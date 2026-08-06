@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>group.zn.zero</groupId>
+        <artifactId>zero-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../zero-parent/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>zero-data-postgresql</artifactId>
+    <name>zeroServer PostgreSQL Data Adapter</name>
+    <description>PostgreSQL 数据适配器占位模块。</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-data</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${postgresql.jdbc.version}</version>
+        </dependency>
+    </dependencies>
+</project>

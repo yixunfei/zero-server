@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>group.zn.zero</groupId>
+        <artifactId>zero-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../../zero-parent/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>zero-example-rpg-tcp-generated</artifactId>
+    <name>zeroServer Example RPG TCP Generated</name>
+    <description>zeroServer generated dispatcher over local TCP example.</description>
+
+    <properties>
+        <exec.mainClass>group.zn.zero.examples.rpgtcp.RpgTcpGeneratedApplication</exec.mainClass>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-net</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-logic</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-codegen</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.3.0</version>
+                <executions>
+                    <execution>
+                        <id>generate-zero-protocol</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>group.zn.zero.codegen.ProtocolCodegenCli</mainClass>
+                            <classpathScope>compile</classpathScope>
+                            <arguments>
+                                <argument>--input</argument>
+                                <argument>${project.basedir}/src/main/protocol</argument>
+                                <argument>--protoId</argument>
+                                <argument>${project.basedir}/src/main/protocol/protoId.txt</argument>
+                                <argument>--out</argument>
+                                <argument>${project.build.directory}/generated-sources/zero-codegen</argument>
+                                <argument>--pkg</argument>
+                                <argument>group.zn.zero.examples.rpgtcp.generated</argument>
+                                <argument>--languages</argument>
+                                <argument>java</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+                <configuration>
+                    <mainClass>${exec.mainClass}</mainClass>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>add-zero-protocol-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/generated-sources/zero-codegen</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

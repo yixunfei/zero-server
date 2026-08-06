@@ -1,0 +1,11 @@
+struct InventoryItem {
+  long itemId;
+  Integer count;
+  Set<String> flags;
+}
+
+client_to_server:
+  queryInventory(long uid);
+
+server_to_client:
+  inventorySnapshot(List<InventoryItem> items, Map<Long,InventoryItem> index);

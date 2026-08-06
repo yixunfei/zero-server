@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>group.zn.zero</groupId>
+        <artifactId>zero-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../zero-parent/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>zero-scene</artifactId>
+    <name>zeroServer Scene</name>
+    <description>场景进入、实体坐标和移动基础抽象。</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-actor</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-game</artifactId>
+        </dependency>
+    </dependencies>
+</project>

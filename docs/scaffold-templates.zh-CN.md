@@ -1,0 +1,400 @@
+# zeroServer 脚手架模板目录
+
+本文用于回答一个更接近业务开发的问题：
+
+```text
+我要做某类游戏服务器原型，应该从哪个模板开始？
+```
+
+当前模板全部是 local / prototype 形态，目标是让用户快速理解协议驱动、生成 BO、本地 starter、Actor lane、日志和指标如何组合。它们不是生产部署模板，也不冻结正式公共 API。涉及正式模块、跨进程一致性、连接治理、存储格式、权限和线程模型的改动，应先提交 GitHub Design Proposal 并完成维护者评审。
+
+## 1. 快速选择
+
+| 需求 | 模板参数 | 适合验证 | 主要生产缺口 |
+| --- | --- | --- | --- |
+| RPG 最小本地流程 | `--template local` | 登录、进入场景、移动、玩家 / 场景服务组合 | 账号鉴权、断线重连、正式在线状态和持久化策略 |
+| 房间 / 对战小局 | `--template room` | 创建房间、加入、准备、开始、提交帧输入 | 匹配、广播、断线恢复、观战、结算和跨服房间；正式化前阅读 [房间组件最小契约草案](room-component-minimum-contract.zh-CN.md) |
+| 场景同步 / 简单 AOI | `--template scene-sync` | 进入场景、移动、可见性查询 | 正式 AOI、广播、delta 压缩、快照协议和跨服迁移；正式化前阅读 [AOI / 状态同步最小契约草案](aoi-state-sync-minimum-contract.zh-CN.md) |
+| 帧同步 / lockstep | `--template frame-sync` | 加入比赛、提交输入、推进帧、查询快照 | 时钟模型、断线补帧、回滚、观战、可靠广播和反作弊；正式化前阅读 [帧同步最小契约草案](frame-sync-minimum-contract.zh-CN.md) |
+| AI NPC / tick | `--template npc-tick` | NPC 生成、行为切换、zone tick、状态查询 | 行为树、寻路、战斗 AI、tick 预算、背压和跨服迁移；正式化前阅读 [NPC tick 最小契约草案](npc-tick-minimum-contract.zh-CN.md) |
+| 排行榜 / 赛季 | `--template ranking-season` | 积分提交、Top 查询、玩家排名、赛季切换 | Redis sorted set、跨服榜、结算奖励、幂等和容量验证；正式化前阅读 [排行榜 / 赛季最小契约草案](ranking-season-minimum-contract.zh-CN.md) |
+| 开放世界 / 分片迁移 | `--template world-shard` | 进入世界、实体移动、分片迁移、状态查询 | 跨进程迁移、状态交接、跨服广播、AOI 拼接和一致性协议；正式化前阅读 [开放世界 / 分片迁移最小契约草案](world-shard-minimum-contract.zh-CN.md) |
+
+脚本事实入口以命令输出为准：
+
+```powershell
+java scripts/NewLocalGame.java --listTemplates
+```
+
+## 2. 命令式推荐
+
+如果不想先读完整目录，可以直接用关键词让脚手架推荐模板：
+
+```powershell
+java scripts/NewLocalGame.java --recommend "aoi scene sync"
+java scripts/NewLocalGame.java --recommend "ranking season"
+java scripts/NewLocalGame.java --recommend "open world shard"
+```
+
+推荐输出会给出候选模板、匹配得分、用途、运行摘要、生产缺口和建议生成命令。它是启发式入口，不替代本文的完整边界说明。
+
+如果想直接按关键词生成项目，可以使用 `--fromKeywords`。该参数会选择匹配得分最高的模板；没有直接匹配时回退到 `local`。它不能和 `--template` 同时使用。
+
+```powershell
+java scripts/NewLocalGame.java `
+  --fromKeywords "open world shard" `
+  --projectName my-world-game `
+  --packageName group.zn.zero.generated.myworld `
+  --outputDir target\my-world-game
+```
+
+查看单个模板详情：
+
+```powershell
+java scripts/NewLocalGame.java --describeTemplate scene-sync
+```
+
+详情输出包含模板说明、适用场景、协议文件、运行摘要、生产缺口、关键词和生成命令。
+
+## 3. 统一生成方式
+
+所有模板都使用同一套命令形态：
+
+```powershell
+java scripts/NewLocalGame.java `
+  --template <template> `
+  --projectName my-game `
+  --packageName group.zn.zero.generated.mygame `
+  --outputDir target\my-game
+```
+
+生成后执行：
+
+```powershell
+java scripts/RunLocalScaffold.java --projectDir target/my-game
+```
+
+如果想用一条显式命令完成生成、结构检查、Maven test 和运行 smoke，可以使用：
+
+```powershell
+java scripts/RunLocalPrototype.java `
+  --fromKeywords "open world shard" `
+  --projectName my-world-game `
+  --packageName group.zn.zero.generated.myworld `
+  --outputDir target\my-world-game `
+  --force
+```
+
+如果没有指定 `--template` 或 `--fromKeywords`，默认使用 `local`。
+
+每个生成项目都包含：
+
+- `src/main/protocol/*.si` 和 `protoId.txt`。
+- Maven `generate-sources` 阶段 codegen。
+- 生成 DTO、codec、BO、dispatcher。
+- 手写 BO 实现。
+- 本地 starter / Actor lane / 日志 / 指标接入；业务只保存安全 `LogAppender`，指标定义显式声明有序标签 schema。
+- 一个 smoke test。
+- `README.md`，说明当前模板边界，并在 `Next Business Step` 中交接到 `BUSINESS_GUIDE.md` 的 `First Business Change`。
+- `BUSINESS_GUIDE.md`，说明业务开发入口、协议修改位置、手写 BO 逻辑位置、本地验证命令、按模板差异化的第一个业务改动 recipe 和生产边界。
+- `COMPONENTS.md`，说明生成协议流、框架组件触点和生产晋升边界。
+- `NEXT_STEPS.md`，说明生产晋升缺口、推荐命令和高风险暂停点。
+- `zero-scaffold.json`，提供模板名称、协议文件、摘要前缀、组件触点和原型边界等机器可读元数据。
+
+`RunLocalScaffold` 会先调用 `InspectLocalScaffold` 快速检查项目结构、manifest、协议入口和 local/prototype 边界，再执行 Maven `clean test` 和 `exec:java`，并校验输出摘要。它不替代 external-tests、压测或生产验收。
+
+如果准备把生成项目中的能力抽取为正式框架模块，或修改公共 API、线程模型、协议、RPC、存储、权限与日志字段，应先在 GitHub 提交 Design Proposal，说明现状、目标、非目标、接口草图、依赖方向、兼容性、性能、安全、迁移和验证方案。
+
+七种完整模板当前统一使用首版日志字段模型：`LogSource + LogOperation + ZeroLogRecord.create(...)`，业务观察点持有 `LogAppender`，扩展字段使用 `fields`。模板指标都显式声明有序 `labelNames`，样本 key 必须与定义完全匹配。模板仍只演示 local/prototype，不因字段迁移获得生产日志落地或容量证明。
+
+如果要从模板继续推进正式模块设计，请先阅读生成项目的 `BUSINESS_GUIDE.md` 与 `NEXT_STEPS.md`，再按 [贡献指南](../CONTRIBUTING.md) 提交 Design Proposal。
+
+## 4. 模板详情
+
+### 4.1 local
+
+适合：
+
+- RPG 或普通在线游戏的最小本地服务端原型。
+- 理解登录、玩家、场景、日志和指标如何在单进程内组合。
+
+生成协议：
+
+```text
+Game.si
+  login(accountId, token, traceId)
+  enterScene(uid, sceneId, traceId)
+  move(uid, sceneId, x, y, traceId)
+```
+
+运行摘要前缀：
+
+```text
+local-game=ok
+```
+
+框架能力触点：
+
+- `zero-codegen` 生成 DTO / codec / BO / dispatcher。
+- `zero-server-starter` 提供本地运行时装配。
+- `zero-player` 和 `zero-scene` 提供玩家与场景原型能力。
+- `zero-log` 和 `zero-monitor` 记录本地日志与指标。
+
+生产缺口：
+
+- 不包含真实账号鉴权、渠道登录、断线重连和正式在线状态管理。
+- 不承诺生产持久化、容量或长稳行为。
+
+### 4.2 room
+
+适合：
+
+- 回合制、对战小局、桌游、轻量匹配房间原型。
+- 理解房间状态如何通过 Actor lane 串行化修改。
+
+生成协议：
+
+```text
+Room.si
+  createRoom(ownerUid, roomId, traceId)
+  joinRoom(uid, roomId, traceId)
+  ready(uid, roomId, traceId)
+  startMatch(roomId, traceId)
+  submitFrame(uid, roomId, frame, input, traceId)
+```
+
+运行摘要前缀：
+
+```text
+room-game=ok
+```
+
+框架能力触点：
+
+- generated BO 接入本地房间状态对象。
+- Actor lane 按房间维度串行化状态变更。
+- 日志和指标记录房间动作。
+
+生产缺口：
+
+- 不包含正式匹配、房间广播、断线恢复、观战和结算。
+- 不冻结 `zero-room` 模块或跨服房间路由 API；正式化前先阅读 [房间组件最小契约草案](room-component-minimum-contract.zh-CN.md)。
+
+### 4.3 scene-sync
+
+适合：
+
+- RPG 场景同步、轻量 MMO 场景、简单 AOI 原型。
+- 理解实体进入、移动和可见性查询的最小形态。
+
+生成协议：
+
+```text
+SceneSync.si
+  enterScene(uid, sceneId, x, y, viewRange, traceId)
+  move(uid, sceneId, x, y, traceId)
+  queryVisible(uid, sceneId, traceId)
+```
+
+运行摘要前缀：
+
+```text
+scene-sync=ok
+```
+
+框架能力触点：
+
+- Actor lane 按场景维度串行化实体状态。
+- 小规模内存 Map 存储实体坐标。
+- 使用 Chebyshev 距离演示可见性查询。
+
+生产缺口：
+
+- 不包含正式 AOI 索引、广播、delta 压缩或客户端快照协议。
+- 不覆盖跨服迁移、地图切分或复杂场景一致性；正式化前先阅读 [AOI / 状态同步最小契约草案](aoi-state-sync-minimum-contract.zh-CN.md)。
+
+### 4.4 frame-sync
+
+适合：
+
+- lockstep、帧同步房间、输入收集和固定帧推进原型。
+- 理解同一比赛内输入如何串行收集和推进帧。
+
+生成协议：
+
+```text
+FrameSync.si
+  joinMatch(uid, matchId, traceId)
+  submitInput(uid, matchId, frame, input, traceId)
+  advanceFrame(matchId, frame, traceId)
+  querySnapshot(matchId, traceId)
+```
+
+运行摘要前缀：
+
+```text
+frame-sync=ok
+```
+
+框架能力触点：
+
+- Actor lane 按 match 维度串行化比赛状态。
+- 收集固定帧输入并生成快照摘要。
+- 日志和指标记录加入、输入、推进和查询动作。
+
+生产缺口：
+
+- 不包含时钟同步、断线补帧、回滚、观战和可靠广播；正式化前先阅读 [帧同步最小契约草案](frame-sync-minimum-contract.zh-CN.md)。
+- 不冻结正式帧协议、反作弊或跨服房间语义。
+
+### 4.5 npc-tick
+
+适合：
+
+- AI NPC 生命周期、zone tick、行为状态机雏形。
+- 理解低频 tick 业务如何放在 Actor lane 中串行推进。
+
+生成协议：
+
+```text
+NpcTick.si
+  spawnNpc(npcId, zoneId, x, y, traceId)
+  setBehavior(npcId, zoneId, behavior, traceId)
+  tickZone(zoneId, tick, traceId)
+  queryNpc(npcId, zoneId, traceId)
+```
+
+运行摘要前缀：
+
+```text
+npc-tick=ok
+```
+
+框架能力触点：
+
+- Actor lane 按 zone 维度串行化 NPC 状态。
+- tick 推进会根据当前行为更新位置和动作摘要。
+- 日志和指标记录 NPC 生成、行为切换、tick 和查询。
+
+生产缺口：
+
+- 不包含行为树、寻路、战斗 AI、tick 预算或背压策略。
+- 不覆盖 NPC 跨服迁移、热更新行为脚本或生产调度观测。
+- 正式化前先阅读 [NPC tick 最小契约草案](npc-tick-minimum-contract.zh-CN.md)。
+
+### 4.6 ranking-season
+
+适合：
+
+- 排行榜、赛季积分、玩家排名查询和赛季切换原型。
+- 理解榜单状态如何在本地串行修改并输出查询摘要。
+
+生成协议：
+
+```text
+RankingSeason.si
+  submitScore(uid, seasonId, score, traceId)
+  queryTop(seasonId, limit, traceId)
+  queryPlayerRank(uid, seasonId, traceId)
+  resetSeason(seasonId, nextSeasonId, traceId)
+```
+
+运行摘要前缀：
+
+```text
+ranking-season=ok
+```
+
+框架能力触点：
+
+- Actor lane 按 season 维度串行化榜单状态。
+- 本地内存结构演示积分提交、Top 查询、排名查询和赛季切换。
+- 日志和指标记录榜单动作。
+
+生产缺口：
+
+- 不包含 Redis sorted set、跨服榜、结算奖励和幂等补偿。
+- 不覆盖容量、热 key、排行榜快照或降级策略。
+- 正式化前先阅读 [排行榜 / 赛季最小契约草案](ranking-season-minimum-contract.zh-CN.md)。
+
+### 4.7 world-shard
+
+适合：
+
+- 开放世界分片、实体迁移和跨 shard 状态查询原型。
+- 理解 world / shard 状态边界和迁移摘要。
+
+生成协议：
+
+```text
+WorldShard.si
+  enterWorld(uid, worldId, shardId, x, y, traceId)
+  moveEntity(uid, worldId, x, y, traceId)
+  transferShard(uid, worldId, targetShardId, x, y, traceId)
+  queryEntity(uid, worldId, traceId)
+```
+
+运行摘要前缀：
+
+```text
+world-shard=ok
+```
+
+框架能力触点：
+
+- Actor lane 按 world 维度串行化实体状态。
+- 本地状态保存实体所在 shard 和坐标。
+- 迁移操作演示 shard 切换和状态查询。
+
+生产缺口：
+
+- 不包含跨进程迁移、可靠状态交接、跨服广播或 AOI 拼接。
+- 不冻结正式 WorldShard、ScenePartition、迁移协议或一致性边界。
+- 正式化前先阅读 [开放世界 / 分片迁移最小契约草案](world-shard-minimum-contract.zh-CN.md)。
+
+## 5. 从模板晋升为正式模块
+
+模板可以帮助业务团队快速验证玩法，但晋升为正式框架模块前至少需要单独完成以下设计和验证：
+
+| 方向 | 必须补齐 |
+| --- | --- |
+| 公共 API | 请求 / 响应模型、ErrorCode、兼容策略、版本演进 |
+| 线程与 Actor | lane 选择、背压、队列指标、跨 Actor 消息边界 |
+| 网络接入 | 握手、鉴权、心跳、重连、限流、连接治理和压测 |
+| 数据与缓存 | Repository / Cache 抽象接入、脏数据追踪、落库失败降级 |
+| 日志与指标 | 复用 `schemaVersion=1`、`LogAppender`、真实 ErrorCode、有序标签 schema；补齐 production sink、Prometheus endpoint、容量和告警闭环 |
+| 分布式语义 | RPC、服务发现、跨进程路由、幂等和故障演练 |
+| 安全与运营 | GM dry-run、审批、RBAC、IP 白名单和审计 |
+
+Room / Matchmaking 方向的首个独立设计输入是 [房间组件最小契约草案](room-component-minimum-contract.zh-CN.md)，其中列出生命周期、成员状态、Actor 归属、广播顺序、结算幂等、匹配 ticket 和跨服边界候选。
+
+AOI / State Sync 方向的首个独立设计输入是 [AOI / 状态同步最小契约草案](aoi-state-sync-minimum-contract.zh-CN.md)，其中列出 AOI、兴趣管理、实体状态、可见性事件、snapshot / delta、广播背压和跨服迁移边界候选。
+
+Frame Sync 方向的首个独立设计输入是 [帧同步最小契约草案](frame-sync-minimum-contract.zh-CN.md)，其中列出固定帧时钟、输入收集、帧推进、snapshot / rollback 边界、广播顺序、观战和反作弊边界候选。
+
+NPC Tick 方向的首个独立设计输入是 [NPC tick 最小契约草案](npc-tick-minimum-contract.zh-CN.md)，其中列出 NPC 生命周期、zone tick、行为状态、tick 预算、背压、降级、adapter 超时和热更边界候选。
+
+Ranking / Season 方向的首个独立设计输入是 [排行榜 / 赛季最小契约草案](ranking-season-minimum-contract.zh-CN.md)，其中列出排行榜模型、赛季生命周期、积分提交、查询快照、Redis / Cache 边界、结算奖励和幂等补偿候选。
+
+World Shard 方向的首个独立设计输入是 [开放世界 / 分片迁移最小契约草案](world-shard-minimum-contract.zh-CN.md)，其中列出世界模型、分片模型、实体归属、迁移状态机、状态交接、跨服路由、AOI 拼接和广播一致性候选。
+
+除七种完整玩法模板外，`templates/config-hot-reload-snippet` 提供可叠加到任意生成项目的 CSV 配置片段，包括 typed 道具 record、独立配置模块、示例 CSV 和 Starter 装配说明。它不会改变 `NewLocalGame` 的七种模板清单；复制后仍需显式配置 `zero.config.hot-reload.enabled=true` 并使用受管非内联 remote IO executor。详细边界见 [CSV 配置加载与本地原子热重载](csv-config-hot-reload.zh-CN.md)。
+
+`templates/managed-scheduler-snippet` 提供另一类可叠加片段：统一注册 once、fixed-delay、fixed-rate 和 Actor deadline 消息，直接返回异步 gateway stage，并在模块关闭时取消周期 handle。它同样不改变七种完整玩法模板清单；复制后必须显式配置 `zero.scheduler.enabled=true`，使用非内联 background executor，并保证 player/scene/entity 状态只在 Actor lane 修改。详细边界见 [本地受管定时任务运行时](managed-scheduler.zh-CN.md)。
+
+`templates/observability-snippet` 提供可叠加的最小日志/指标模块：装配层创建一次 `LogPipeline` 并向业务注入 `LogAppender`，业务不保存或直接调用 terminal `LogSink`；成功记录不携带 ErrorCode，失败记录传入真实 ErrorCode；`MetricDefinition` 显式声明 `module / operation / result` 有序 schema。默认安全门拒绝 token、密码、secret、credential、raw command 和凭据 URI，并脱敏 IP、operator、accountId、playerId、targetId；TraceId 和完整 IP 不进入指标标签。该片段同样不改变七种完整玩法模板清单，完整边界见 [可观测性最小运行时](observability-runtime.zh-CN.md)。
+
+上述三个片段都是 local / single-process / minimum-slice 接入。可观测性片段不提供 production file/Kafka sink、Prometheus HTTP endpoint、容量、长稳或 SLA 保证，`productionReady=false`。
+
+上述内容涉及公共 API、线程模型、协议、存储、权限或模块依赖方向时，不能从模板直接静默演进到生产模块；应先公开设计、评审风险并补齐针对性验证。
+
+## 6. 批量验证
+
+验证所有当前模板：
+
+```powershell
+mvn -q -DskipTests install
+java scripts/VerifyLocalScaffolds.java --outputDir target\scaffold-verify
+```
+
+该命令会生成并验证七种 local/prototype 项目，检查 README `Next Business Step` / `BUSINESS_GUIDE.md` 首改 recipe / `COMPONENTS.md` / `zero-scaffold.json`，通过 `RunLocalScaffold` 执行结构检查、`clean test`、`exec:java` 和摘要校验。它仍然不连接真实中间件，也不证明生产就绪；正式模块推进前应提交 GitHub Design Proposal 并完成维护者评审。

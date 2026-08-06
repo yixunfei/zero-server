@@ -1,0 +1,36 @@
+# zeroServer standard flow: login and account bootstrap.
+
+enum LoginPlatform {
+  UNKNOWN = 0,
+  GUEST = 1,
+  ACCOUNT = 2,
+  STEAM = 3,
+  APPLE = 4
+}
+
+enum LoginResult {
+  SUCCESS = 0,
+  TOKEN_EXPIRED = 1,
+  SERVER_MAINTENANCE = 2,
+  ACCOUNT_BANNED = 3
+}
+
+struct ServerNotice {
+  int noticeId; // notice id
+  String title; // notice title
+  String content; // notice content
+}
+
+struct LoginProfile {
+  long uid; // account uid
+  String accountId; // account id from platform
+  LoginPlatform platform; // login platform
+  List<Long> roleIds; // owned role id list
+  Optional<String> lastRoleName; // last selected role name
+}
+
+client_to_server:
+  login(String accountId, String token, LoginPlatform platform, String clientVersion, String traceId); // login request
+
+server_to_client:
+  loginResult(LoginResult result, LoginProfile profile, Optional<String> reason, List<ServerNotice> notices); // login response

@@ -1,0 +1,4 @@
+# RPG TCP generated dispatcher example.
+
+client_to_server:
+  queryPlayer(long uid, String traceId); // Query player through local TCP.

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- JMH 注解处理器生成的 harness 不属于项目手写源码，并会产生已知的 DLS 误报。 -->
+    <Match>
+        <Class name="~group\.zn\.zero\.benchmark\..*\.jmh_generated\..*"/>
+    </Match>
+</FindBugsFilter>
