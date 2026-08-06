@@ -1,0 +1,42 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# Java
+*.class
+*.log
+hs_err_pid*
+replay_pid*
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# Codex local state
+.codex/
+
+# Local collaboration records (never publish)
+AGENTS.md
+tasks/
+logs/
+*.plan.md
+*.local.md
+
+# Local development secrets
+config/local-dev/*.env
+config/local-dev/*.local.*
+config/local-dev/*secret*
+config/local-dev/*credential*
+
+# Benchmark and profiler output
+*.jfr
+*.hprof
+benchmark-results/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,10 @@
+# RPG protocol driven local example.
+
+client_to_server:
+  login(String accountId, String token, String traceId); // Login with local demo account.
+  loadPlayer(long uid, String traceId); // Load player online data.
+  enterScene(long uid, String sceneId, String traceId); // Enter scene.
+  move(long uid, String sceneId, int x, int y, String traceId); // Move in scene.
+  gmQueryPlayer(long uid, String operatorId, String traceId); // Query player by local GM flow.
+  gmQueryScene(String sceneId, String traceId); // Query scene entities by local GM flow.
+  leaveScene(long uid, String sceneId, String traceId); // Leave scene.

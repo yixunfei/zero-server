@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>group.zn.zero</groupId>
+    <artifactId>zero-server</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>zeroServer</name>
+    <description>通用企业级 Java 游戏服务器框架。</description>
+    <url>https://github.com/yixunfei/zero-server</url>
+
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/license/mit/</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>zn</id>
+            <name>zn</name>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/yixunfei/zero-server.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/yixunfei/zero-server.git</developerConnection>
+        <url>https://github.com/yixunfei/zero-server</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/yixunfei/zero-server/issues</url>
+    </issueManagement>
+
+    <modules>
+        <module>zero-parent</module>
+        <module>zero-bom</module>
+        <module>zero-core</module>
+        <module>zero-event</module>
+        <module>zero-protocol</module>
+        <module>zero-codegen</module>
+        <module>zero-actor</module>
+        <module>zero-game</module>
+        <module>zero-player</module>
+        <module>zero-scene</module>
+        <module>zero-logic</module>
+        <module>zero-net</module>
+        <module>zero-rpc-common</module>
+        <module>zero-rpc</module>
+        <module>zero-rpc-kafka</module>
+        <module>zero-data</module>
+        <module>zero-data-mongo</module>
+        <module>zero-data-redis</module>
+        <module>zero-data-postgresql</module>
+        <module>zero-cache</module>
+        <module>zero-discovery-nacos</module>
+        <module>zero-log</module>
+        <module>zero-monitor</module>
+        <module>zero-gm</module>
+        <module>zero-hot-update</module>
+        <module>zero-server-starter</module>
+        <module>zero-server-starter-production</module>
+    </modules>
+
+    <profiles>
+        <profile>
+            <id>benchmarks</id>
+            <modules>
+                <module>zero-benchmarks</module>
+            </modules>
+        </profile>
+    </profiles>
+</project>

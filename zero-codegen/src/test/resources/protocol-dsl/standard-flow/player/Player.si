@@ -1,0 +1,39 @@
+# zeroServer standard flow: player snapshot and player operations.
+
+enum CurrencyType {
+  UNKNOWN = 0,
+  GOLD = 1,
+  DIAMOND = 2,
+  STAMINA = 3
+}
+
+struct PlayerCurrency {
+  CurrencyType type; // currency type
+  long amount; // current amount
+}
+
+struct PlayerStat {
+  String key; // stat key
+  long value; // stat value
+}
+
+struct PlayerSnapshot {
+  long roleId; // role id
+  String roleName; // role display name
+  int level; // player level
+  long exp; // current exp
+  ulong revision; // sync revision
+  List<PlayerCurrency> currencies; // currency list
+  Map<String,Long> counters; // gameplay counters
+  Optional<String> guildName; // guild name
+}
+
+client_to_server:
+  queryPlayer(long roleId, String traceId); // query player snapshot
+  heartbeat(long roleId, long clientTimeMillis); // client heartbeat
+  updatePlayerStat(long roleId, List<PlayerStat> stats, String traceId); // update selected player stats
+
+server_to_client:
+  playerSnapshot(PlayerSnapshot player, long serverTimeMillis); // player snapshot result
+  heartbeatAck(long roleId, long serverTimeMillis); // heartbeat ack
+  playerStatUpdated(long roleId, List<PlayerStat> stats); // player stat update notification

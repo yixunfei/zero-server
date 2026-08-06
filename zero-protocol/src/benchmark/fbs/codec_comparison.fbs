@@ -1,0 +1,33 @@
+namespace group.zn.zero.protocol.benchmark.fb;
+
+table SampleItem {
+  item_id:int;
+  count:int;
+  expire_at:long;
+  price:double;
+  name:string;
+}
+
+table SampleAttr {
+  key:string;
+  value:int;
+}
+
+table SamplePayload {
+  sequence:int;
+  player_id:long;
+  scene_id:int;
+  x:float;
+  y:double;
+  name:string;
+  note:string;
+  blob:[ubyte];
+  stats:[int];
+  checkpoints:[long];
+  items:[SampleItem];
+  attrs:[SampleAttr];
+  flags:[bool];
+}
+
+root_type SamplePayload;
+file_identifier "ZCMP";

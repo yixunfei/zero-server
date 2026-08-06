@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package group.zn.zero.protocol.benchmark.pb;
+
+option java_package = "group.zn.zero.protocol.benchmark.pb";
+option java_outer_classname = "CodecComparisonProto";
+
+message SampleItem {
+  int32 item_id = 1;
+  int32 count = 2;
+  int64 expire_at = 3;
+  double price = 4;
+  string name = 5;
+}
+
+message SampleAttr {
+  string key = 1;
+  int32 value = 2;
+}
+
+message SamplePayload {
+  int32 sequence = 1;
+  int64 player_id = 2;
+  int32 scene_id = 3;
+  float x = 4;
+  double y = 5;
+  string name = 6;
+  optional string note = 7;
+  bytes blob = 8;
+  repeated int32 stats = 9 [packed = true];
+  repeated int64 checkpoints = 10 [packed = true];
+  repeated SampleItem items = 11;
+  repeated SampleAttr attrs = 12;
+  repeated bool flags = 13 [packed = true];
+}

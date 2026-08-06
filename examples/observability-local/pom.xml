@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>group.zn.zero</groupId>
+        <artifactId>zero-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../../zero-parent/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>zero-example-observability-local</artifactId>
+    <name>zeroServer Example Local Observability</name>
+    <description>zeroServer 统一日志安全门和指标标签 schema 的无 Docker 本地示例。</description>
+
+    <properties>
+        <exec.mainClass>group.zn.zero.examples.observability.ObservabilityLocalApplication</exec.mainClass>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-log</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-monitor</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.3.0</version>
+                <configuration>
+                    <mainClass>${exec.mainClass}</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

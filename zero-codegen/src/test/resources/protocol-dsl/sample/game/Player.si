@@ -1,0 +1,30 @@
+# zeroServer S1-05 test schema
+
+enum PlayerRole {
+  UNKNOWN,
+  WARRIOR,
+  MAGE
+}
+
+struct PlayerInfo {
+  long uid;
+  String name;
+  int level;
+  PlayerRole role;
+  List<Map<String,Integer>> tags;
+  int[][] matrix;
+  List<PlayerItem>[] itemBuckets;
+  Optional<String> title;
+}
+
+struct PlayerItem {
+  long itemId;
+  int count;
+}
+
+client_to_server:
+  queryPlayer(long uid, String traceId);
+  updateTags(long uid, List<Map<String,Integer>> tags);
+
+server_to_client:
+  queryPlayerResult(PlayerInfo player);

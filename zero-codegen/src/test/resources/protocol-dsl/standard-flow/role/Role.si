@@ -1,0 +1,35 @@
+# zeroServer standard flow: role list and create role.
+
+enum RoleClass {
+  UNKNOWN = 0,
+  WARRIOR = 1,
+  MAGE = 2,
+  ARCHER = 3,
+  PRIEST = 4
+}
+
+enum CreateRoleResult {
+  SUCCESS = 0,
+  NAME_DUPLICATED = 1,
+  NAME_INVALID = 2,
+  SLOT_FULL = 3
+}
+
+struct RoleInfo {
+  long roleId; // role id
+  long uid; // owner uid
+  String roleName; // role display name
+  RoleClass roleClass; // role class
+  int level; // current level
+  long createdAt; // created timestamp millis
+}
+
+client_to_server:
+  listRoles(long uid, String traceId); // query role list
+  createRole(long uid, String roleName, RoleClass roleClass, String traceId); // create a role
+  selectRole(long uid, long roleId, String traceId); // select role for entering game
+
+server_to_client:
+  roleList(long uid, List<RoleInfo> roles); // role list result
+  createRoleResult(CreateRoleResult result, Optional<RoleInfo> role, Optional<String> reason); // create role result
+  roleSelected(RoleInfo role, String sessionToken); // selected role result
