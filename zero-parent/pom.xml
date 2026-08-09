@@ -38,7 +38,7 @@
         <maven.checkstyle.plugin.version>3.5.0</maven.checkstyle.plugin.version>
         <maven.pmd.plugin.version>3.25.0</maven.pmd.plugin.version>
         <spotbugs.maven.plugin.version>4.9.3.0</spotbugs.maven.plugin.version>
-        <jacoco.maven.plugin.version>0.8.13</jacoco.maven.plugin.version>
+        <jacoco.maven.plugin.version>0.8.15</jacoco.maven.plugin.version>
     </properties>
 
     <dependencyManagement>
