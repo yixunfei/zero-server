@@ -29,7 +29,7 @@
         <mongodb.driver.version>5.8.0</mongodb.driver.version>
         <jedis.version>7.2.0</jedis.version>
         <nacos.client.version>3.2.2</nacos.client.version>
-        <postgresql.jdbc.version>42.7.11</postgresql.jdbc.version>
+        <postgresql.jdbc.version>42.7.13</postgresql.jdbc.version>
         <maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
         <maven.surefire.plugin.version>3.2.5</maven.surefire.plugin.version>
         <maven.failsafe.plugin.version>3.2.5</maven.failsafe.plugin.version>
