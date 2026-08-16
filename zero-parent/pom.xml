@@ -27,7 +27,7 @@
         <netty.version>4.1.134.Final</netty.version>
         <kafka.clients.version>4.2.0</kafka.clients.version>
         <mongodb.driver.version>5.9.1</mongodb.driver.version>
-        <jedis.version>7.2.0</jedis.version>
+        <jedis.version>8.0.0</jedis.version>
         <nacos.client.version>3.2.2</nacos.client.version>
         <postgresql.jdbc.version>42.7.13</postgresql.jdbc.version>
         <maven.compiler.plugin.version>3.15.0</maven.compiler.plugin.version>
