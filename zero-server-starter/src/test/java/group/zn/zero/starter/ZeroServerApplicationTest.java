@@ -13,8 +13,6 @@ import group.zn.zero.codegen.ProtocolCodegenOptions;
 import group.zn.zero.codegen.ProtocolCodegenRunner;
 import group.zn.zero.codegen.dsl.ProtocolDslDocument;
 import group.zn.zero.core.config.MapZeroConfig;
-import group.zn.zero.core.error.SystemErrorCode;
-import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.core.lifecycle.AbstractLifecycle;
 import group.zn.zero.discovery.nacos.InMemoryServiceDiscovery;
 import group.zn.zero.discovery.nacos.ServiceInstance;
@@ -25,9 +23,10 @@ import group.zn.zero.log.ZeroLogRecord;
 import group.zn.zero.logic.LocalLogicExample;
 import group.zn.zero.logic.LogicFlowResult;
 import group.zn.zero.protocol.ProtocolDirection;
-import group.zn.zero.rpc.RpcRequest;
-import group.zn.zero.rpc.RpcResponse;
-import group.zn.zero.rpc.spi.RpcTransport;
+import group.zn.zero.runtime.api.ComponentId;
+import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.diagnostics.RuntimeAssemblyException;
+import group.zn.zero.runtime.diagnostics.RuntimeErrorCode;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -36,8 +35,6 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -74,22 +71,22 @@ class ZeroServerApplicationTest {
     @Test
     void applicationShouldManageRuntimeComponents() {
         InMemoryLogSink sink = new InMemoryLogSink();
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localDefault(
+        GameRuntime components = LocalRuntime.create(
                 new MapZeroConfig(Map.of("zero.mode", "test")),
                 sink);
         ZeroServerApplication application = new ZeroServerApplication(components);
 
         application.start();
 
-        assertSame(components, application.components());
+        assertSame(components, application.runtime());
         assertTrue(components.running());
-        assertTrue(components.persistenceManager().running());
+        assertTrue(components.require(LocalRuntimeCapabilities.PERSISTENCE_MANAGER).running());
 
         application.stop();
 
         assertFalse(application.running());
         assertFalse(components.running());
-        assertFalse(components.persistenceManager().running());
+        assertFalse(components.require(LocalRuntimeCapabilities.PERSISTENCE_MANAGER).running());
     }
 
     /**
@@ -121,21 +118,21 @@ class ZeroServerApplicationTest {
     @Test
     void runtimeBuilderShouldOverrideSingleComponentAndReportAssembly() {
         InMemoryCacheService<Object, Object> cacheService = new InMemoryCacheService<>();
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localBuilder(new MapZeroConfig(Map.of(
+        GameRuntime components = LocalRuntime.builder(new MapZeroConfig(Map.of(
                         "zero.mode", "custom",
                         "zero.name", "custom-runtime")))
-                .cacheService(cacheService)
+                .replace(LocalRuntimeCapabilities.CACHE_SERVICE, cacheService)
                 .build();
 
-        ZeroRuntimeAssemblyReport report = components.assemblyReport();
+        group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport report = components.report();
 
-        assertSame(cacheService, components.cacheService());
-        assertEquals("custom", report.mode());
-        assertEquals("custom-runtime", report.name());
-        assertEquals(cacheService.getClass().getName(), report.componentType("cacheService").orElseThrow());
-        assertTrue(report.componentType("logAppender").orElseThrow().contains("LogPipeline"));
-        assertTrue(report.lifecycleComponentTypes().stream()
-                .anyMatch(type -> type.endsWith("DefaultPersistenceManager")));
+        assertSame(cacheService, components.require(LocalRuntimeCapabilities.CACHE_SERVICE));
+        assertEquals("custom", components.require(LocalRuntimeCapabilities.CONFIG).get("zero.mode").orElseThrow());
+        assertEquals("custom-runtime",
+                components.require(LocalRuntimeCapabilities.CONFIG).get("zero.name").orElseThrow());
+        assertTrue(report.plan().components().stream()
+                .anyMatch(component -> component.componentId().equals(
+                        ComponentId.of("application.zero.cache.service"))));
     }
 
     /**
@@ -144,18 +141,15 @@ class ZeroServerApplicationTest {
     @Test
     void runtimeBuilderShouldFreezeAndReuseSafeLogAppender() {
         InMemoryLogSink terminalLogSink = new InMemoryLogSink();
-        ZeroRuntimeBuilder builder = ZeroRuntimeFactory.localBuilder(
+        LocalRuntimeBuilder builder = LocalRuntime.builder(
                 new MapZeroConfig(Map.of("zero.mode", "test")),
                 terminalLogSink);
 
         LogAppender logAppender = builder.logAppender();
-        ZeroRuntimeComponents components = builder.build();
+        GameRuntime components = builder.build();
 
-        assertSame(logAppender, components.logAppender());
-        assertThrows(IllegalStateException.class, () -> builder.terminalLogSink(new InMemoryLogSink()));
-        assertThrows(
-                IllegalStateException.class,
-                () -> builder.config(new MapZeroConfig(Map.of("zero.mode", "changed"))));
+        assertSame(logAppender, components.require(LocalRuntimeCapabilities.LOG_APPENDER));
+        assertThrows(IllegalStateException.class, builder::build);
     }
 
     /**
@@ -166,8 +160,9 @@ class ZeroServerApplicationTest {
         List<String> steps = new ArrayList<>();
         CountingLifecycle first = new CountingLifecycle("first", steps);
         CountingLifecycle second = new CountingLifecycle("second", steps);
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localBuilder(new MapZeroConfig(Map.of("zero.mode", "test")))
-                .lifecycleComponents(List.of(first, second))
+        GameRuntime components = LocalRuntime.builder(new MapZeroConfig(Map.of("zero.mode", "test")))
+                .addApplicationLifecycle(ComponentId.of("test.lifecycle.first"), first)
+                .addApplicationLifecycle(ComponentId.of("test.lifecycle.second"), second)
                 .build();
 
         components.start();
@@ -177,50 +172,46 @@ class ZeroServerApplicationTest {
     }
 
     /**
-     * 验证 builder 对同一个附加生命周期组件按身份去重。
+     * 验证 builder 拒绝重复组件 ID，避免隐式覆盖装配声明。
      */
     @Test
-    void runtimeBuilderShouldDeduplicateAdditionalLifecycleComponentByIdentity() {
+    void runtimeBuilderShouldRejectDuplicateComponentId() {
         List<String> steps = new ArrayList<>();
         CountingLifecycle lifecycle = new CountingLifecycle("extra", steps);
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localBuilder(new MapZeroConfig(Map.of("zero.mode", "test")))
-                .addLifecycleComponent(lifecycle)
-                .addLifecycleComponent(lifecycle)
-                .build();
+        LocalRuntimeBuilder builder = LocalRuntime.builder(new MapZeroConfig(Map.of("zero.mode", "test")))
+                .addApplicationLifecycle(ComponentId.of("test.lifecycle.duplicate"), lifecycle)
+                .addApplicationLifecycle(ComponentId.of("test.lifecycle.duplicate"), lifecycle);
 
-        components.start();
-        components.stop();
-
-        assertEquals(2, components.lifecycleComponents().size());
-        assertEquals(List.of("start:extra", "stop:extra"), steps);
+        RuntimeAssemblyException failure = assertThrows(RuntimeAssemblyException.class, builder::build);
+        assertSame(RuntimeErrorCode.RUNTIME_DUPLICATE_PROVIDER, failure.errorCode());
+        assertTrue(steps.isEmpty());
     }
 
     /**
-     * 验证 builder 拒绝只有 RPC transport 而没有 handler registry 的不一致组合。
+     * 验证 builder 在启动前拒绝指向未知 provider 的显式选择。
      */
     @Test
-    void runtimeBuilderShouldRejectHalfRpcOverride() {
-        ZeroException exception = assertThrows(ZeroException.class, () -> ZeroRuntimeFactory
-                .localBuilder(new MapZeroConfig(Map.of("zero.mode", "test")))
-                .rpcTransport(new TransportOnlyRpc())
+    void runtimeBuilderShouldRejectUnknownRpcProvider() {
+        RuntimeAssemblyException exception = assertThrows(RuntimeAssemblyException.class, () -> LocalRuntime
+                .builder(new MapZeroConfig(Map.of("zero.mode", "test")))
+                .override(LocalRuntimeCapabilities.RPC_TRANSPORT, ComponentId.of("test.rpc.missing"))
                 .build());
 
-        assertEquals(SystemErrorCode.INVALID_ARGUMENT.code(), exception.code());
+        assertSame(RuntimeErrorCode.RUNTIME_UNKNOWN_PROVIDER, exception.errorCode());
     }
 
     /**
-     * 验证 builder 可以识别同时实现 RPC transport 与 handler registry 的组件。
+     * 验证本地 RPC provider 同时绑定 transport 与 handler registry。
      */
     @Test
-    void runtimeBuilderShouldAcceptRpcComponentImplementingBothContracts() {
-        group.zn.zero.rpc.local.InMemoryRpcTransport rpc = new group.zn.zero.rpc.local.InMemoryRpcTransport();
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localBuilder(new MapZeroConfig(Map.of("zero.mode", "test")))
-                .rpcTransport(rpc)
-                .build();
+    void localRuntimeShouldBindSharedRpcComponent() {
+        GameRuntime components = LocalRuntime.create(new MapZeroConfig(Map.of("zero.mode", "test")));
 
-        assertSame(rpc, components.rpcTransport());
-        assertSame(rpc, components.rpcHandlerRegistry());
-        assertInstanceOf(group.zn.zero.rpc.local.InMemoryRpcTransport.class, components.rpcTransport());
+        assertSame(
+                components.require(LocalRuntimeCapabilities.RPC_TRANSPORT),
+                components.require(LocalRuntimeCapabilities.RPC_HANDLER_REGISTRY));
+        assertInstanceOf(group.zn.zero.rpc.local.InMemoryRpcTransport.class,
+                components.require(LocalRuntimeCapabilities.RPC_TRANSPORT));
     }
 
     /**
@@ -373,43 +364,4 @@ class ZeroServerApplicationTest {
         }
     }
 
-    /**
-     * 仅实现 RPC 传输的测试组件。
-     *
-     * @author zn
-     */
-    private static final class TransportOnlyRpc implements RpcTransport {
-
-        /**
-         * 返回测试组件名称。
-         *
-         * @return 组件名称；不可为空；线程安全。
-         */
-        @Override
-        public String name() {
-            return "transport-only";
-        }
-
-        /**
-         * 返回未使用的请求结果。
-         *
-         * @param request RPC 请求；不可为空。
-         * @return 失败响应；不可为空；线程安全。
-         */
-        @Override
-        public CompletionStage<RpcResponse> request(final RpcRequest request) {
-            return CompletableFuture.failedFuture(new UnsupportedOperationException("not used"));
-        }
-
-        /**
-         * 返回未使用的单向发送结果。
-         *
-         * @param request RPC 请求；不可为空。
-         * @return 失败响应；不可为空；线程安全。
-         */
-        @Override
-        public CompletionStage<Void> oneway(final RpcRequest request) {
-            return CompletableFuture.failedFuture(new UnsupportedOperationException("not used"));
-        }
-    }
 }

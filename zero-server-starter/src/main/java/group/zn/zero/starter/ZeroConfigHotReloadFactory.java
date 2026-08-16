@@ -8,6 +8,7 @@ import group.zn.zero.hotupdate.config.ConfigReloadRequestFactory;
 import group.zn.zero.hotupdate.config.LocalConfigHotReloadService;
 import group.zn.zero.hotupdate.config.LoggingConfigReloadObserver;
 import group.zn.zero.log.LogAppender;
+import group.zn.zero.runtime.api.ComponentId;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
@@ -16,12 +17,14 @@ import java.util.Optional;
  * Starter 本地 CSV 配置热重载显式装配工厂。
  *
  * <p>该工厂只在 {@code zero.config.hot-reload.enabled=true} 时创建服务，并把服务追加到
- * {@link ZeroRuntimeBuilder} 生命周期。所有 CSV 文件 IO 和可选 WatchService 都复用 starter
+ * {@link LocalRuntimeBuilder} 生命周期。所有 CSV 文件 IO 和可选 WatchService 都复用 starter
  * 管理的非内联 remote IO executor；本工厂不创建线程池，也不注册业务配置表。
  *
  * @author zn
  */
 public final class ZeroConfigHotReloadFactory {
+
+    private static final ComponentId COMPONENT_ID = ComponentId.of("zero.local.config-hot-reload");
 
     private ZeroConfigHotReloadFactory() {
     }
@@ -59,11 +62,11 @@ public final class ZeroConfigHotReloadFactory {
      * @throws ZeroException 当配置非法或 remote IO executor 可能内联时抛出。
      */
     public static Optional<LocalConfigHotReloadService> configure(
-            final ZeroRuntimeBuilder builder,
+            final LocalRuntimeBuilder builder,
             final ZeroConfig config,
             final LogAppender logAppender,
             final ZeroRuntimeExecutors executors) {
-        ZeroRuntimeBuilder checkedBuilder = Objects.requireNonNull(builder, "builder");
+        LocalRuntimeBuilder checkedBuilder = Objects.requireNonNull(builder, "builder");
         ZeroConfig checkedConfig = Objects.requireNonNull(config, "config");
         LogAppender checkedLogAppender = Objects.requireNonNull(logAppender, "logAppender");
         ZeroRuntimeExecutors checkedExecutors = Objects.requireNonNull(executors, "executors");
@@ -78,7 +81,7 @@ public final class ZeroConfigHotReloadFactory {
                 ConfigReloadRequestFactory.local(operator(checkedConfig)),
                 new LoggingConfigReloadObserver(checkedLogAppender),
                 options(checkedConfig));
-        checkedBuilder.addLifecycleComponent(service);
+        checkedBuilder.addApplicationLifecycle(COMPONENT_ID, service);
         return Optional.of(service);
     }
 

@@ -20,7 +20,7 @@ zeroServer 是一个面向实时在线游戏的通用 Java 21 服务端框架。
 - **状态有主**：玩家在线状态绑定 player lane，场景状态绑定 scene lane；跨 Actor 修改通过消息完成。
 - **本地简单**：默认 Starter 不需要 Docker 或外部中间件，适合原型、教学、测试和单进程服务。
 - **生产显式**：真实 Kafka、MongoDB、Redis、PostgreSQL、Nacos 只通过 Production Starter 显式启用；缺配置、健康失败或预算耗尽时 fail-fast，不静默退回本地实现。
-- **核心低依赖**：`zero-core`、`zero-event`、`zero-actor`、`zero-protocol` 不依赖具体中间件。
+- **核心低依赖**：`zero-core`、`zero-event`、`zero-actor`、`zero-protocol` 不依赖具体中间件；中立 `zero-runtime` 只依赖 `zero-core`。
 - **性能可验证**：关键路径关注分配、锁、队列、复制、阻塞和背压；性能结论必须附工作负载、环境与复现方法。
 - **运营可追踪**：TraceId、统一 ErrorCode、结构化日志、敏感字段安全门、低基数指标、GM dry-run 和审计归因贯穿运行时。
 
@@ -62,7 +62,7 @@ java scripts/RunLocalPrototype.java `
 
 该命令会：
 
-1. 检查 Java 21、Maven 3.9+ 和仓库根目录。
+1. 检查 Java 21、Maven 3.9+、Git 和仓库根目录。
 2. 安装当前 `0.1.0-SNAPSHOT` 工件。
 3. 按关键词选择脚手架。
 4. 在 `target/generated/my-game` 生成独立 Maven 工程。
@@ -217,6 +217,7 @@ flowchart LR
 | `zero-discovery-nacos` | 本地/Nacos 服务发现、订阅和 RPC metadata | Nacos 是可选 Adapter，不能污染 RPC/Core |
 | `zero-log` | 统一日志、Appender/Sink、安全门和脱敏 | 业务只能接收 `LogAppender`，不能绕过 Pipeline |
 | `zero-monitor` | 指标、Prometheus、Grafana、告警和系统探针 | 禁止 playerId/traceId/IP 等高基数标签 |
+| `zero-runtime` | 显式组件选择、typed config、依赖图、生命周期事务、安全诊断与共享能力模型 | 1B/1C 已实现；Local Starter、生成器和模板已迁移；真实 Adapter provider 留在 1D；不扫描 classpath |
 | `zero-server-starter` | 本地默认装配、Builder、生命周期和 demo | 默认不连接外部组件，不扫描 classpath 自动启用 Adapter |
 | `zero-server-starter-production` | 真实 Adapter 显式装配、健康、预算和回滚 | single-use runtime；fail-fast；当前仍非 production ready |
 | `zero-benchmarks` | opt-in JMH workload | 仅 `-Pbenchmarks` 加入 Reactor；不设 CI 性能阈值 |
@@ -309,6 +310,20 @@ mvn -B -ntp -DskipTests install
 
 ## 构建与验证
 
+克隆后或日常开发先运行本地关键路径验收：
+
+```bash
+java scripts/ZeroStage0Acceptance.java --level quick
+```
+
+提交前运行完整阶段 0 验收；它串联环境、架构、Maven 门禁、五类独立示例和七类脚手架，并将日志限制在 `target/stage0-acceptance/`：
+
+```bash
+java scripts/ZeroStage0Acceptance.java --level full
+```
+
+完整检查映射、超时、输出和安全边界见[阶段 0 开箱即用验收](docs/local-stage0-acceptance.zh-CN.md)。分层命令仍可独立执行：
+
 默认单元测试：
 
 ```bash
@@ -382,7 +397,7 @@ JMH 还测量了日志字段、指标标签、脱敏和生产网络 observer：0
 - 安全日志 Pipeline 和内存指标运行时。
 - 由 Starter 管理的 logic、actor、remote IO、background 执行器。
 
-它不因 classpath 出现 Adapter 就自动连接外部服务。业务可以通过 `ZeroRuntimeFactory.localBuilder()` 显式覆盖单个槽位。
+它不因 classpath 出现 Adapter 就自动连接外部服务。业务通过 `LocalRuntime.builder()` 创建显式装配器，并用 typed capability 与 provider ID 替换实现；可在创建资源前调用 `diagnose()` 检查组件图。
 
 ### 显式生产 Adapter 装配
 
@@ -395,12 +410,15 @@ zero.adapter.data.redis.enabled=false
 zero.adapter.cache.redis.enabled=false
 zero.adapter.data.postgresql.enabled=false
 zero.discovery.mode=local
+zero.net.lifecycle.enabled=false
 
 zero.adapter.startup-budget-millis=60000
 zero.adapter.startup-timeout-millis=10000
 ```
 
 启用某 Adapter 后必须提供对应隔离配置。例如 Kafka 使用 `zero.rpc.kafka.bootstrap-servers` 或 `ZERO_KAFKA_BOOTSTRAP_SERVERS`，MongoDB 使用 `ZERO_MONGO_URI`/`ZERO_MONGO_DATABASE`，Redis 使用 `ZERO_REDIS_URI`，PostgreSQL 使用 `ZERO_POSTGRESQL_URL`/`ZERO_POSTGRES_USER`/`ZERO_POSTGRES_PASSWORD`，Nacos 使用 `ZERO_NACOS_SERVER_ADDR` 等。
+
+`ZeroProductionRuntime` 直接实现 `GameRuntime`。业务从 `ProductionRuntimeCapabilities` 选择中立接口，通过 `require(...)`、`optional(...)` 或 `requireAll(...)` 访问 RPC、data、cache、discovery、resolver 和 network lifecycle；驱动 client 不作为公共能力暴露。Adapter 状态使用 `productionReport()`，标准组件图与资源状态使用 `report()`。启用 production network 时还必须对 builder 显式提供 `networkPolicy(...)` 和不会内联 remote IO 的 `ZeroRuntimeExecutors`。
 
 不要把真实值写入仓库。生产装配报告和异常只显示配置键、来源、Adapter、阶段、状态和 ErrorCode，不回显 URI、host、database、topic、namespace、group、账号、密码或第三方异常原文。
 
@@ -491,9 +509,11 @@ zero.adapter.startup-timeout-millis=10000
 - [总体架构](docs/architecture.zh-CN.md)
 - [模块图](docs/module-map.md)
 - [能力矩阵](docs/capability-matrix.zh-CN.md)
+- [阶段 0 开箱即用验收](docs/local-stage0-acceptance.zh-CN.md)
 
 ### 核心模型
 
+- [模块化运行时装配设计（阶段 1B/1C 实现与 1D 边界）](docs/modular-runtime-assembly.zh-CN.md)
 - [事件模型](docs/event-model.zh-CN.md)
 - [线程模型](docs/threading-model.zh-CN.md)
 - [协议 DSL](docs/protocol-dsl.zh-CN.md)

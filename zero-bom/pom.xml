@@ -26,6 +26,11 @@
             </dependency>
             <dependency>
                 <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
                 <artifactId>zero-event</artifactId>
                 <version>${project.version}</version>
             </dependency>

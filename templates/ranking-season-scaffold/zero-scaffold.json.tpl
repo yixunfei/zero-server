@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generator": "scripts/NewLocalGame.java",
+  "generator": "zero-codegen/project-scaffold",
   "projectName": __PROJECT_NAME_JSON__,
   "packageName": __PACKAGE_JSON__,
   "zeroVersion": __ZERO_VERSION_JSON__,
@@ -12,13 +12,12 @@
   "prototype": true,
   "connectsExternalMiddleware": false,
   "opensNetworkPorts": false,
+  "runtimeProfile": "local",
+  "runtimeCapabilities": [
+__RUNTIME_CAPABILITIES_JSON__
+  ],
   "frameworkComponents": [
-    "zero-codegen",
-    "zero-protocol",
-    "zero-server-starter",
-    "zero-actor",
-    "zero-log",
-    "zero-monitor"
+__FRAMEWORK_COMPONENTS_JSON__
   ],
   "documents": [
     "README.md",

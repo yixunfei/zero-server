@@ -8,12 +8,25 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ### Added
 
+- 阶段 0 统一验收入口，分为 quick/full 两级，串联环境、架构、Maven 门禁、独立示例和七类脚手架，并输出可机器解析结果。
+- 阶段 1 模块化运行时装配设计与 `zero-runtime` 1B/1C 通用契约：显式 catalog/selection、typed config、确定性依赖图、双资源账本、启动健康、single-use 生命周期、稳定错误码、安全诊断和共享能力模型；Local Starter、生成器、示例及模板已迁移，真实 Adapter provider 留待 1D。
+- 1D-0 Production 迁移基础契约：`GameRuntime.optional(...)`、相互独立的 assembly/startup deadline，以及 `standalone`、`external-test`、`production` profile 和中立 data/discovery/resolver/network capability 词汇。
+- 1D-1 Kafka RPC 正式 runtime provider：稳定 provider ID、typed startup schema、显式日志依赖、双 RPC capability、mandatory startup health，以及保持不变的安全属性白名单和延迟连接边界。
+- 1D-2 MongoDB data 正式 runtime provider：稳定 provider ID、敏感 typed schema、`DataService` 多值贡献、mandatory startup health，以及立即登记到中立 build resource ledger 的 Mongo client。
+- 1D-3 Redis provider family：包内共享资源句柄、独立 data/cache provider、单一中立 ledger client、`DataService`/`CacheService` 业务能力和各自 mandatory startup health；未公开 `RedisClient` typed capability。
+- 1D-4/5 PostgreSQL 与 Nacos provider：敏感 typed schema、中立 data/discovery/resolver capability、mandatory startup health 和既有启动预算语义。
+- 1D-6 production network provider：显式 policy、10 项非敏感 typed config、受管非内联 remote IO executor 和默认/自定义有界限流器。
+- 1D-7 收敛：`ZeroProductionRuntime` 直接实现 `GameRuntime`，删除驱动 getter、package-private bridge、重复 resource scope 和旧 network factory。
 - 首次公开 GitHub 仓库、完整项目首页、贡献指南、安全策略、行为准则、Issue/PR 模板和 Dependabot 配置。
 - Java 21 GitHub Actions，覆盖默认测试、Checkstyle、PMD、SpotBugs、JaCoCo、示例和脚手架验证。
 - 独立 `zero-benchmarks` JMH 模块以及 Zero Binary Protocol、Protobuf、FlatBuffers 的可复现横向基准。
 
 ### Changed
 
+- `zero-runtime` 在 1B 复审中收紧 callback 异常归一化、确定性 catalog/selection 冻结和 startup health 超时取消；公开异常与报告不携带 raw cause 或配置值。
+- Local/Production Starter 统一复用 `GameRuntime` 生命周期与双 ledger 契约；Production Adapter 配置、健康预算和回滚已由正式 provider 接入同一组件图。
+- Production 累计启动预算现在只覆盖 lifecycle start 与 startup health；planning/config/create 使用独立装配预算，不再从资源创建阶段提前消耗启动预算。
+- 共享 capability model 现在可声明 provider-specific 依赖与实现制品，使具体实现依赖不会被错误提升为所有 provider 的能力依赖，生成器也能计算完整 provider artifact 闭包。
 - 公开文档改为面向使用者、部署者和贡献者组织，移除内部任务、计划和审计材料。
 - Maven 项目元数据、SCM 和 Issue 地址更新为 `yixunfei/zero-server`。
 

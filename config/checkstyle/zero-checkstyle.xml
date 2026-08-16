@@ -5,8 +5,15 @@
 <module name="Checker">
     <property name="charset" value="UTF-8"/>
     <module name="NewlineAtEndOfFile"/>
+    <module name="FileLength">
+        <property name="max" value="1500"/>
+    </module>
     <module name="TreeWalker">
         <module name="AvoidStarImport"/>
+        <module name="MethodLength">
+            <property name="max" value="100"/>
+            <property name="countEmpty" value="true"/>
+        </module>
         <module name="OuterTypeFilename"/>
     </module>
 </module>

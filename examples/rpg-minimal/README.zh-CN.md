@@ -63,12 +63,12 @@ examples/rpg-minimal/src/main/protocol/Rpg.si
 
 它演示了以下做法：
 
-- 使用 `ZeroRuntimeFactory.localBuilder(...)` 创建本地运行时组件。
+- 使用 `LocalRuntime.builder(...)` 创建中立 `GameRuntime`。
 - 使用 `ZeroRuntimeExecutors.localPrototype(...)` 让 starter 管理原型执行域。
 - 使用 `LocalPlayerService` 处理登录、玩家加载和 GM 查询玩家。
 - 使用 `LocalSceneService` 处理进入场景、移动、场景实体查询和离开场景。
 - 使用 `InMemoryLogSink` 作为本地终端快照，业务日志经 `LogAppender` 安全入口写入，并由 `MonitorRuntime` 记录指标。
-- 通过 `components.assemblyReport()` 输出无敏感值的装配摘要。
+- 通过 `GameRuntime.require(LocalRuntimeCapabilities.*)` 取得 Actor、配置和安全日志等 typed capability。
 
 协议驱动入口还演示了以下做法：
 

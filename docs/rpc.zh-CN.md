@@ -144,7 +144,7 @@ Broadcast RPC 支持两种筛选：
 
 旧版 `zero.rpc.version`、`zero.rpc.topic`、`zero.rpc.group` 和 `zero.rpc.protocol` 保留兼容读取和写入。
 
-`zero-discovery-nacos` 提供 `NacosRpcMetadataMapper` 和 `ServiceDiscoveryRpcServiceResolver`，负责把 Nacos / 本地 `ServiceDiscovery` 实例映射为 RPC 中立模型。`zero-server-starter-production` 在显式启用 Nacos discovery 时暴露 `rpcServiceResolver()`；默认 local 路径仍不连接 Nacos。
+`zero-discovery-nacos` 提供 `NacosRpcMetadataMapper` 和 `ServiceDiscoveryRpcServiceResolver`，负责把 Nacos / 本地 `ServiceDiscovery` 实例映射为 RPC 中立模型。`zero-server-starter-production` 在显式启用 Nacos discovery 时绑定 `ProductionRuntimeCapabilities.RPC_SERVICE_RESOLVER`，调用方通过 `GameRuntime.require(...)` 取得中立接口；默认 local 路径仍不连接 Nacos。
 
 consumer 侧默认调用路径仍由 `RpcClientFactory`、`RpcRoute` 和具体 transport 决定。本阶段先提供显式 resolver 协作入口，不把服务发现自动接入所有 RPC 调用，避免改变现有调用语义。
 

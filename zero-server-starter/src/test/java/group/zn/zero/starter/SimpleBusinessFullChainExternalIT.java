@@ -66,6 +66,7 @@ import group.zn.zero.rpc.kafka.KafkaRpcAdapter;
 import group.zn.zero.rpc.kafka.KafkaRpcSettings;
 import group.zn.zero.rpc.kafka.KafkaRpcTopicResolver;
 import group.zn.zero.rpc.server.RpcServiceBinder;
+import group.zn.zero.runtime.api.GameRuntime;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -121,179 +122,179 @@ class SimpleBusinessFullChainExternalIT {
     void dockerRealEnvironmentShouldRunSimpleBusinessFullChain() throws Exception {
         assertTrue(Boolean.getBoolean(EXTERNAL_TESTS_ENABLED), "external-tests profile must be enabled");
         String suffix = UUID.randomUUID().toString().replace("-", "");
-        String serviceName = "external.business.player";
-        String routeServiceName = serviceName + ":v1";
-        String topicPrefix = "zero.rpc.business." + suffix;
-        String providerGroup = "business-provider-" + suffix;
-        String replyTopic = "business-reply-" + suffix;
-        String instanceId = "business-provider-" + suffix;
         String playerId = "player-10086-" + suffix;
         String accountId = "account-10086-" + suffix;
         InMemoryLogSink baseLogSink = new InMemoryLogSink();
         MonitorRuntime monitorRuntime = MonitorRuntime.createDefault();
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localBuilder(
+        GameRuntime components = LocalRuntime.builder(
                 new MapZeroConfig(Map.of(
                         ZeroRuntimeConfigKeys.ZERO_MODE, "external-test",
                         ZeroRuntimeConfigKeys.ZERO_NAME, "docker-full-chain")),
                 baseLogSink)
-                .monitorRuntime(monitorRuntime)
+                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime)
                 .build();
         ZeroServerApplication application = new ZeroServerApplication(components);
-        MongoClient mongoClient = null;
-        RedisClient redisClient = null;
-        ServiceDiscovery discovery = null;
-        KafkaRpcAdapter provider = null;
-        KafkaRpcAdapter caller = null;
-        try {
+        try (ExternalResources resources = new ExternalResources(application)) {
             application.start();
-            components.monitorRuntime().registry().register(new MetricDefinition(
+            components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME).registry().register(new MetricDefinition(
                     LOGIN_METRIC,
                     "simple business login count",
                     "count",
                     List.of("operation", "zone")));
-            MongoDriverSettings mongoSettings = mongoSettings();
-            MongoDataAdapter mongoAdapter = new MongoDataAdapter();
-            mongoClient = mongoAdapter.createClient(mongoSettings);
-            assertTrue(new MongoDataHealthCheck(mongoClient, mongoSettings.databaseName()).check(),
-                    "MongoDB external service is unavailable");
-            mongoClient.getDatabase(mongoSettings.databaseName()).getCollection("game__player_full_chain").drop();
-            ZeroDataEnvelopeCrudRepository<String, PlayerProfile> playerRepository =
-                    mongoAdapter.registerDriverRepository(
-                            "player_full_chain",
-                            mongoClient,
-                            mongoSettings.databaseName(),
-                            new ZeroDataMappingIntrospector().inspect(PlayerProfile.class),
-                            PlayerProfileCodec.INSTANCE,
-                            1);
-
-            PostgresqlDriverSettings postgresqlSettings = postgresqlSettings();
-            assertTrue(new PostgresqlDataHealthCheck(postgresqlSettings).check(),
-                    "PostgreSQL external service is unavailable");
-            ZeroDataEnvelopeCrudRepository<String, AccountProfile> accountRepository =
-                    new PostgresqlDataAdapter().registerDriverRepository(
-                            "account_full_chain",
-                            postgresqlSettings,
-                            new ZeroDataMappingIntrospector().inspect(AccountProfile.class),
-                            AccountProfileCodec.INSTANCE,
-                            1);
-            accountRepository.deleteById(accountId).toCompletableFuture().join();
-
-            RedisDriverSettings redisSettings = RedisDriverSettings.fromSystemProperties();
-            RedisDataAdapter redisDataAdapter = new RedisDataAdapter();
-            redisClient = redisDataAdapter.createClient(redisSettings);
-            assertTrue(new RedisDataHealthCheck(redisClient).check(), "Redis external service is unavailable");
-            redisClient.flushDB();
-            RedisDistributedCacheService<String, String> cacheService =
-                    new RedisDistributedCacheService<>(
-                            "redis-full-chain",
-                            CachePolicy.defaults(),
-                            new RedisCacheStore<>(
-                                    redisClient,
-                                    "game",
-                                    "player_login_full_chain",
-                                    1,
-                                    new DefaultRedisCacheKeyStrategy(),
-                                    key -> key,
-                                    StringCacheValueCodec.INSTANCE,
-                                    new RedisCacheEnvelopeCodec()));
-
-            discovery = NacosDiscoveryFactory.nacos(nacosSettings());
-            discovery.start();
-            provider = new KafkaRpcAdapter(kafkaSettings(
-                    "business-provider-" + suffix,
-                    providerGroup,
-                    topicPrefix,
-                    "provider-reply-" + suffix));
-            caller = new KafkaRpcAdapter(kafkaSettings(
-                    "business-caller-" + suffix,
-                    "business-caller-" + suffix,
-                    topicPrefix,
-                    replyTopic));
-            new RpcServiceBinder(provider, codecRegistry()).bind(BusinessPlayerRpc.class, new BusinessPlayerRpcImpl(
-                    playerRepository,
-                    accountRepository,
-                    cacheService,
-                    components.logAppender(),
-                    components.monitorRuntime()));
-            discovery.register(new ServiceInstance(
-                    serviceName,
-                    instanceId,
-                    "127.0.0.1",
-                    19092,
-                    ServiceDiscoveryConstants.DEFAULT_GROUP_NAME,
-                    ServiceDiscoveryConstants.DEFAULT_CLUSTER_NAME,
-                    true,
-                    true,
-                    true,
-                    1.0D,
-                    0.1D,
-                    RpcDiscoveryMetadata.providerMetadata(
-                            serviceName,
-                            "1.0.0",
-                            new KafkaRpcTopicResolver(topicPrefix).requestTopic(routeServiceName),
-                            providerGroup,
-                            instanceId,
-                            "kafka")));
-            ServiceQuery query = new ServiceQuery(
-                    serviceName,
-                    ServiceDiscoveryConstants.DEFAULT_GROUP_NAME,
-                    java.util.List.of(ServiceDiscoveryConstants.DEFAULT_CLUSTER_NAME),
-                    false,
-                    true);
-            ServiceInstance instance = awaitInstance(discovery, query, instanceId);
-            assertEquals("kafka", instance.metadata().get(RpcDiscoveryMetadata.PROTOCOL));
-
-            BusinessPlayerRpc client = new RpcClientFactory(
-                    caller,
-                    codecRegistry(),
-                    RpcCallOptions.defaults()
-                            .withReplyTopic(replyTopic)
-                            .withTraceId("trace-business-full-chain"))
-                    .create(BusinessPlayerRpc.class);
+            BusinessData data = createBusinessData(resources, accountId);
+            BusinessPlayerRpc client = startBusinessRpc(resources, components, data, suffix);
             LoginResponseDTO response = client.login(new LoginRequestDTO(10086L, accountId, playerId, "zone-a"))
                     .orThrow();
-
-            assertEquals(10086L, response.uid());
-            assertEquals("player-10086", response.name());
-            assertEquals("zone-a", response.zone());
-            assertEquals("created", response.state());
-            assertEquals(response.name(), cacheService.get("player:" + response.uid()).toCompletableFuture()
-                    .join()
-                    .orElseThrow());
-            assertEquals(response.name(), playerRepository.findById(playerId).toCompletableFuture()
-                    .join()
-                    .orElseThrow()
-                    .name());
-            assertEquals(10086L, accountRepository.findById(accountId).toCompletableFuture()
-                    .join()
-                    .orElseThrow()
-                    .uid());
-            assertTrue(baseLogSink.records().stream()
-                    .anyMatch(record -> "player login completed".equals(record.message())
-                            && "10086".equals(record.fields().get("uid"))));
-            assertTrue(components.monitorRuntime().registry().samples().stream()
-                    .anyMatch(sample -> LOGIN_METRIC.equals(sample.name())
-                            && "login".equals(sample.labels().get("operation"))));
-        } finally {
-            if (caller != null) {
-                caller.close();
-            }
-            if (provider != null) {
-                provider.close();
-            }
-            if (discovery != null && discovery.running()) {
-                discovery.stop();
-            }
-            if (redisClient != null) {
-                redisClient.close();
-            }
-            if (mongoClient != null) {
-                mongoClient.close();
-            }
-            if (application.running()) {
-                application.stop();
-            }
+            assertBusinessResult(response, data, playerId, accountId, baseLogSink,
+                    components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME));
         }
+    }
+
+    private BusinessData createBusinessData(
+            final ExternalResources resources,
+            final String accountId) {
+        MongoDriverSettings mongoSettings = mongoSettings();
+        MongoDataAdapter mongoAdapter = new MongoDataAdapter();
+        resources.mongoClient = mongoAdapter.createClient(mongoSettings);
+        assertTrue(new MongoDataHealthCheck(resources.mongoClient, mongoSettings.databaseName()).check(),
+                "MongoDB external service is unavailable");
+        resources.mongoClient.getDatabase(mongoSettings.databaseName())
+                .getCollection("game__player_full_chain")
+                .drop();
+        ZeroDataEnvelopeCrudRepository<String, PlayerProfile> playerRepository =
+                mongoAdapter.registerDriverRepository(
+                        "player_full_chain",
+                        resources.mongoClient,
+                        mongoSettings.databaseName(),
+                        new ZeroDataMappingIntrospector().inspect(PlayerProfile.class),
+                        PlayerProfileCodec.INSTANCE,
+                        1);
+
+        PostgresqlDriverSettings postgresqlSettings = postgresqlSettings();
+        assertTrue(new PostgresqlDataHealthCheck(postgresqlSettings).check(),
+                "PostgreSQL external service is unavailable");
+        ZeroDataEnvelopeCrudRepository<String, AccountProfile> accountRepository =
+                new PostgresqlDataAdapter().registerDriverRepository(
+                        "account_full_chain",
+                        postgresqlSettings,
+                        new ZeroDataMappingIntrospector().inspect(AccountProfile.class),
+                        AccountProfileCodec.INSTANCE,
+                        1);
+        accountRepository.deleteById(accountId).toCompletableFuture().join();
+
+        RedisDriverSettings redisSettings = RedisDriverSettings.fromSystemProperties();
+        resources.redisClient = new RedisDataAdapter().createClient(redisSettings);
+        assertTrue(new RedisDataHealthCheck(resources.redisClient).check(), "Redis external service is unavailable");
+        resources.redisClient.flushDB();
+        RedisDistributedCacheService<String, String> cacheService = new RedisDistributedCacheService<>(
+                "redis-full-chain",
+                CachePolicy.defaults(),
+                new RedisCacheStore<>(
+                        resources.redisClient,
+                        "game",
+                        "player_login_full_chain",
+                        1,
+                        new DefaultRedisCacheKeyStrategy(),
+                        key -> key,
+                        StringCacheValueCodec.INSTANCE,
+                        new RedisCacheEnvelopeCodec()));
+        return new BusinessData(playerRepository, accountRepository, cacheService);
+    }
+
+    private BusinessPlayerRpc startBusinessRpc(
+            final ExternalResources resources,
+            final GameRuntime components,
+            final BusinessData data,
+            final String suffix) throws InterruptedException {
+        String serviceName = "external.business.player";
+        String topicPrefix = "zero.rpc.business." + suffix;
+        String providerGroup = "business-provider-" + suffix;
+        String replyTopic = "business-reply-" + suffix;
+        String instanceId = "business-provider-" + suffix;
+        resources.discovery = NacosDiscoveryFactory.nacos(nacosSettings());
+        resources.discovery.start();
+        resources.provider = new KafkaRpcAdapter(kafkaSettings(
+                "business-provider-" + suffix,
+                providerGroup,
+                topicPrefix,
+                "provider-reply-" + suffix));
+        resources.caller = new KafkaRpcAdapter(kafkaSettings(
+                "business-caller-" + suffix,
+                "business-caller-" + suffix,
+                topicPrefix,
+                replyTopic));
+        new RpcServiceBinder(resources.provider, codecRegistry()).bind(
+                BusinessPlayerRpc.class,
+                new BusinessPlayerRpcImpl(
+                        data.playerRepository(),
+                        data.accountRepository(),
+                        data.cacheService(),
+                        components.require(LocalRuntimeCapabilities.LOG_APPENDER),
+                        components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME)));
+        resources.discovery.register(new ServiceInstance(
+                serviceName,
+                instanceId,
+                "127.0.0.1",
+                19092,
+                ServiceDiscoveryConstants.DEFAULT_GROUP_NAME,
+                ServiceDiscoveryConstants.DEFAULT_CLUSTER_NAME,
+                true,
+                true,
+                true,
+                1.0D,
+                0.1D,
+                RpcDiscoveryMetadata.providerMetadata(
+                        serviceName,
+                        "1.0.0",
+                        new KafkaRpcTopicResolver(topicPrefix).requestTopic(serviceName + ":v1"),
+                        providerGroup,
+                        instanceId,
+                        "kafka")));
+        ServiceQuery query = new ServiceQuery(
+                serviceName,
+                ServiceDiscoveryConstants.DEFAULT_GROUP_NAME,
+                List.of(ServiceDiscoveryConstants.DEFAULT_CLUSTER_NAME),
+                false,
+                true);
+        ServiceInstance instance = awaitInstance(resources.discovery, query, instanceId);
+        assertEquals("kafka", instance.metadata().get(RpcDiscoveryMetadata.PROTOCOL));
+        return new RpcClientFactory(
+                resources.caller,
+                codecRegistry(),
+                RpcCallOptions.defaults()
+                        .withReplyTopic(replyTopic)
+                        .withTraceId("trace-business-full-chain"))
+                .create(BusinessPlayerRpc.class);
+    }
+
+    private void assertBusinessResult(
+            final LoginResponseDTO response,
+            final BusinessData data,
+            final String playerId,
+            final String accountId,
+            final InMemoryLogSink logSink,
+            final MonitorRuntime monitorRuntime) {
+        assertEquals(10086L, response.uid());
+        assertEquals("player-10086", response.name());
+        assertEquals("zone-a", response.zone());
+        assertEquals("created", response.state());
+        assertEquals(response.name(), data.cacheService().get("player:" + response.uid()).toCompletableFuture()
+                .join()
+                .orElseThrow());
+        assertEquals(response.name(), data.playerRepository().findById(playerId).toCompletableFuture()
+                .join()
+                .orElseThrow()
+                .name());
+        assertEquals(10086L, data.accountRepository().findById(accountId).toCompletableFuture()
+                .join()
+                .orElseThrow()
+                .uid());
+        assertTrue(logSink.records().stream()
+                .anyMatch(record -> "player login completed".equals(record.message())
+                        && "10086".equals(record.fields().get("uid"))));
+        assertTrue(monitorRuntime.registry().samples().stream()
+                .anyMatch(sample -> LOGIN_METRIC.equals(sample.name())
+                        && "login".equals(sample.labels().get("operation"))));
     }
 
     private ServiceInstance awaitInstance(
@@ -400,6 +401,48 @@ class SimpleBusinessFullChainExternalIT {
                 new ProtocolDefinition(9202, "business.login.response", ProtocolDirection.SERVER_TO_CLIENT, 1),
                 new GeneratedProtocolCodec<>(LoginResponseCodec.INSTANCE));
         return registry;
+    }
+
+    private record BusinessData(
+            ZeroDataEnvelopeCrudRepository<String, PlayerProfile> playerRepository,
+            ZeroDataEnvelopeCrudRepository<String, AccountProfile> accountRepository,
+            RedisDistributedCacheService<String, String> cacheService) {
+    }
+
+    private static final class ExternalResources implements AutoCloseable {
+
+        private final ZeroServerApplication application;
+        private MongoClient mongoClient;
+        private RedisClient redisClient;
+        private ServiceDiscovery discovery;
+        private KafkaRpcAdapter provider;
+        private KafkaRpcAdapter caller;
+
+        private ExternalResources(final ZeroServerApplication application) {
+            this.application = application;
+        }
+
+        @Override
+        public void close() {
+            if (caller != null) {
+                caller.close();
+            }
+            if (provider != null) {
+                provider.close();
+            }
+            if (discovery != null && discovery.running()) {
+                discovery.stop();
+            }
+            if (redisClient != null) {
+                redisClient.close();
+            }
+            if (mongoClient != null) {
+                mongoClient.close();
+            }
+            if (application.running()) {
+                application.stop();
+            }
+        }
     }
 
     /**

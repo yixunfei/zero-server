@@ -22,6 +22,10 @@
         </dependency>
         <dependency>
             <groupId>group.zn.zero</groupId>
+            <artifactId>zero-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
             <artifactId>zero-event</artifactId>
         </dependency>
         <dependency>

@@ -7,13 +7,13 @@
 ```java
 InMemoryLogSink terminalLogSink = new InMemoryLogSink();
 ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("{{artifactId}}", 4);
-ZeroRuntimeBuilder builder = ZeroRuntimeFactory.localBuilder(config, terminalLogSink, executors);
+LocalRuntimeBuilder builder = LocalRuntime.builder(config, terminalLogSink, executors);
 LocalConfigHotReloadService configService = ZeroConfigHotReloadFactory
         .configure(builder, config, builder.logAppender(), executors)
         .orElseThrow();
 GameItemConfigModule itemConfigs = GameItemConfigModule.register(configService, configDirectory);
-ZeroRuntimeComponents components = builder.build();
-components.start();
+GameRuntime runtime = builder.build();
+runtime.start();
 ```
 
 最小配置：

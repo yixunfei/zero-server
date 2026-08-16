@@ -9,17 +9,17 @@ ZeroConfig config = new MapZeroConfig(Map.of(
 InMemoryLogSink terminalLogSink = new InMemoryLogSink();
 MonitorRuntime monitorRuntime = MonitorRuntime.createDefault();
 ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("{{artifactId}}", 4);
-ZeroRuntimeBuilder builder = ZeroRuntimeFactory
-        .localBuilder(config, terminalLogSink, executors)
-        .monitorRuntime(monitorRuntime);
+LocalRuntimeBuilder builder = LocalRuntime
+        .builder(config, terminalLogSink, executors)
+        .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime);
 ManagedScheduler scheduler = ZeroManagedSchedulerFactory
         .configure(builder, config, builder.logAppender(), monitorRuntime, executors)
         .orElseThrow();
-ZeroRuntimeComponents components = builder.build();
-components.start();
+GameRuntime runtime = builder.build();
+runtime.start();
 ```
 
-然后创建 `ManagedSchedulerModule` 并调用 `start()`。停止时先 `module.close()`，再 `components.stop()`，与 L1 生命周期保持一致。
+然后创建 `ManagedSchedulerModule` 并调用 `start()`。停止时先 `module.close()`，再 `runtime.stop()`，与 L1 生命周期保持一致。
 
 最小配置：
 

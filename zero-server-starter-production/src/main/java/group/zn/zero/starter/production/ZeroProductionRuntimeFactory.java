@@ -17,7 +17,7 @@ import java.util.Objects;
  * 生产与外部测试 runtime 装配工厂。
  *
  * <p>该工厂位于独立模块中，显式承载真实 Adapter 依赖；`zero-server-starter` 的
- * `localDefault` 和 `localBuilder` 仍保持无 Docker、无真实中间件连接的默认语义。
+ * {@code LocalRuntime.create} 和 {@code LocalRuntime.builder} 保持无 Docker、无真实中间件连接的默认语义。
  *
  * @author zn
  */

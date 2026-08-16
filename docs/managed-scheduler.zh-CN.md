@@ -200,14 +200,14 @@ RUNNING   -> CANCELLED                   当前 stage 完成后取消未来调�
 ```java
 MonitorRuntime monitorRuntime = MonitorRuntime.createDefault();
 ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("game", 4);
-ZeroRuntimeBuilder builder = ZeroRuntimeFactory
-        .localBuilder(config, logSink, executors)
-        .monitorRuntime(monitorRuntime);
+LocalRuntimeBuilder builder = LocalRuntime
+        .builder(config, terminalLogSink, executors)
+        .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime);
 ManagedScheduler scheduler = ZeroManagedSchedulerFactory
-        .configure(builder, config, logSink, monitorRuntime, executors)
+        .configure(builder, config, builder.logAppender(), monitorRuntime, executors)
         .orElseThrow();
-ZeroRuntimeComponents components = builder.build();
-components.start();
+GameRuntime runtime = builder.build();
+runtime.start();
 ```
 
 关闭配置时，工厂返回 `Optional.empty()`，不修改 builder、不注册指标、不创建 timer。
@@ -231,7 +231,7 @@ scheduler 等基础设施
 
 业务生命周期组件应在自己的 stop 中先取消持有的任务句柄。Scheduler stop 随后关闭 admission、取消未来 timer、等待 in-flight stage，最后关闭单 timer resource。超过 `stop-timeout-ms` 时抛出绑定 `STOP_TIMEOUT` 的异常并产生 `STOP_TIMEOUT` 结构化事件；runtime 仍会尝试停止后续资源。
 
-`ZeroRuntimeBuilder.lifecycleComponents(...)` 是高级完整顺序覆盖入口。调用后由调用方提供全部生命周期顺序，不再自动插入默认 L1 列表。
+扩展组件必须通过 `LocalRuntimeBuilder.addInfrastructureLifecycle(...)` 或 `addApplicationLifecycle(...)` 显式声明所属生命周期层级。运行时根据能力依赖形成确定性拓扑；没有绕过依赖图、整体替换生命周期顺序的公共入口。
 
 ## 10. Actor 与远程 IO 边界
 

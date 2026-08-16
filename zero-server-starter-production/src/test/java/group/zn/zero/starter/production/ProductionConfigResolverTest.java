@@ -212,6 +212,30 @@ class ProductionConfigResolverTest {
     }
 
     /**
+     * 验证 defaultable 可选项允许空白首选来源回到默认值，但不会读取低优先级敏感值。
+     */
+    @Test
+    void readDefaultableShouldTreatBlankAsMissingWithoutFallback() {
+        String systemKey = "system.optional.secret";
+        ProductionConfigResolver resolver = new ProductionConfigResolver(
+                new MapZeroConfig(Map.of("config.optional", " ")),
+                key -> systemKey.equals(key) ? "lower-priority-secret" : null,
+                key -> null);
+
+        ResolvedProductionSetting setting = resolver.readDefaultable(
+                ADAPTER_NAME,
+                LOGICAL_KEY,
+                true,
+                List.of("config.optional"),
+                List.of(systemKey),
+                List.of());
+
+        assertFalse(setting.present());
+        assertEquals(Optional.empty(), setting.source());
+        assertFalse(setting.toString().contains("lower-priority-secret"));
+    }
+
+    /**
      * 验证 required 缺失时绑定真实缺配置错误码，且异常图不保存原始值或 cause。
      */
     @Test
@@ -257,18 +281,14 @@ class ProductionConfigResolverTest {
     }
 
     /**
-     * 验证 network 使用的兼容入口保持原有宽松布尔和空白回退行为。
+     * 验证 network enabled 入口保持原有宽松布尔行为。
      */
     @Test
-    void legacyNetworkEntriesShouldKeepExistingParsingBehavior() {
-        ProductionConfigResolver resolver = resolver(Map.of(
-                ENABLED_KEY, "TRUE",
-                MODE_KEY, " ",
-                LOGICAL_KEY, "12"));
+    void networkEnabledShouldKeepExistingParsingBehavior() {
+        ProductionConfigResolver resolver = resolver(Map.of(ENABLED_KEY, "TRUE"));
 
         assertTrue(resolver.enabled(ENABLED_KEY));
-        assertEquals("default", resolver.getOrDefault(MODE_KEY, "default"));
-        assertEquals(12, resolver.positiveInt(LOGICAL_KEY, 10));
+        assertFalse(resolver(Map.of(ENABLED_KEY, " true ")).enabled(ENABLED_KEY));
     }
 
     private static ProductionConfigResolver resolver(final Map<String, String> values) {

@@ -6,14 +6,23 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import group.zn.zero.cache.CacheValueCodec;
 import group.zn.zero.core.config.MapZeroConfig;
+import group.zn.zero.data.mongo.MongoDataAdapter;
 import group.zn.zero.data.mongo.MongoDriverSettings;
+import group.zn.zero.data.postgresql.PostgresqlDataAdapter;
 import group.zn.zero.data.postgresql.PostgresqlDriverSettings;
+import group.zn.zero.data.redis.RedisDataAdapter;
+import group.zn.zero.data.redis.RedisDistributedCacheService;
 import group.zn.zero.data.redis.RedisDriverSettings;
 import group.zn.zero.discovery.nacos.NacosDiscoveryAdapter;
 import group.zn.zero.discovery.nacos.NacosDiscoveryConfigKeys;
+import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
+import group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome;
+import group.zn.zero.runtime.spi.ComponentKind;
+import group.zn.zero.starter.LocalRuntimeCapabilities;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
@@ -43,7 +52,7 @@ class ProductionRuntimeAssemblyContractTest {
         try {
             NacosDiscoveryAdapter adapter = assertInstanceOf(
                     NacosDiscoveryAdapter.class,
-                    runtime.serviceDiscovery().orElseThrow());
+                    runtime.require(ProductionRuntimeCapabilities.SERVICE_DISCOVERY));
             assertEquals(1_250, adapter.settings().requestTimeoutMillis());
         } finally {
             runtime.close();
@@ -64,37 +73,270 @@ class ProductionRuntimeAssemblyContractTest {
     }
 
     /**
-     * 验证六个 production Adapter 槽位同时启用时恰好装配六个 startup health lifecycle，
-     * 每个 lifecycle 都绑定唯一且完整的稳定 Adapter 名称。
+     * 验证所有已迁移 Adapter 使用正式中立 startup health，不再保留 legacy health lifecycle。
      */
     @Test
-    void everyEnabledAdapterSlotShouldInstallOneMandatoryStartupHealthLifecycle() {
+    void everyEnabledAdapterSlotShouldInstallOneMandatoryStartupHealth() {
         ZeroProductionRuntime runtime = isolatedBuilder(new MapZeroConfig(allEnabledConfig()))
                 .redisCacheValueCodec(StringObjectCacheValueCodec.INSTANCE)
                 .build();
         try {
-            List<AdapterHealthCheckLifecycle> healthChecks = runtime.components()
-                    .lifecycleComponents()
-                    .stream()
-                    .filter(AdapterHealthCheckLifecycle.class::isInstance)
-                    .map(AdapterHealthCheckLifecycle.class::cast)
-                    .toList();
-            Set<String> expectedAdapters = Set.of(
-                    ZeroProductionRuntimeBuilder.ADAPTER_KAFKA_RPC,
-                    ZeroProductionRuntimeBuilder.ADAPTER_MONGO_DATA,
-                    ZeroProductionRuntimeBuilder.ADAPTER_REDIS_DATA,
-                    ZeroProductionRuntimeBuilder.ADAPTER_REDIS_CACHE,
-                    ZeroProductionRuntimeBuilder.ADAPTER_POSTGRESQL_DATA,
-                    ZeroProductionRuntimeBuilder.ADAPTER_NACOS_DISCOVERY);
-            Set<String> actualAdapters = healthChecks.stream()
-                    .map(AdapterHealthCheckLifecycle::adapterName)
-                    .collect(Collectors.toUnmodifiableSet());
+            var kafkaPlan = runtime.plan().components().stream()
+                    .filter(component -> StandardRuntimeCapabilityModel.PRODUCTION_KAFKA_RPC.equals(
+                            component.componentId()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(ComponentKind.EXTERNAL, kafkaPlan.kind());
+            assertTrue(kafkaPlan.requires().contains(LocalRuntimeCapabilities.LOG_APPENDER));
+            assertTrue(kafkaPlan.provides().contains(ProductionRuntimeCapabilities.RPC_TRANSPORT));
+            assertTrue(kafkaPlan.provides().contains(ProductionRuntimeCapabilities.RPC_HANDLER_REGISTRY));
+            assertTrue(kafkaPlan.selectionReasons().stream().allMatch(reason ->
+                    StandardRuntimeCapabilityModel.PRODUCTION_KAFKA_RPC.equals(reason.providerId())));
 
-            assertEquals(6, healthChecks.size());
-            assertEquals(expectedAdapters, actualAdapters);
+            var kafkaConfig = runtime.plan().config().stream()
+                    .filter(metadata -> StandardRuntimeCapabilityModel.PRODUCTION_KAFKA_RPC.equals(metadata.owner()))
+                    .toList();
+            assertEquals(8, kafkaConfig.size());
+            assertEquals(5, kafkaConfig.stream().filter(metadata -> metadata.sensitive()).count());
+
+            var kafkaStatus = runtime.report().components().stream()
+                    .filter(component -> StandardRuntimeCapabilityModel.PRODUCTION_KAFKA_RPC.equals(
+                            component.componentId()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(RuntimePhaseOutcome.NOT_RUN, kafkaStatus.startupHealth());
+
+            var mongoPlan = runtime.plan().components().stream()
+                    .filter(component -> StandardRuntimeCapabilityModel.PRODUCTION_MONGO_DATA.equals(
+                            component.componentId()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(ComponentKind.EXTERNAL, mongoPlan.kind());
+            assertTrue(mongoPlan.provides().contains(ProductionRuntimeCapabilities.DATA_SERVICES));
+            assertTrue(mongoPlan.selectionReasons().stream().allMatch(reason ->
+                    StandardRuntimeCapabilityModel.PRODUCTION_MONGO_DATA.equals(reason.providerId())));
+
+            var mongoConfig = runtime.plan().config().stream()
+                    .filter(metadata -> StandardRuntimeCapabilityModel.PRODUCTION_MONGO_DATA.equals(metadata.owner()))
+                    .toList();
+            assertEquals(2, mongoConfig.size());
+            assertTrue(mongoConfig.stream().allMatch(metadata -> metadata.sensitive()));
+            assertInstanceOf(
+                    MongoDataAdapter.class,
+                    runtime.requireAll(ProductionRuntimeCapabilities.DATA_SERVICES).getFirst());
+            assertPostgresqlAssembly(runtime);
+            assertRedisAssembly(runtime);
+            assertNacosAssembly(runtime);
+
+            var mongoStatus = runtime.report().components().stream()
+                    .filter(component -> StandardRuntimeCapabilityModel.PRODUCTION_MONGO_DATA.equals(
+                            component.componentId()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(RuntimePhaseOutcome.NOT_RUN, mongoStatus.startupHealth());
         } finally {
             runtime.close();
         }
+    }
+
+    private void assertPostgresqlAssembly(final ZeroProductionRuntime runtime) {
+        var plan = runtime.plan().components().stream()
+                .filter(component -> ProductionPostgresqlDataProvider.ID.equals(component.componentId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(ComponentKind.EXTERNAL, plan.kind());
+        assertTrue(plan.provides().contains(ProductionRuntimeCapabilities.DATA_SERVICES));
+        assertTrue(plan.selectionReasons().stream().allMatch(reason ->
+                ProductionPostgresqlDataProvider.ID.equals(reason.providerId())));
+        assertConfigMetadata(runtime, ProductionPostgresqlDataProvider.ID, 4, 4);
+        assertTrue(runtime.requireAll(ProductionRuntimeCapabilities.DATA_SERVICES).stream()
+                .anyMatch(PostgresqlDataAdapter.class::isInstance));
+        assertStartupHealthNotRun(runtime, ProductionPostgresqlDataProvider.ID);
+    }
+
+    private void assertNacosAssembly(final ZeroProductionRuntime runtime) {
+        var plans = runtime.plan().components();
+        var discoveryPlan = plans.stream()
+                .filter(component -> ProductionNacosDiscoveryProvider.ID.equals(component.componentId()))
+                .findFirst()
+                .orElseThrow();
+        var resolverPlan = plans.stream()
+                .filter(component -> ProductionNacosRpcResolverProvider.ID.equals(component.componentId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(ComponentKind.EXTERNAL, discoveryPlan.kind());
+        assertTrue(discoveryPlan.provides().contains(ProductionRuntimeCapabilities.SERVICE_DISCOVERY));
+        assertEquals(ComponentKind.FOUNDATION, resolverPlan.kind());
+        assertTrue(resolverPlan.requires().contains(ProductionRuntimeCapabilities.SERVICE_DISCOVERY));
+        assertTrue(resolverPlan.provides().contains(ProductionRuntimeCapabilities.RPC_SERVICE_RESOLVER));
+        assertConfigMetadata(runtime, ProductionNacosDiscoveryProvider.ID, 11, 8);
+        assertConfigMetadata(runtime, ProductionNacosRpcResolverProvider.ID, 0, 0);
+        assertInstanceOf(
+                NacosDiscoveryAdapter.class,
+                runtime.require(ProductionRuntimeCapabilities.SERVICE_DISCOVERY));
+        assertTrue(runtime.optional(ProductionRuntimeCapabilities.RPC_SERVICE_RESOLVER).isPresent());
+        assertStartupHealthNotRun(runtime, ProductionNacosDiscoveryProvider.ID);
+    }
+
+    /** 验证 Mongo build 不要求服务可达，且 client 由中立 build resource ledger 持有和关闭。 */
+    @Test
+    void mongoBuildShouldNotRequireReachabilityAndShouldUseNeutralResourceLedger() {
+        ZeroProductionRuntime baseline = isolatedBuilder(new MapZeroConfig(Map.of())).build();
+        int baselineResourceCount;
+        try {
+            baselineResourceCount = baseline.report().buildResourceCount();
+        } finally {
+            baseline.close();
+        }
+        ZeroProductionRuntime runtime = isolatedBuilder(new MapZeroConfig(Map.of(
+                        ZeroProductionRuntimeConfigKeys.ADAPTER_DATA_MONGO_ENABLED, "true",
+                        MongoDriverSettings.PROPERTY_MONGO_URI, "mongodb://203.0.113.1:27017",
+                        MongoDriverSettings.PROPERTY_MONGO_DATABASE, "assembly")))
+                .build();
+
+        assertTrue(runtime.requireAll(ProductionRuntimeCapabilities.DATA_SERVICES).stream()
+                .anyMatch(MongoDataAdapter.class::isInstance));
+        assertEquals(baselineResourceCount + 1, runtime.report().buildResourceCount());
+        assertEquals(baselineResourceCount + 1, runtime.report().pendingResourceCloseCount());
+        runtime.close();
+        assertEquals(0, runtime.report().pendingResourceCloseCount());
+    }
+
+    /** 验证 provider create 失败从脱敏 diagnostic 恢复 Mongo client-creation 归因。 */
+    @Test
+    void invalidMongoUriShouldRemainSafeClientCreationFailure() {
+        ProductionAdapterException failure = assertThrows(
+                ProductionAdapterException.class,
+                () -> isolatedBuilder(new MapZeroConfig(Map.of(
+                                ZeroProductionRuntimeConfigKeys.ADAPTER_DATA_MONGO_ENABLED, "true",
+                                MongoDriverSettings.PROPERTY_MONGO_URI, SECRET,
+                                MongoDriverSettings.PROPERTY_MONGO_DATABASE, "assembly")))
+                        .build());
+
+        assertEquals(ZeroProductionRuntimeBuilder.ADAPTER_MONGO_DATA, failure.adapterName());
+        assertEquals(ProductionAdapterFailurePhase.CLIENT_CREATION, failure.failurePhase());
+        assertSame(ProductionAdapterErrorCode.CLIENT_CREATION_FAILED, failure.errorCode());
+        assertEquals(ProductionAdapterErrorCode.CLIENT_CREATION_FAILED.message(), failure.message());
+        assertNull(failure.getCause());
+        assertFalse(stackTrace(failure).contains(SECRET), stackTrace(failure));
+    }
+
+    /** 验证 Redis data/cache 共用一个中立 ledger client，且 build 不要求 Redis 可达。 */
+    @Test
+    void redisProvidersShouldShareOneNeutralResource() {
+        ZeroProductionRuntime baseline = isolatedBuilder(new MapZeroConfig(Map.of())).build();
+        int baselineResourceCount;
+        try {
+            baselineResourceCount = baseline.report().buildResourceCount();
+        } finally {
+            baseline.close();
+        }
+        ZeroProductionRuntime runtime = isolatedBuilder(new MapZeroConfig(Map.of(
+                        ZeroProductionRuntimeConfigKeys.ADAPTER_DATA_REDIS_ENABLED, "true",
+                        ZeroProductionRuntimeConfigKeys.ADAPTER_CACHE_REDIS_ENABLED, "true",
+                        RedisDriverSettings.PROPERTY_REDIS_URI, "redis://203.0.113.1:6379/0",
+                        ZeroProductionRuntimeConfigKeys.ADAPTER_CACHE_REDIS_NAMESPACE, "assembly",
+                        ZeroProductionRuntimeConfigKeys.ADAPTER_CACHE_REDIS_CACHE_NAME, "contract")))
+                .redisCacheValueCodec(StringObjectCacheValueCodec.INSTANCE)
+                .build();
+
+        assertTrue(runtime.requireAll(ProductionRuntimeCapabilities.DATA_SERVICES).stream()
+                .anyMatch(RedisDataAdapter.class::isInstance));
+        assertInstanceOf(
+                RedisDistributedCacheService.class,
+                runtime.require(ProductionRuntimeCapabilities.CACHE_SERVICE));
+        assertEquals(baselineResourceCount + 1, runtime.report().buildResourceCount());
+        assertEquals(baselineResourceCount + 1, runtime.report().pendingResourceCloseCount());
+        runtime.close();
+        assertEquals(0, runtime.report().pendingResourceCloseCount());
+    }
+
+    /** 验证共享 Redis client 创建失败仍按 data 优先 owner 安全归因。 */
+    @Test
+    void invalidSharedRedisUriShouldRemainSafeDataClientCreationFailure() {
+        ProductionAdapterException failure = assertThrows(
+                ProductionAdapterException.class,
+                () -> isolatedBuilder(new MapZeroConfig(Map.of(
+                                ZeroProductionRuntimeConfigKeys.ADAPTER_DATA_REDIS_ENABLED, "true",
+                                ZeroProductionRuntimeConfigKeys.ADAPTER_CACHE_REDIS_ENABLED, "true",
+                                RedisDriverSettings.PROPERTY_REDIS_URI, SECRET,
+                                ZeroProductionRuntimeConfigKeys.ADAPTER_CACHE_REDIS_NAMESPACE, "assembly",
+                                ZeroProductionRuntimeConfigKeys.ADAPTER_CACHE_REDIS_CACHE_NAME, "contract")))
+                        .redisCacheValueCodec(StringObjectCacheValueCodec.INSTANCE)
+                        .build());
+
+        assertEquals(ZeroProductionRuntimeBuilder.ADAPTER_REDIS_DATA, failure.adapterName());
+        assertEquals(ProductionAdapterFailurePhase.CLIENT_CREATION, failure.failurePhase());
+        assertSame(ProductionAdapterErrorCode.CLIENT_CREATION_FAILED, failure.errorCode());
+        assertEquals(ProductionAdapterErrorCode.CLIENT_CREATION_FAILED.message(), failure.message());
+        assertNull(failure.getCause());
+        assertFalse(stackTrace(failure).contains(SECRET), stackTrace(failure));
+    }
+
+    private void assertRedisAssembly(final ZeroProductionRuntime runtime) {
+        var plans = runtime.plan().components();
+        var resourcePlan = plans.stream()
+                .filter(component -> ProductionRedisResourceProvider.ID.equals(component.componentId()))
+                .findFirst()
+                .orElseThrow();
+        var dataPlan = plans.stream()
+                .filter(component -> ProductionRedisDataProvider.ID.equals(component.componentId()))
+                .findFirst()
+                .orElseThrow();
+        var cachePlan = plans.stream()
+                .filter(component -> ProductionRedisCacheProvider.ID.equals(component.componentId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(ComponentKind.FOUNDATION, resourcePlan.kind());
+        assertTrue(resourcePlan.provides().contains(ProductionRedisRuntimeCapabilities.RESOURCE));
+        assertEquals(ComponentKind.EXTERNAL, dataPlan.kind());
+        assertTrue(dataPlan.requires().contains(ProductionRedisRuntimeCapabilities.RESOURCE));
+        assertTrue(dataPlan.provides().contains(ProductionRuntimeCapabilities.DATA_SERVICES));
+        assertEquals(ComponentKind.EXTERNAL, cachePlan.kind());
+        assertTrue(cachePlan.requires().contains(ProductionRedisRuntimeCapabilities.RESOURCE));
+        assertTrue(cachePlan.provides().contains(ProductionRuntimeCapabilities.CACHE_SERVICE));
+        assertTrue(cachePlan.startAfter().contains(ProductionRedisDataProvider.ID));
+
+        assertConfigMetadata(runtime, ProductionRedisResourceProvider.ID, 1, 1);
+        assertConfigMetadata(runtime, ProductionRedisDataProvider.ID, 0, 0);
+        assertConfigMetadata(runtime, ProductionRedisCacheProvider.ID, 2, 2);
+        Set<Class<?>> dataServiceTypes = runtime.requireAll(ProductionRuntimeCapabilities.DATA_SERVICES)
+                .stream()
+                .map(Object::getClass)
+                .collect(Collectors.toUnmodifiableSet());
+        assertEquals(
+                Set.of(MongoDataAdapter.class, PostgresqlDataAdapter.class, RedisDataAdapter.class),
+                dataServiceTypes);
+        assertInstanceOf(
+                RedisDistributedCacheService.class,
+                runtime.require(ProductionRuntimeCapabilities.CACHE_SERVICE));
+        assertEquals(3, runtime.report().buildResourceCount());
+        assertStartupHealthNotRun(runtime, ProductionRedisDataProvider.ID);
+        assertStartupHealthNotRun(runtime, ProductionRedisCacheProvider.ID);
+    }
+
+    private void assertConfigMetadata(
+            final ZeroProductionRuntime runtime,
+            final group.zn.zero.runtime.api.ComponentId owner,
+            final int expectedCount,
+            final long expectedSensitiveCount) {
+        var metadata = runtime.plan().config().stream()
+                .filter(value -> owner.equals(value.owner()))
+                .toList();
+        assertEquals(expectedCount, metadata.size());
+        assertEquals(expectedSensitiveCount, metadata.stream().filter(value -> value.sensitive()).count());
+    }
+
+    private void assertStartupHealthNotRun(
+            final ZeroProductionRuntime runtime,
+            final group.zn.zero.runtime.api.ComponentId componentId) {
+        var status = runtime.report().components().stream()
+                .filter(component -> componentId.equals(component.componentId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(RuntimePhaseOutcome.NOT_RUN, status.startupHealth());
     }
 
     /**

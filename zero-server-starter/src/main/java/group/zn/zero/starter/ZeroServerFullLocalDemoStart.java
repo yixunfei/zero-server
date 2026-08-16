@@ -26,6 +26,7 @@ import group.zn.zero.rpc.RpcMode;
 import group.zn.zero.rpc.RpcRequest;
 import group.zn.zero.rpc.RpcResponse;
 import group.zn.zero.rpc.spi.RpcHandler;
+import group.zn.zero.runtime.api.GameRuntime;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.net.InetSocketAddress;
@@ -80,22 +81,22 @@ public final class ZeroServerFullLocalDemoStart {
      */
     public static DemoResult runDemo() throws Exception {
         InMemoryLogSink logSink = new InMemoryLogSink();
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localDefault(
+        GameRuntime runtime = LocalRuntime.create(
                 new MapZeroConfig(Map.of(
                         ZeroRuntimeConfigKeys.ZERO_MODE, "demo",
                         ZeroRuntimeConfigKeys.ZERO_NAME, "zeroServerFullLocalDemo")),
                 logSink,
                 ZeroRuntimeExecutors.singleThreaded("zero-starter-demo-logic"));
-        ZeroServerApplication application = new ZeroServerApplication(components);
+        ZeroServerApplication application = new ZeroServerApplication(runtime);
         ProtocolFrameCodec frameCodec = new ZeroBinaryFrameCodec();
         AtomicInteger eventCount = new AtomicInteger();
         AtomicInteger actorCount = new AtomicInteger();
         AtomicReference<String> handlerThreadName = new AtomicReference<>();
 
         application.start();
-        NettyTcpServer server = newDemoServer(components, frameCodec, eventCount, actorCount, handlerThreadName);
+        NettyTcpServer server = newDemoServer(runtime, frameCodec, eventCount, actorCount, handlerThreadName);
         try {
-            registerDemoComponents(components, eventCount, actorCount);
+            registerDemoComponents(runtime, eventCount, actorCount);
             server.start();
             ProtocolFrame response = exchange(server.boundPort(), frameCodec, new ProtocolFrame(
                     DEMO_PROTOCOL.id(),
@@ -103,13 +104,13 @@ public final class ZeroServerFullLocalDemoStart {
                     0,
                     null,
                     "ping".getBytes(StandardCharsets.UTF_8)));
-            components.monitorRuntime().collectOnce();
+            runtime.require(LocalRuntimeCapabilities.MONITOR_RUNTIME).collectOnce();
             return new DemoResult(
                     new String(response.payload(), StandardCharsets.UTF_8),
                     eventCount.get(),
                     actorCount.get(),
                     logSink.records().size(),
-                    components.persistenceManager().running(),
+                    runtime.require(LocalRuntimeCapabilities.PERSISTENCE_MANAGER).running(),
                     application.running(),
                     handlerThreadName.get());
         } finally {
@@ -119,43 +120,46 @@ public final class ZeroServerFullLocalDemoStart {
     }
 
     private static void registerDemoComponents(
-            final ZeroRuntimeComponents components,
+            final GameRuntime runtime,
             final AtomicInteger eventCount,
             final AtomicInteger actorCount) {
-        components.protocolRegistry().register(DEMO_PROTOCOL);
-        components.actorScheduler().register(DemoActorPayload.class, ActorHandler.sync((context, message) -> {
+        runtime.require(LocalRuntimeCapabilities.PROTOCOL_REGISTRY).register(DEMO_PROTOCOL);
+        runtime.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER).register(
+                DemoActorPayload.class, ActorHandler.sync((context, message) -> {
             actorCount.incrementAndGet();
         }));
-        components.eventBus().register(EventType.CLIENT_PROTOCOL, event -> {
+        runtime.require(LocalRuntimeCapabilities.EVENT_BUS).register(EventType.CLIENT_PROTOCOL, event -> {
             eventCount.incrementAndGet();
-            return components.actorScheduler().dispatch(new ActorMessage(
+            return runtime.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER).dispatch(new ActorMessage(
                     "demo-actor-" + event.eventId(),
                     LaneKey.player("demo-player"),
                     event.traceId(),
                     new DemoActorPayload(event.eventId())));
         }, 0);
-        components.rpcHandlerRegistry().register("starter-demo", "echo", RpcHandler.sync(request -> new RpcResponse(
+        runtime.require(LocalRuntimeCapabilities.RPC_HANDLER_REGISTRY).register(
+                "starter-demo", "echo", RpcHandler.sync(request -> new RpcResponse(
                 request.correlationId(),
                 request.traceId(),
                 SystemErrorCode.OK,
                 request.payload())));
-        components.cacheService().put("demo-key", "demo-value").toCompletableFuture().join();
-        components.persistenceManager().flushNow().toCompletableFuture().join();
+        runtime.require(LocalRuntimeCapabilities.CACHE_SERVICE)
+                .put("demo-key", "demo-value").toCompletableFuture().join();
+        runtime.require(LocalRuntimeCapabilities.PERSISTENCE_MANAGER).flushNow().toCompletableFuture().join();
     }
 
     private static NettyTcpServer newDemoServer(
-            final ZeroRuntimeComponents components,
+            final GameRuntime runtime,
             final ProtocolFrameCodec frameCodec,
             final AtomicInteger eventCount,
             final AtomicInteger actorCount,
             final AtomicReference<String> handlerThreadName) {
         ServerFrameHandler handler = (connection, frame) -> {
             handlerThreadName.set(Thread.currentThread().getName());
-            components.eventBus().publish(new BasicZeroEvent(
+            runtime.require(LocalRuntimeCapabilities.EVENT_BUS).publish(new BasicZeroEvent(
                     "demo-event-" + frame.protocolId(),
                     EventType.CLIENT_PROTOCOL,
                     "trace-demo-local")).toCompletableFuture().join();
-            RpcResponse rpcResponse = components.rpcTransport().request(new RpcRequest(
+            RpcResponse rpcResponse = runtime.require(LocalRuntimeCapabilities.RPC_TRANSPORT).request(new RpcRequest(
                     "demo-correlation",
                     "demo-reply",
                     "starter-demo",
@@ -164,10 +168,11 @@ public final class ZeroServerFullLocalDemoStart {
                     Instant.now().plusSeconds(3),
                     RpcMode.REQUEST_RESPONSE,
                     frame.payload())).toCompletableFuture().join();
-            Object cacheValue = components.cacheService().get("demo-key").toCompletableFuture()
+            Object cacheValue = runtime.require(LocalRuntimeCapabilities.CACHE_SERVICE)
+                    .get("demo-key").toCompletableFuture()
                     .join()
                     .orElse("missing");
-            components.logAppender().append(ZeroLogRecord.create(
+            runtime.require(LocalRuntimeCapabilities.LOG_APPENDER).append(ZeroLogRecord.create(
                     Instant.now(),
                     LogLevel.INFO,
                     LogType.RUNTIME,
@@ -194,7 +199,7 @@ public final class ZeroServerFullLocalDemoStart {
                 handler,
                 new group.zn.zero.net.ConnectionListener() {
                 },
-                components.executors().logicExecutor());
+                runtime.require(LocalRuntimeCapabilities.EXECUTORS).logicExecutor());
     }
 
     private static ProtocolFrame exchange(

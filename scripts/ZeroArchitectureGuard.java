@@ -39,6 +39,7 @@ public final class ZeroArchitectureGuard {
             "zero-parent",
             "zero-bom",
             "zero-core",
+            "zero-runtime",
             "zero-event",
             "zero-protocol",
             "zero-codegen",
@@ -99,8 +100,10 @@ public final class ZeroArchitectureGuard {
 
     /** 允许直接持有 terminal LogSink 的顶层装配源码。 */
     private static final Set<String> TERMINAL_LOG_SINK_ASSEMBLY_FILES = Set.of(
-            "zero-server-starter/src/main/java/group/zn/zero/starter/ZeroRuntimeBuilder.java",
-            "zero-server-starter/src/main/java/group/zn/zero/starter/ZeroRuntimeFactory.java",
+            "zero-server-starter/src/main/java/group/zn/zero/starter/LocalRuntime.java",
+            "zero-server-starter/src/main/java/group/zn/zero/starter/LocalRuntimeBuilder.java",
+            "zero-server-starter/src/main/java/group/zn/zero/starter/LocalRuntimeCapabilities.java",
+            "zero-server-starter/src/main/java/group/zn/zero/starter/LocalRuntimeProviders.java",
             "zero-server-starter/src/main/java/group/zn/zero/starter/ZeroServerApplication.java",
             "zero-server-starter-production/src/main/java/group/zn/zero/starter/production/"
                     + "ZeroProductionRuntimeBuilder.java",
@@ -133,6 +136,7 @@ public final class ZeroArchitectureGuard {
      */
     private static final List<String> MODULE_MAP_ANCHORS = List.of(
             "zero-core",
+            "zero-runtime",
             "zero-server-starter",
             "zero-server-starter-production",
             "zero-rpc",
@@ -175,6 +179,7 @@ public final class ZeroArchitectureGuard {
         checkRootModules(report, rootModules);
         checkModulePoms(report);
         checkZeroCoreBoundary(report);
+        checkRuntimeBoundary(report);
         checkFoundationBoundaries(report);
         checkRpcBoundary(report);
         checkActorBoundary(report);
@@ -264,6 +269,21 @@ public final class ZeroArchitectureGuard {
         } else {
             report.fail("zero-core-boundary", "zero-core must stay dependency-free, found: "
                     + dependencyNames(dependencies));
+        }
+    }
+
+    private static void checkRuntimeBoundary(final GuardReport report) throws IOException {
+        List<Dependency> nonTestDependencies = dependenciesOf(report, "zero-runtime").stream()
+                .filter(dependency -> !dependency.isTestOnly())
+                .toList();
+        boolean onlyDependsOnCore = nonTestDependencies.size() == 1
+                && "group.zn.zero".equals(nonTestDependencies.getFirst().groupId())
+                && "zero-core".equals(nonTestDependencies.getFirst().artifactId());
+        if (onlyDependsOnCore) {
+            report.pass("zero-runtime-boundary", "zero-runtime directly depends only on zero-core at runtime.");
+        } else {
+            report.fail("zero-runtime-boundary", "zero-runtime must have exactly one non-test direct dependency, "
+                    + "group.zn.zero:zero-core, found: " + dependencyNames(nonTestDependencies));
         }
     }
 
@@ -834,6 +854,7 @@ public final class ZeroArchitectureGuard {
         System.out.println("  root reactor module list");
         System.out.println("  expected module pom.xml files");
         System.out.println("  zero-core dependency-free boundary");
+        System.out.println("  zero-runtime single zero-core dependency boundary");
         System.out.println("  zero-event / zero-protocol / zero-actor foundational dependencies");
         System.out.println("  zero-rpc, zero-actor and zero-data forbidden dependency boundaries");
         System.out.println("  zero-server-starter local/default adapter boundary");

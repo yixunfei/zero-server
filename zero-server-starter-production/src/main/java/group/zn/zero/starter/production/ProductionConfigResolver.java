@@ -110,43 +110,89 @@ final class ProductionConfigResolver {
             final List<String> configKeys,
             final List<String> systemProperties,
             final List<String> environmentVariables) {
+        return read(
+                adapterName,
+                logicalKey,
+                sensitive,
+                configKeys,
+                systemProperties,
+                environmentVariables,
+                false);
+    }
+
+    /**
+     * 读取允许空白值遮蔽低优先级来源并回到 schema 默认值的可选配置。
+     *
+     * <p>该入口只用于保留已经存在的 Adapter 可选配置语义：首个已存在来源为空白时返回 missing，
+     * 不继续读取更低优先级来源。必填配置和严格可选配置仍必须使用 {@link #read}。</p>
+     *
+     * @param adapterName Adapter 稳定名称；不可为空白。
+     * @param logicalKey 逻辑键；不可为空白。
+     * @param sensitive 是否敏感。
+     * @param configKeys ZeroConfig 键候选；不可为空，可为空集合，保持顺序。
+     * @param systemProperties 系统属性候选；不可为空，可为空集合，保持顺序。
+     * @param environmentVariables 环境变量候选；不可为空，可为空集合，保持顺序。
+     * @return 已解析配置；不可为空；空白首选来源返回 missing。
+     */
+    ResolvedProductionSetting readDefaultable(
+            final String adapterName,
+            final String logicalKey,
+            final boolean sensitive,
+            final List<String> configKeys,
+            final List<String> systemProperties,
+            final List<String> environmentVariables) {
+        return read(
+                adapterName,
+                logicalKey,
+                sensitive,
+                configKeys,
+                systemProperties,
+                environmentVariables,
+                true);
+    }
+
+    private ResolvedProductionSetting read(
+            final String adapterName,
+            final String logicalKey,
+            final boolean sensitive,
+            final List<String> configKeys,
+            final List<String> systemProperties,
+            final List<String> environmentVariables,
+            final boolean blankMeansMissing) {
         String currentAdapterName = requireText(adapterName, "adapterName");
         String currentLogicalKey = requireText(logicalKey, "logicalKey");
-        for (String key : checkedKeys(configKeys, "configKeys")) {
-            Optional<String> value = config.get(key);
-            if (value.isPresent()) {
-                return resolvedOrInvalid(
-                        currentAdapterName,
-                        currentLogicalKey,
-                        value.get(),
-                        "ZeroConfig",
-                        key,
-                        sensitive);
-            }
+        ResolvedProductionSetting configured = firstCandidate(
+                currentAdapterName,
+                currentLogicalKey,
+                sensitive,
+                checkedKeys(configKeys, "configKeys"),
+                key -> config.get(key).orElse(null),
+                "ZeroConfig",
+                blankMeansMissing);
+        if (configured != null) {
+            return configured;
         }
-        for (String key : checkedKeys(systemProperties, "systemProperties")) {
-            String value = systemPropertyLookup.apply(key);
-            if (value != null) {
-                return resolvedOrInvalid(
-                        currentAdapterName,
-                        currentLogicalKey,
-                        value,
-                        "systemProperty",
-                        key,
-                        sensitive);
-            }
+        ResolvedProductionSetting system = firstCandidate(
+                currentAdapterName,
+                currentLogicalKey,
+                sensitive,
+                checkedKeys(systemProperties, "systemProperties"),
+                systemPropertyLookup,
+                "systemProperty",
+                blankMeansMissing);
+        if (system != null) {
+            return system;
         }
-        for (String key : checkedKeys(environmentVariables, "environmentVariables")) {
-            String value = environmentLookup.apply(key);
-            if (value != null) {
-                return resolvedOrInvalid(
-                        currentAdapterName,
-                        currentLogicalKey,
-                        value,
-                        "environment",
-                        key,
-                        sensitive);
-            }
+        ResolvedProductionSetting environment = firstCandidate(
+                currentAdapterName,
+                currentLogicalKey,
+                sensitive,
+                checkedKeys(environmentVariables, "environmentVariables"),
+                environmentLookup,
+                "environment",
+                blankMeansMissing);
+        if (environment != null) {
+            return environment;
         }
         return new ResolvedProductionSetting(currentLogicalKey, Optional.empty(), Optional.empty());
     }
@@ -235,23 +281,6 @@ final class ProductionConfigResolver {
     }
 
     /**
-     * 按单个配置键读取兼容字符串值。
-     *
-     * <p>该方法保留 network 既有空白值回退行为。Production Adapter 必填项应使用 {@link #read} 和
-     * {@link #required(String, ResolvedProductionSetting)}。
-     *
-     * @param key 配置键；不可为空。
-     * @param defaultValue 默认值；可为空。
-     * @return 非空白配置值或默认值；可为空；线程安全性取决于配置来源。
-     * @throws NullPointerException 配置键为空时抛出。
-     */
-    String getOrDefault(final String key, final String defaultValue) {
-        return config.get(Objects.requireNonNull(key, "key"))
-                .filter(ProductionConfigResolver::hasText)
-                .orElse(defaultValue);
-    }
-
-    /**
      * 返回 Adapter 必填配置值。
      *
      * @param adapterName Adapter 稳定名称；不可为空白。
@@ -269,27 +298,6 @@ final class ProductionConfigResolver {
                 ProductionAdapterFailurePhase.CONFIG_VALIDATION,
                 ProductionAdapterErrorCode.CONFIG_MISSING,
                 "missing production adapter config key: " + currentSetting.logicalKey()));
-    }
-
-    /**
-     * 按单个配置键读取兼容正整数值。
-     *
-     * <p>该方法保留 network 既有异常类型与解析行为。Production Adapter 数值配置必须使用
-     * {@link #strictPositiveInt(String, String, int)}。
-     *
-     * @param key 配置键；不可为空。
-     * @param defaultValue 默认值；必须大于 0。
-     * @return 正整数配置值；线程安全性取决于配置来源。
-     * @throws NumberFormatException 配置不是整数时抛出。
-     * @throws IllegalArgumentException 配置不是正整数时抛出。
-     */
-    int positiveInt(final String key, final int defaultValue) {
-        String value = getOrDefault(key, Integer.toString(defaultValue));
-        int parsed = Integer.parseInt(value);
-        if (parsed <= 0) {
-            throw new IllegalArgumentException(key + " must be positive");
-        }
-        return parsed;
     }
 
     /**
@@ -326,17 +334,28 @@ final class ProductionConfigResolver {
         }
     }
 
-    private ResolvedProductionSetting resolvedOrInvalid(
+    private ResolvedProductionSetting firstCandidate(
             final String adapterName,
             final String logicalKey,
-            final String value,
+            final boolean sensitive,
+            final List<String> keys,
+            final Function<String, String> lookup,
             final String sourceType,
-            final String sourceKey,
-            final boolean sensitive) {
-        if (value.isBlank()) {
-            throw invalidValue(adapterName, logicalKey);
+            final boolean blankMeansMissing) {
+        for (String key : keys) {
+            String value = lookup.apply(key);
+            if (value == null) {
+                continue;
+            }
+            if (value.isBlank()) {
+                if (blankMeansMissing) {
+                    return new ResolvedProductionSetting(logicalKey, Optional.empty(), Optional.empty());
+                }
+                throw invalidValue(adapterName, logicalKey);
+            }
+            return resolved(logicalKey, value, sourceType, key, sensitive);
         }
-        return resolved(logicalKey, value, sourceType, sourceKey, sensitive);
+        return null;
     }
 
     private ResolvedProductionSetting resolved(

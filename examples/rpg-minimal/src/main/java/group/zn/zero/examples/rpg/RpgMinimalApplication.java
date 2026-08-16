@@ -24,11 +24,11 @@ import group.zn.zero.scene.SceneLeaveResult;
 import group.zn.zero.scene.SceneMoveRequest;
 import group.zn.zero.scene.SceneMoveResult;
 import group.zn.zero.scene.ScenePosition;
-import group.zn.zero.starter.ZeroRuntimeAssemblyReport;
-import group.zn.zero.starter.ZeroRuntimeComponents;
+import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.starter.LocalRuntime;
+import group.zn.zero.starter.LocalRuntimeCapabilities;
 import group.zn.zero.starter.ZeroRuntimeConfigKeys;
 import group.zn.zero.starter.ZeroRuntimeExecutors;
-import group.zn.zero.starter.ZeroRuntimeFactory;
 import group.zn.zero.starter.ZeroServerApplication;
 import java.time.Instant;
 import java.util.List;
@@ -103,33 +103,34 @@ public final class RpgMinimalApplication {
     public static DemoResult runDemo() {
         InMemoryLogSink terminalLogSink = new InMemoryLogSink();
         MonitorRuntime monitorRuntime = MonitorRuntime.createDefault();
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localBuilder(
+        GameRuntime components = LocalRuntime.builder(
                 new MapZeroConfig(Map.of(
                         ZeroRuntimeConfigKeys.ZERO_MODE, ZeroRuntimeConfigKeys.MODE_LOCAL,
                         ZeroRuntimeConfigKeys.ZERO_NAME, MODULE)),
                 terminalLogSink,
                 ZeroRuntimeExecutors.localPrototype("zero-example-rpg", 2))
-                .monitorRuntime(monitorRuntime)
+                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime)
                 .build();
         ZeroServerApplication application = new ZeroServerApplication(components);
 
         application.start();
         try (LocalPlayerService playerService = new LocalPlayerService(
-                components.actorScheduler(),
+                components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER),
                 request -> 1001L);
-                LocalSceneService sceneService = new LocalSceneService(components.actorScheduler())) {
+                LocalSceneService sceneService = new LocalSceneService(
+                        components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER))) {
             registerMetrics(monitorRuntime);
             PlayerLoginResult login = playerService.login(new PlayerLoginRequest(
                     "guest-1001",
                     "local-token",
                     "trace-rpg-login")).toCompletableFuture().join();
-            record(components.logAppender(), monitorRuntime,
+            record(components.require(LocalRuntimeCapabilities.LOG_APPENDER), monitorRuntime,
                     "trace-rpg-login", "player login completed", LOGIN_METRIC, "login");
 
             PlayerProfile profile = playerService.loadPlayer(new PlayerLoadRequest(
                     login.uid(),
                     "trace-rpg-load")).toCompletableFuture().join();
-            record(components.logAppender(), monitorRuntime,
+            record(components.require(LocalRuntimeCapabilities.LOG_APPENDER), monitorRuntime,
                     "trace-rpg-load", "player profile loaded", LOAD_PLAYER_METRIC, "load");
 
             sceneService.enterScene(new SceneEnterRequest(
@@ -142,7 +143,7 @@ public final class RpgMinimalApplication {
                     "scene-1",
                     new ScenePosition(7, 11),
                     "trace-rpg-move")).toCompletableFuture().join();
-            record(components.logAppender(), monitorRuntime,
+            record(components.require(LocalRuntimeCapabilities.LOG_APPENDER), monitorRuntime,
                     "trace-rpg-move", "scene move completed", MOVE_METRIC, "move");
 
             Optional<PlayerProfile> gmPlayer = playerService.queryPlayer(
@@ -151,7 +152,7 @@ public final class RpgMinimalApplication {
             List<?> sceneBeforeLeave = sceneService.listEntities(
                     "scene-1",
                     "trace-rpg-gm-scene-before").toCompletableFuture().join();
-            record(components.logAppender(), monitorRuntime,
+            record(components.require(LocalRuntimeCapabilities.LOG_APPENDER), monitorRuntime,
                     "trace-rpg-gm", "gm query completed", GM_QUERY_METRIC, "gm-query");
 
             SceneLeaveResult leave = sceneService.leaveScene(new SceneLeaveRequest(
@@ -161,13 +162,13 @@ public final class RpgMinimalApplication {
             List<?> sceneAfterLeave = sceneService.listEntities(
                     "scene-1",
                     "trace-rpg-gm-scene-after").toCompletableFuture().join();
-            record(components.logAppender(), monitorRuntime,
+            record(components.require(LocalRuntimeCapabilities.LOG_APPENDER), monitorRuntime,
                     "trace-rpg-leave", "scene leave completed", LEAVE_SCENE_METRIC, "leave");
 
-            ZeroRuntimeAssemblyReport report = components.assemblyReport();
+            Map<String, String> runtimeConfig = components.require(LocalRuntimeCapabilities.CONFIG).asMap();
             return new DemoResult(
-                    report.mode(),
-                    report.name(),
+                    runtimeConfig.get(ZeroRuntimeConfigKeys.ZERO_MODE),
+                    runtimeConfig.get(ZeroRuntimeConfigKeys.ZERO_NAME),
                     login.uid(),
                     gmPlayer.orElse(profile).name(),
                     move.currentState().position(),

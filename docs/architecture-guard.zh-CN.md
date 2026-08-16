@@ -21,7 +21,7 @@ java scripts/ZeroArchitectureGuard.java --help
 正常摘要类似：
 
 ```text
-zero-architecture-guard=ok|modules=27|rules=16|violations=0|warnings=0
+zero-architecture-guard=ok|modules=28|rules=17|violations=0|warnings=0
 ```
 
 其中：
@@ -38,16 +38,17 @@ zero-architecture-guard=ok|modules=27|rules=16|violations=0|warnings=0
 脚本会检查：
 
 - 当前目录是否包含 `pom.xml`、`CONTRIBUTING.md` 和 `docs/module-map.md`。
-- 根 `pom.xml` 是否声明当前 27 个预期模块。
+- 根 `pom.xml` 是否声明当前 28 个预期模块。
 - 每个预期模块是否存在 `pom.xml`。
 
-当前守卫关注的模块包括 `zero-core`、`zero-event`、`zero-protocol`、`zero-actor`、`zero-game`、`zero-player`、`zero-scene`、`zero-net`、`zero-rpc`、`zero-data`、`zero-cache`、`zero-log`、`zero-monitor`、`zero-gm`、`zero-hot-update`、`zero-server-starter` 和 `zero-server-starter-production` 等。
+当前守卫关注的模块包括 `zero-core`、`zero-runtime`、`zero-event`、`zero-protocol`、`zero-actor`、`zero-game`、`zero-player`、`zero-scene`、`zero-net`、`zero-rpc`、`zero-data`、`zero-cache`、`zero-log`、`zero-monitor`、`zero-gm`、`zero-hot-update`、`zero-server-starter` 和 `zero-server-starter-production` 等。
 
 ### 2.2 核心与基础模块边界
 
 脚本会确认：
 
 - `zero-core` 不声明直接 dependencies。
+- `zero-runtime` 的非测试直接依赖恰好只有 `group.zn.zero:zero-core`。
 - `zero-event`、`zero-protocol`、`zero-actor` 当前只依赖 `zero-core`。
 - `zero-actor` 不直接绑定 RPC、Kafka、Nacos、Redis、MongoDB、PostgreSQL 或 Netty。
 
@@ -81,6 +82,7 @@ O1 后新增的五项守卫会确认：
 脚本会检查 `docs/module-map.md` 是否包含关键模块和 Adapter 锚点，例如：
 
 - `zero-core`
+- `zero-runtime`
 - `zero-server-starter`
 - `zero-server-starter-production`
 - `zero-rpc`

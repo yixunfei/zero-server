@@ -95,9 +95,10 @@
 local/prototype 路径保持原有语义：未传入 `ProductionNetworkLifecycle` 时，TCP 连接建立后立即触发 `ConnectionListener.onOpen`，首个 `ProtocolFrame` 直接投递业务 executor。生产路径必须同时满足以下条件：
 
 1. 配置 `zero.net.lifecycle.enabled=true`。
-2. 通过 `ZeroProductionNetworkFactory` 创建生命周期组合。
-3. `ZeroRuntimeComponents` 使用 starter 管理且不会内联的 remote IO 执行器。
-4. 调用带 `ProductionNetworkLifecycle` 参数的 `ServerFactory.tcp(...)` 或 `NettyTcpServer` 构造。
+2. 对 `ZeroProductionRuntimeBuilder` 显式调用 `networkPolicy(...)`；需要自定义限流时再调用 `networkRateLimiter(...)`。
+3. builder 必须使用 remote IO 不会内联的 `ZeroRuntimeExecutors`，否则在构建组件图前 fail-fast。
+4. 从已构建 runtime 调用 `require(ProductionRuntimeCapabilities.NETWORK_LIFECYCLE)` 取得生命周期组合。
+5. 调用带 `ProductionNetworkLifecycle` 参数的 `ServerFactory.tcp(...)` 或 `NettyTcpServer` 构造。
 
 显式启用后的连接流程：
 

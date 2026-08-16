@@ -10,7 +10,7 @@ PAF1 只解决显式选择 production runtime 后的严格选择、缺配置 fai
 
 ## 1. 覆盖范围与入口
 
-PAF1 覆盖六个 Adapter 槽位：
+PAF1 覆盖六个外部 Adapter 槽位；production network 使用同一显式组件图，但不连接外部中间件：
 
 | 稳定 Adapter 名称 | 能力 | 实现模块 |
 | --- | --- | --- |
@@ -20,6 +20,7 @@ PAF1 覆盖六个 Adapter 槽位：
 | `redis-cache` | Redis L2 cache | `zero-data-redis` |
 | `postgresql-data` | PostgreSQL data | `zero-data-postgresql` |
 | `nacos-discovery` | Nacos discovery 与 RPC service resolver | `zero-discovery-nacos` |
+| `network-lifecycle` | 连接准入、鉴权、心跳、重连和有界限流组合 | `zero-net` |
 
 显式运行时入口位于 `zero-server-starter-production`：
 
@@ -27,9 +28,12 @@ PAF1 覆盖六个 Adapter 槽位：
 - `ZeroProductionRuntimeFactory.externalTestBuilder(...)` 只接受 `external-test` profile。
 - `ZeroProductionRuntimeBuilder.diagnose()` 只解析配置并生成安全报告，不创建真实 Adapter。
 - `ZeroProductionRuntimeBuilder.build()` 校验配置、创建构建期资源并返回未启动的 `ZeroProductionRuntime`。
-- `ZeroRuntimeFactory.localDefault(...)` 与 `localBuilder(...)` 不扫描 classpath，也不会因为引入真实 Adapter 模块而连接 Kafka、MongoDB、Redis、PostgreSQL 或 Nacos。
+- `ZeroProductionRuntime` 直接实现 `GameRuntime`；中立图使用 `report()`，Adapter 诊断使用 `productionReport()`。
+- `LocalRuntime.create(...)` 与 `LocalRuntime.builder(...)` 不扫描 classpath，也不会因为引入真实 Adapter 模块而连接 Kafka、MongoDB、Redis、PostgreSQL 或 Nacos。
 
 全部 Adapter disabled 且 discovery 使用默认 `local` 是合法组合。显式启用任一 Adapter 后，缺配置、非法配置、客户端创建、启动、注册、启动健康或启动预算失败都会阻止启动；不允许静默切换到本地实现，也不进入 degraded 状态。
+
+1D 已将 Kafka RPC、MongoDB data、Redis data/cache、PostgreSQL、Nacos discovery/resolver 与 production network 迁移为正式 runtime provider。外部 client 在取得后立即进入中立 build resource ledger；Redis data/cache 共享一个包内资源 handle，且不公开 `RedisClient`。外部 Adapter 各自执行 mandatory startup health；network provider 只组合本地策略、遥测和受管执行器，不声明虚假的外部健康探针。业务统一通过中立 typed capability 访问，不再从 runtime 读取驱动对象。
 
 ## 2. 严格选择器
 
@@ -66,6 +70,8 @@ zero.discovery.mode=local|nacos
 - 未知值、大小写变体、空字符串、纯空白和带前后空格的值全部立即 fail-fast。
 
 PAF1 不维护旧 selector 兼容层。production network 的 `zero.net.lifecycle.enabled` 保留其既有解析边界，不属于本切片的 Adapter selector 破坏性收敛范围。
+
+Network enabled 继续使用 `Boolean.parseBoolean` 语义；只有结果为 true 且 builder 显式提供 `networkPolicy(...)` 时才选择 provider。默认 builder 的 direct remote IO executor 会被拒绝，调用方必须提供不会内联的受管执行器。自定义 `networkRateLimiter(...)` 时，默认三项限流参数保持不消费，延续旧入口语义。
 
 ## 3. Production 必填隔离配置
 
@@ -146,7 +152,9 @@ PAF1 只实现一次性 startup health，不实现周期健康、readiness/liven
 | `zero.adapter.startup-budget-millis` | `60000` | 全部 Production Adapter 串行启动的累计正数预算 |
 | `zero.adapter.startup-timeout-millis` | `10000` | 单 Adapter 最大正数 timeout，且必须小于或等于累计预算 |
 
-`ZeroProductionRuntime` 第一次 start 时固定累计预算起点，重复调用不会重置。每个真实 Adapter start 和每个 startup health probe 进入前都会读取共享剩余预算，得到的本阶段预算不超过单 Adapter 上限。预算耗尽使用 `STARTUP_BUDGET / STARTUP_BUDGET_EXHAUSTED`，不会调用后续驱动阶段。
+`ZeroProductionRuntime` 第一次 start 时固定 Production 累计启动预算起点，重复调用不会重置。中立 runtime 也在第一次 `GameRuntime.start()` 时创建独立 startup deadline；它与 planning/config/create 使用的 assembly deadline 不共享计时起点。资源创建耗时不会计入 `zero.adapter.startup-budget-millis`，该配置只约束串行 lifecycle start 与 startup health。
+
+每个真实 Adapter start 和每个 startup health probe 进入前都会读取共享剩余启动预算，得到的本阶段预算不超过单 Adapter 上限。预算耗尽使用 `STARTUP_BUDGET / STARTUP_BUDGET_EXHAUSTED`，不会调用后续驱动阶段。assembly/startup 两个阶段仍复用既有稳定超时 ErrorCode，并通过失败 phase 区分，不改变现有 Production Adapter ErrorCode 集合。
 
 驱动边界按当前能力设置原生 timeout：
 
@@ -241,7 +249,7 @@ report 保存的是实际 `ErrorCode` 对象，不是临时字符串或伪错误
 
 ### 9.1 Build 事务
 
-`ProductionResourceScope` 在 client 创建成功后立即登记资源，保持真实创建顺序。构建成功时 `commit()` 把不可变创建顺序快照交给 runtime；构建中途失败时：
+每个 provider 在 client 创建成功后立即调用自身的中立 `ResourceRegistrar`。`RuntimeBuildTransaction` 把资源写入统一 `BuildResourceLedger`；构建中途失败时：
 
 1. 把原失败转换为安全 primary。
 2. 严格按创建顺序逆序关闭全部已登记资源。
@@ -250,13 +258,13 @@ report 保存的是实际 `ErrorCode` 对象，不是临时字符串或伪错误
 
 ### 9.2 Start 回滚
 
-`ZeroRuntimeComponents` 只记录真正成功完成 `start()` 的生命周期组件。某组件启动失败时：
+中立 `GameRuntime` 只记录真正成功完成 `start()` 的生命周期组件。某组件启动失败时：
 
 1. 失败组件和尚未尝试的组件不作为“已成功启动组件”重复 stop。
 2. 已成功组件按实际启动顺序严格逆序 stop。
 3. 每个 rollback 失败继续聚合到原启动异常的 suppressed。
 4. runtime 拥有的 executors 在组件回滚后关闭；执行器关闭失败同样作为 suppressed。
-5. `ZeroProductionRuntime` 再把整个图安全转换，并逆序关闭尚未释放的 build 资源，包括尚未进入 start 的 client。
+5. 同一个中立 runtime ledger 继续逆序关闭尚未释放的 build 资源，包括尚未进入 start 的 client；`ZeroProductionRuntime` 只负责安全归因，不维护第二份资源清单。
 
 ### 9.3 Stop / close
 
@@ -271,7 +279,7 @@ Kafka 构造、handler replay、timeout wheel、request/reply subscription 和 h
 `ZeroProductionRuntime` 是 single-use：
 
 - 第一次真实启动尝试会永久占用唯一启动机会；启动失败后，或成功运行后再 stop/close，都不能重新执行同一个对象的启动逻辑。
-- runtime 已处于 `RUNNING` 时，生命周期基类对重复 `start()` 直接幂等返回；这不构成第二次启动事务，也不会重置预算。
+- runtime 已处于 `RUNNING` 时再次调用 `start()` 也会明确拒绝，不会被通用生命周期幂等分支吞掉。
 - 在 start 前调用 `close()` 也会终止该对象，之后不得 start。
 - start 后 stop/close 的对象不得再次 start。
 - 重用以 `STARTUP / RUNTIME_REUSE_REJECTED` fail-fast。
@@ -304,15 +312,15 @@ Maven gate 约束为：
 | PAF1-02 | Nacos mode 缺失为 local，非法值 fail-fast | `ProductionConfigResolver.strictChoice` |
 | PAF1-03 | 缺配置只公开键名 | `ProductionConfigResolver.required`、`ProductionAdapterFailures` |
 | PAF1-04 | report/异常图/settings 文本通过 secret sentinel 反证 | 安全 report、exception factory 与各 Adapter settings |
-| PAF1-05 | build 中途失败逆序关闭已登记资源 | `ProductionResourceScope` |
-| PAF1-06 | runtime 启动失败关闭尚未 start 的 build 资源 | `ZeroProductionRuntime` |
-| PAF1-07 | 多个 rollback/close 失败全部安全聚合且继续关闭 | `ZeroRuntimeComponents`、`ZeroProductionRuntime` |
+| PAF1-05 | build 中途失败逆序关闭已登记资源 | `RuntimeBuildTransaction`、`BuildResourceLedger` |
+| PAF1-06 | runtime 启动失败关闭尚未 start 的 build 资源 | `GameRuntime` build resource ledger |
+| PAF1-07 | 多个 rollback/close 失败全部安全聚合且继续关闭 | `GameRuntime`；Production 门面只转换安全归因 |
 | PAF1-08 | Kafka 分阶段失败完整回滚 | `KafkaRpcAdapter`、`KafkaRpcLifecycleAdapter` |
 | PAF1-09 | Kafka 多 subscription 共享绝对关闭 deadline | `KafkaRpcCloseDeadline` 与 consumer 关闭路径 |
 | PAF1-10 | Nacos 主失败、shutdown suppressed 与 unsubscribe 重试 | `NacosDiscoveryAdapter` |
 | PAF1-11 | 驱动原生 timeout 受累计预算约束 | `ProductionStartupBudget` 与各 driver factory/health check |
 | PAF1-12 | Kafka producer/consumer/Admin 使用一致安全属性 | `kafkaClientProperties`、`KafkaClusterHealthCheck` |
-| PAF1-13 | local runtime 默认不连接外部组件 | `ZeroRuntimeFactory` 与独立 production starter |
+| PAF1-13 | local runtime 默认不连接外部组件 | `LocalRuntime` 与独立 production starter |
 | PAF1-14 | external tests 仅由显式 profile 启用 | `zero-parent` Failsafe profiles |
 
 上述映射用于描述应覆盖的行为，不替代持续集成结果。提交相关变更时应重新执行根 Reactor 默认测试和 quality profile；涉及真实 Kafka、MongoDB、Redis、PostgreSQL 或 Nacos 的行为，还应在隔离环境中显式运行 external-tests，并在 Pull Request 中记录组件版本、配置来源与结果。

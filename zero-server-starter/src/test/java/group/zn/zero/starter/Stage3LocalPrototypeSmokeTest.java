@@ -22,6 +22,7 @@ import group.zn.zero.monitor.MetricDefinition;
 import group.zn.zero.monitor.MetricSample;
 import group.zn.zero.monitor.MonitorRuntime;
 import group.zn.zero.protocol.buffer.ZeroWriter;
+import group.zn.zero.runtime.api.GameRuntime;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -54,7 +55,7 @@ import org.junit.jupiter.api.io.TempDir;
  * 阶段 3 本地原型开箱即用 smoke 测试。
  *
  * <p>本测试仅在 test scope 内验证协议 DSL 生成物、starter 本地装配、Actor lane、日志和指标
- * 可以形成最小业务闭环；正式业务模块接入由 `Stage3GeneratedBoFullLoopTest` 覆盖。
+ * 可以形成最小业务闭环；正式业务模块接入由 `Stage3GeneratedBoFullLoopIT` 覆盖。
  *
  * @author zn
  */
@@ -111,17 +112,17 @@ class Stage3LocalPrototypeSmokeTest {
             GeneratedRuntime generated = loadGeneratedRuntime(loader);
             InMemoryLogSink baseLogSink = new InMemoryLogSink();
             MonitorRuntime monitorRuntime = MonitorRuntime.createDefault();
-            ZeroRuntimeComponents components = ZeroRuntimeFactory.localBuilder(new MapZeroConfig(Map.of(
+            GameRuntime components = LocalRuntime.builder(new MapZeroConfig(Map.of(
                             ZeroRuntimeConfigKeys.ZERO_MODE, "stage3-smoke",
                             ZeroRuntimeConfigKeys.ZERO_NAME, "stage3-local-prototype")), baseLogSink)
-                    .monitorRuntime(monitorRuntime)
+                    .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime)
                     .build();
             ZeroServerApplication application = new ZeroServerApplication(components);
             Stage3PrototypeState state = new Stage3PrototypeState();
 
             try {
                 application.start();
-                registerMetrics(components.monitorRuntime());
+                registerMetrics(components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME));
                 registerActorHandlers(components, state);
                 Object dispatcher = registerGeneratedBos(generated, components, state);
 
@@ -169,10 +170,13 @@ class Stage3LocalPrototypeSmokeTest {
                 assertLog(baseLogSink, "trace-stage3-enter", "stage3 scene entered");
                 assertLog(baseLogSink, "trace-stage3-move", "stage3 scene moved");
                 assertLog(baseLogSink, "trace-stage3-gm", "stage3 gm query completed");
-                assertMetric(components.monitorRuntime(), LOGIN_METRIC, "login");
-                assertMetric(components.monitorRuntime(), LOAD_PLAYER_METRIC, "load-player");
-                assertMetric(components.monitorRuntime(), SCENE_MOVE_METRIC, "move");
-                assertMetric(components.monitorRuntime(), GM_QUERY_METRIC, "gm-query");
+                assertMetric(components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME), LOGIN_METRIC, "login");
+                assertMetric(components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME),
+                        LOAD_PLAYER_METRIC, "load-player");
+                assertMetric(components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME),
+                        SCENE_MOVE_METRIC, "move");
+                assertMetric(components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME),
+                        GM_QUERY_METRIC, "gm-query");
             } finally {
                 if (application.running()) {
                     application.stop();
@@ -305,8 +309,9 @@ class Stage3LocalPrototypeSmokeTest {
                 GM_QUERY_METRIC, "stage3 gm query count", "count", List.of("operation")));
     }
 
-    private void registerActorHandlers(final ZeroRuntimeComponents components, final Stage3PrototypeState state) {
-        components.actorScheduler().register(LoginCommand.class, ActorHandler.sync((context, message) -> {
+    private void registerActorHandlers(final GameRuntime components, final Stage3PrototypeState state) {
+        components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER)
+                .register(LoginCommand.class, ActorHandler.sync((context, message) -> {
             LoginCommand command = (LoginCommand) message.payload();
             assertEquals(LaneKey.session(command.accountId()), context.laneKey());
             state.rememberLane(context.laneKey());
@@ -314,7 +319,8 @@ class Stage3LocalPrototypeSmokeTest {
             appendLog(components, command.traceId(), "stage3 login completed", "login");
             recordMetric(components, LOGIN_METRIC, "login");
         }));
-        components.actorScheduler().register(LoadPlayerCommand.class, ActorHandler.sync((context, message) -> {
+        components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER)
+                .register(LoadPlayerCommand.class, ActorHandler.sync((context, message) -> {
             LoadPlayerCommand command = (LoadPlayerCommand) message.payload();
             assertEquals(LaneKey.player(Long.toString(command.uid())), context.laneKey());
             state.rememberLane(context.laneKey());
@@ -322,14 +328,16 @@ class Stage3LocalPrototypeSmokeTest {
             appendLog(components, command.traceId(), "stage3 player loaded", "load-player");
             recordMetric(components, LOAD_PLAYER_METRIC, "load-player");
         }));
-        components.actorScheduler().register(EnterSceneCommand.class, ActorHandler.sync((context, message) -> {
+        components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER)
+                .register(EnterSceneCommand.class, ActorHandler.sync((context, message) -> {
             EnterSceneCommand command = (EnterSceneCommand) message.payload();
             assertEquals(LaneKey.scene(command.sceneId()), context.laneKey());
             state.rememberLane(context.laneKey());
             state.enterScene(command.sceneId(), command.uid(), new Position(0, 0));
             appendLog(components, command.traceId(), "stage3 scene entered", "enter-scene");
         }));
-        components.actorScheduler().register(MoveCommand.class, ActorHandler.sync((context, message) -> {
+        components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER)
+                .register(MoveCommand.class, ActorHandler.sync((context, message) -> {
             MoveCommand command = (MoveCommand) message.payload();
             assertEquals(LaneKey.scene(command.sceneId()), context.laneKey());
             state.rememberLane(context.laneKey());
@@ -337,7 +345,8 @@ class Stage3LocalPrototypeSmokeTest {
             appendLog(components, command.traceId(), "stage3 scene moved", "move");
             recordMetric(components, SCENE_MOVE_METRIC, "move");
         }));
-        components.actorScheduler().register(GmQueryCommand.class, ActorHandler.sync((context, message) -> {
+        components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER)
+                .register(GmQueryCommand.class, ActorHandler.sync((context, message) -> {
             GmQueryCommand command = (GmQueryCommand) message.payload();
             assertEquals(LaneKey.player(Long.toString(command.uid())), context.laneKey());
             state.rememberLane(context.laneKey());
@@ -350,7 +359,7 @@ class Stage3LocalPrototypeSmokeTest {
 
     private Object registerGeneratedBos(
             final GeneratedRuntime generated,
-            final ZeroRuntimeComponents components,
+            final GameRuntime components,
             final Stage3PrototypeState state) throws Exception {
         generated.login().registerMethod().invoke(generated.dispatcher(), proxy(generated.login().boClass(), request -> {
             String accountId = stringField(request, "accountId");
@@ -414,11 +423,11 @@ class Stage3LocalPrototypeSmokeTest {
     }
 
     private void dispatchActor(
-            final ZeroRuntimeComponents components,
+            final GameRuntime components,
             final LaneKey laneKey,
             final String traceId,
             final Object command) {
-        components.actorScheduler()
+        components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER)
                 .dispatch(new ActorMessage("stage3-" + command.getClass().getSimpleName(), laneKey, traceId, command))
                 .toCompletableFuture()
                 .join();
@@ -482,11 +491,11 @@ class Stage3LocalPrototypeSmokeTest {
     }
 
     private void appendLog(
-            final ZeroRuntimeComponents components,
+            final GameRuntime components,
             final String traceId,
             final String message,
             final String operation) {
-        components.logAppender().append(ZeroLogRecord.create(
+        components.require(LocalRuntimeCapabilities.LOG_APPENDER).append(ZeroLogRecord.create(
                 Instant.now(),
                 LogLevel.INFO,
                 LogType.BUSINESS,
@@ -498,10 +507,10 @@ class Stage3LocalPrototypeSmokeTest {
     }
 
     private void recordMetric(
-            final ZeroRuntimeComponents components,
+            final GameRuntime components,
             final String metricName,
             final String operation) {
-        components.monitorRuntime().registry().record(new MetricSample(
+        components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME).registry().record(new MetricSample(
                 metricName,
                 1.0D,
                 Map.of("operation", operation),

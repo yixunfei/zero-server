@@ -22,6 +22,8 @@ import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.log.LogSink;
 import group.zn.zero.log.ZeroLogRecord;
 import group.zn.zero.monitor.MonitorRuntime;
+import group.zn.zero.runtime.api.ComponentId;
+import group.zn.zero.runtime.api.GameRuntime;
 import group.zn.zero.starter.scheduler.LocalManagedScheduler;
 import group.zn.zero.starter.scheduler.LoggingScheduledTaskObserver;
 import java.time.Duration;
@@ -51,7 +53,7 @@ class ZeroManagedSchedulerFactoryTest {
         InMemoryLogSink logSink = new InMemoryLogSink();
         MonitorRuntime monitor = MonitorRuntime.createDefault();
         ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.direct();
-        ZeroRuntimeBuilder builder = ZeroRuntimeFactory.localBuilder(config, logSink, executors);
+        LocalRuntimeBuilder builder = LocalRuntime.builder(config, logSink, executors);
         int definitionsBefore = monitor.registry().definitions().size();
 
         Optional<LocalManagedScheduler> scheduler = ZeroManagedSchedulerFactory.configure(
@@ -63,8 +65,9 @@ class ZeroManagedSchedulerFactoryTest {
 
         assertTrue(scheduler.isEmpty());
         assertEquals(definitionsBefore, monitor.registry().definitions().size());
-        ZeroRuntimeComponents components = builder.build();
-        assertEquals(1, components.lifecycleComponents().size());
+        GameRuntime components = builder.build();
+        assertTrue(components.requireAll(LocalRuntimeCapabilities.INFRASTRUCTURE_LIFECYCLES).isEmpty());
+        assertTrue(components.requireAll(LocalRuntimeCapabilities.APPLICATION_LIFECYCLES).isEmpty());
         components.start();
         components.stop();
     }
@@ -79,7 +82,7 @@ class ZeroManagedSchedulerFactoryTest {
         MonitorRuntime monitor = MonitorRuntime.createDefault();
 
         ZeroRuntimeExecutors direct = ZeroRuntimeExecutors.direct();
-        ZeroRuntimeBuilder directBuilder = ZeroRuntimeFactory.localBuilder(config, logSink, direct);
+        LocalRuntimeBuilder directBuilder = LocalRuntime.builder(config, logSink, direct);
         ZeroException directFailure = assertThrows(
                 ZeroException.class,
                 () -> ZeroManagedSchedulerFactory.configure(
@@ -92,7 +95,7 @@ class ZeroManagedSchedulerFactoryTest {
 
         ZeroRuntimeExecutors single = ZeroRuntimeExecutors.singleThreaded("scheduler-inline");
         try {
-            ZeroRuntimeBuilder singleBuilder = ZeroRuntimeFactory.localBuilder(config, logSink, single);
+            LocalRuntimeBuilder singleBuilder = LocalRuntime.builder(config, logSink, single);
             ZeroException singleFailure = assertThrows(
                     ZeroException.class,
                     () -> ZeroManagedSchedulerFactory.configure(
@@ -133,8 +136,8 @@ class ZeroManagedSchedulerFactoryTest {
         LatchLogSink logSink = new LatchLogSink(3);
         MonitorRuntime monitor = MonitorRuntime.createDefault();
         ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("scheduler-factory", 2);
-        ZeroRuntimeBuilder builder = ZeroRuntimeFactory.localBuilder(config, logSink, executors)
-                .monitorRuntime(monitor);
+        LocalRuntimeBuilder builder = LocalRuntime.builder(config, logSink, executors)
+                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitor);
         LocalManagedScheduler scheduler = ZeroManagedSchedulerFactory.configure(
                 builder,
                 config,
@@ -142,10 +145,12 @@ class ZeroManagedSchedulerFactoryTest {
                 monitor,
                 executors).orElseThrow();
         LifecycleProbe business = new LifecycleProbe(scheduler);
-        builder.addLifecycleComponent(business);
-        ZeroRuntimeComponents components = builder.build();
-        assertSame(scheduler, components.lifecycleComponents().getFirst());
-        assertSame(business, components.lifecycleComponents().getLast());
+        builder.addApplicationLifecycle(ComponentId.of("test.scheduler.business"), business);
+        GameRuntime components = builder.build();
+        assertSame(scheduler,
+                components.requireAll(LocalRuntimeCapabilities.INFRASTRUCTURE_LIFECYCLES).getFirst());
+        assertSame(business,
+                components.requireAll(LocalRuntimeCapabilities.APPLICATION_LIFECYCLES).getLast());
         CountDownLatch taskDone = new CountDownLatch(1);
         AtomicReference<String> workerThread = new AtomicReference<>();
 
@@ -187,21 +192,22 @@ class ZeroManagedSchedulerFactoryTest {
         InMemoryLogSink logSink = new InMemoryLogSink();
         MonitorRuntime monitor = MonitorRuntime.createDefault();
         ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("scheduler-actor", 2);
-        ZeroRuntimeBuilder builder = ZeroRuntimeFactory.localBuilder(config, logSink, executors)
-                .monitorRuntime(monitor);
+        LocalRuntimeBuilder builder = LocalRuntime.builder(config, logSink, executors)
+                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitor);
         LocalManagedScheduler scheduler = ZeroManagedSchedulerFactory.configure(
                 builder,
                 config,
                 builder.logAppender(),
                 monitor,
                 executors).orElseThrow();
-        ZeroRuntimeComponents components = builder.build();
+        GameRuntime components = builder.build();
         CountDownLatch actorDone = new CountDownLatch(1);
         AtomicReference<String> schedulerTrace = new AtomicReference<>();
         AtomicReference<String> actorTrace = new AtomicReference<>();
         AtomicReference<String> actorThread = new AtomicReference<>();
         AtomicBoolean stateChanged = new AtomicBoolean();
-        components.actorScheduler().register(ActorMutation.class, ActorHandler.sync((context, message) -> {
+        components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER)
+                .register(ActorMutation.class, ActorHandler.sync((context, message) -> {
             actorTrace.set(message.traceId());
             actorThread.set(Thread.currentThread().getName());
             stateChanged.set(true);
@@ -215,7 +221,7 @@ class ZeroManagedSchedulerFactoryTest {
                     Duration.ZERO,
                     context -> {
                         schedulerTrace.set(context.traceId());
-                        return components.actorScheduler().dispatch(new ActorMessage(
+                        return components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER).dispatch(new ActorMessage(
                                 context.executionId(),
                                 LaneKey.player("example-player"),
                                 context.traceId(),
@@ -238,7 +244,7 @@ class ZeroManagedSchedulerFactoryTest {
         MonitorRuntime monitor = MonitorRuntime.createDefault();
         ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("invalid-scheduler", 2);
         try {
-            ZeroRuntimeBuilder builder = ZeroRuntimeFactory.localBuilder(config, logSink, executors);
+            LocalRuntimeBuilder builder = LocalRuntime.builder(config, logSink, executors);
             ZeroException failure = assertThrows(
                     ZeroException.class,
                     () -> ZeroManagedSchedulerFactory.configure(

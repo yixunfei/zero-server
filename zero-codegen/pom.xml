@@ -18,6 +18,10 @@
     <dependencies>
         <dependency>
             <groupId>group.zn.zero</groupId>
+            <artifactId>zero-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
             <artifactId>zero-protocol</artifactId>
         </dependency>
         <dependency>

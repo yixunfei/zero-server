@@ -5,12 +5,13 @@ import group.zn.zero.core.config.ZeroConfig;
 import group.zn.zero.core.lifecycle.LifecycleState;
 import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.monitor.MonitorRuntime;
+import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.starter.LocalRuntime;
+import group.zn.zero.starter.LocalRuntimeBuilder;
+import group.zn.zero.starter.LocalRuntimeCapabilities;
 import group.zn.zero.starter.ZeroManagedSchedulerFactory;
-import group.zn.zero.starter.ZeroRuntimeBuilder;
-import group.zn.zero.starter.ZeroRuntimeComponents;
 import group.zn.zero.starter.ZeroRuntimeConfigKeys;
 import group.zn.zero.starter.ZeroRuntimeExecutors;
-import group.zn.zero.starter.ZeroRuntimeFactory;
 import group.zn.zero.starter.scheduler.LocalManagedScheduler;
 import group.zn.zero.starter.scheduler.LoggingScheduledTaskObserver;
 import java.util.Map;
@@ -67,23 +68,23 @@ public final class ManagedSchedulerLocalApplication {
         InMemoryLogSink terminalLogSink = new InMemoryLogSink();
         MonitorRuntime monitorRuntime = MonitorRuntime.createDefault();
         ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("managed-scheduler-example", 2);
-        ZeroRuntimeComponents components = null;
+        GameRuntime runtime = null;
         boolean stopped = false;
         try {
             RuntimeAssembly assembly = assemble(terminalLogSink, monitorRuntime, executors);
-            components = assembly.components();
-            components.start();
+            runtime = assembly.runtime();
+            runtime.start();
             ManagedSchedulerDemoTasks.TaskSuiteResult tasks = new ManagedSchedulerDemoTasks(
                     assembly.scheduler(),
-                    components.actorScheduler(),
+                    runtime.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER),
                     executors.remoteIoExecutor()).run();
-            components.stop();
-            stopped = components.state() == LifecycleState.STOPPED;
+            runtime.stop();
+            stopped = runtime.state() == LifecycleState.STOPPED;
             ObservabilityResult observability = inspectObservability(terminalLogSink, monitorRuntime);
             return toDemoResult(tasks, observability, stopped);
         } finally {
             if (!stopped) {
-                closeRuntime(components, executors);
+                closeRuntime(runtime, executors);
             }
         }
     }
@@ -99,9 +100,9 @@ public final class ManagedSchedulerLocalApplication {
                 ZeroRuntimeConfigKeys.SCHEDULER_MAX_IN_FLIGHT, "8",
                 ZeroRuntimeConfigKeys.SCHEDULER_STOP_TIMEOUT_MILLIS, "3000",
                 ZeroRuntimeConfigKeys.SCHEDULER_THREAD_NAME_PREFIX, "managed-scheduler-example-timer"));
-        ZeroRuntimeBuilder builder = ZeroRuntimeFactory
-                .localBuilder(config, terminalLogSink, executors)
-                .monitorRuntime(monitorRuntime);
+        LocalRuntimeBuilder builder = LocalRuntime
+                .builder(config, terminalLogSink, executors)
+                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime);
         LocalManagedScheduler scheduler = ZeroManagedSchedulerFactory
                 .configure(builder, config, builder.logAppender(), monitorRuntime, executors)
                 .orElseThrow();
@@ -145,12 +146,12 @@ public final class ManagedSchedulerLocalApplication {
     }
 
     private static void closeRuntime(
-            final ZeroRuntimeComponents components,
+            final GameRuntime runtime,
             final ZeroRuntimeExecutors executors) {
-        if (components == null || components.state() == LifecycleState.NEW) {
+        if (runtime == null) {
             executors.close();
         } else {
-            components.stop();
+            runtime.close();
         }
     }
 
@@ -191,12 +192,12 @@ public final class ManagedSchedulerLocalApplication {
     /**
      * 示例内部 runtime 组合。
      *
-     * @param components Starter 组件门面。
+     * @param runtime 中立运行时。
      * @param scheduler 本地受管调度器。
      * @author zn
      */
     private record RuntimeAssembly(
-            ZeroRuntimeComponents components,
+            GameRuntime runtime,
             LocalManagedScheduler scheduler) {
     }
 

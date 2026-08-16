@@ -48,9 +48,9 @@ single-table reload
 
 ```java
 ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("my-game", 4);
-ZeroRuntimeBuilder builder = ZeroRuntimeFactory.localBuilder(config, logSink, executors);
+LocalRuntimeBuilder builder = LocalRuntime.builder(config, terminalLogSink, executors);
 LocalConfigHotReloadService configService = ZeroConfigHotReloadFactory
-        .configure(builder, config, logSink, executors)
+        .configure(builder, config, builder.logAppender(), executors)
         .orElseThrow();
 
 ConfigTable<Integer, ItemConfig> items = configService.register(ConfigTableDefinition.of(
@@ -64,8 +64,8 @@ ConfigTable<Integer, ItemConfig> items = configService.register(ConfigTableDefin
                 row.require("name"),
                 Integer.parseInt(row.require("price")))));
 
-ZeroRuntimeComponents components = builder.build();
-components.start();
+GameRuntime runtime = builder.build();
+runtime.start();
 
 ItemConfig item = items.find(1001).orElseThrow();
 ConfigTableSnapshot<Integer, ItemConfig> snapshot = items.snapshot();

@@ -20,17 +20,7 @@
     </properties>
 
     <dependencies>
-        <dependency>
-            <groupId>group.zn.zero</groupId>
-            <artifactId>zero-server-starter</artifactId>
-            <version>${zero.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>group.zn.zero</groupId>
-            <artifactId>zero-codegen</artifactId>
-            <version>${zero.version}</version>
-            <scope>provided</scope>
-        </dependency>
+__FRAMEWORK_DEPENDENCIES_XML__
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

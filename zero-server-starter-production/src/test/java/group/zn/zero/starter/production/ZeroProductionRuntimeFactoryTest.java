@@ -19,10 +19,11 @@ import group.zn.zero.data.redis.RedisDistributedCacheService;
 import group.zn.zero.data.redis.RedisDriverSettings;
 import group.zn.zero.discovery.nacos.NacosDiscoveryConfigKeys;
 import group.zn.zero.rpc.local.InMemoryRpcTransport;
-import group.zn.zero.starter.ZeroRuntimeComponents;
+import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.starter.LocalRuntime;
+import group.zn.zero.starter.LocalRuntimeCapabilities;
 import group.zn.zero.starter.ZeroRuntimeConfigKeys;
 import group.zn.zero.starter.ZeroRuntimeExecutors;
-import group.zn.zero.starter.ZeroRuntimeFactory;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
@@ -61,7 +62,7 @@ class ZeroProductionRuntimeFactoryTest {
 
     /**
      * 验证 production diagnose、runtime report 及失败异常图均不会保留配置中的 runtime name，
-     * 顶层与嵌套 starter report 使用同一固定脱敏值。
+     * 顶层名称固定脱敏，中立 runtime report 不包含 runtime name 或配置值。
      */
     @Test
     void productionReportsAndFailuresShouldRedactConfiguredRuntimeName() {
@@ -77,11 +78,10 @@ class ZeroProductionRuntimeFactoryTest {
 
         ZeroProductionRuntime runtime = isolatedProductionBuilder(namedConfig).build();
         try {
-            ZeroProductionAssemblyReport report = runtime.report();
+            ZeroProductionAssemblyReport report = runtime.productionReport();
             assertEquals(ZeroProductionAssemblyReport.REDACTED_RUNTIME_NAME, report.name());
-            assertEquals(
-                    ZeroProductionAssemblyReport.REDACTED_RUNTIME_NAME,
-                    report.runtimeReport().name());
+            assertEquals(ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION,
+                    report.runtimeReport().plan().profile());
             assertFalse(report.toString().contains(secretSentinel));
             assertFalse(report.runtimeReport().toString().contains(secretSentinel));
         } finally {
@@ -112,14 +112,16 @@ class ZeroProductionRuntimeFactoryTest {
      * 验证本地默认工厂不会因为配置里出现 Adapter 键而创建真实 Adapter。
      */
     @Test
-    void localDefaultShouldIgnoreProductionAdapterKeys() {
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localDefault(new MapZeroConfig(Map.of(
+    void localRuntimeShouldIgnoreProductionAdapterKeys() {
+        GameRuntime components = LocalRuntime.create(new MapZeroConfig(Map.of(
                 ZeroProductionRuntimeConfigKeys.ADAPTER_DATA_MONGO_ENABLED, "true",
                 MongoDriverSettings.PROPERTY_MONGO_URI, "mongodb://user:secret@127.0.0.1:27017",
                 MongoDriverSettings.PROPERTY_MONGO_DATABASE, "zero_secret")));
 
-        assertInstanceOf(InMemoryRpcTransport.class, components.rpcTransport());
-        assertFalse(components.assemblyReport().componentTypes().toString().contains(MongoDataAdapter.class.getName()));
+        assertInstanceOf(InMemoryRpcTransport.class,
+                components.require(LocalRuntimeCapabilities.RPC_TRANSPORT));
+        assertFalse(components.report().plan().components().toString().contains(MongoDataAdapter.class.getName()));
+        components.close();
     }
 
     /**
@@ -224,14 +226,11 @@ class ZeroProductionRuntimeFactoryTest {
                                 ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION)))
                 .build();
         try {
-            assertTrue(runtime.kafkaRpcAdapter().isEmpty());
-            assertTrue(runtime.mongoDataAdapter().isEmpty());
-            assertTrue(runtime.redisDataAdapter().isEmpty());
-            assertTrue(runtime.postgresqlDataAdapter().isEmpty());
-            assertTrue(runtime.serviceDiscovery().isEmpty());
+            assertFalse(runtime.plan().components().stream().anyMatch(component ->
+                    component.componentId().value().startsWith("zero.production.")));
             assertEquals(
                     ZeroProductionAdapterState.DISABLED,
-                    runtime.report()
+                    runtime.productionReport()
                             .adapterStatus(ZeroProductionRuntimeBuilder.ADAPTER_NACOS_DISCOVERY)
                             .orElseThrow()
                             .state());
@@ -344,13 +343,17 @@ class ZeroProductionRuntimeFactoryTest {
                         Map.entry(PostgresqlDriverSettings.TABLE_NAME_PROPERTY, "secret_table"))))
                 .build();
         try {
-            ZeroProductionAssemblyReport report = runtime.report();
+            ZeroProductionAssemblyReport report = runtime.productionReport();
             String text = report.toString();
 
-            assertTrue(runtime.kafkaRpcAdapter().isPresent());
-            assertTrue(runtime.mongoDataAdapter().isPresent());
-            assertTrue(runtime.redisDataAdapter().isPresent());
-            assertTrue(runtime.postgresqlDataAdapter().isPresent());
+            assertTrue(runtime.plan().components().stream().anyMatch(component ->
+                    ProductionKafkaRpcProvider.ID.equals(component.componentId())));
+            assertTrue(runtime.plan().components().stream().anyMatch(component ->
+                    ProductionMongoDataProvider.ID.equals(component.componentId())));
+            assertTrue(runtime.plan().components().stream().anyMatch(component ->
+                    ProductionRedisDataProvider.ID.equals(component.componentId())));
+            assertTrue(runtime.plan().components().stream().anyMatch(component ->
+                    ProductionPostgresqlDataProvider.ID.equals(component.componentId())));
             assertEquals(ZeroProductionAdapterState.CREATED,
                     report.adapterStatus(ZeroProductionRuntimeBuilder.ADAPTER_MONGO_DATA).orElseThrow().state());
             assertFalse(text.contains("secret-pass"));
@@ -383,9 +386,11 @@ class ZeroProductionRuntimeFactoryTest {
                 .redisCacheValueCodec(StringObjectCacheValueCodec.INSTANCE)
                 .build();
         try {
-            assertTrue(runtime.redisClient().isPresent());
-            assertInstanceOf(RedisDistributedCacheService.class, runtime.components().cacheService());
-            assertSame(runtime.components().cacheService(), runtime.components().cacheService());
+            assertInstanceOf(RedisDistributedCacheService.class,
+                    runtime.require(LocalRuntimeCapabilities.CACHE_SERVICE));
+            assertSame(
+                    runtime.require(LocalRuntimeCapabilities.CACHE_SERVICE),
+                    runtime.require(LocalRuntimeCapabilities.CACHE_SERVICE));
         } finally {
             runtime.close();
         }
@@ -404,8 +409,8 @@ class ZeroProductionRuntimeFactoryTest {
                         NacosDiscoveryConfigKeys.DEFAULT_CLUSTER, "FACTORY_TEST_CLUSTER")))
                 .build();
         try {
-            assertTrue(runtime.serviceDiscovery().isPresent());
-            assertTrue(runtime.rpcServiceResolver().isPresent());
+            assertTrue(runtime.optional(ProductionRuntimeCapabilities.SERVICE_DISCOVERY).isPresent());
+            assertTrue(runtime.optional(ProductionRuntimeCapabilities.RPC_SERVICE_RESOLVER).isPresent());
         } finally {
             runtime.close();
         }

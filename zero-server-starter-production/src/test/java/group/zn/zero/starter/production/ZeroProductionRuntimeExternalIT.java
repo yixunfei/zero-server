@@ -81,25 +81,27 @@ class ZeroProductionRuntimeExternalIT {
                 .redisCacheValueCodec(StringObjectCacheValueCodec.INSTANCE)
                 .build()) {
             assertEquals(ZeroProductionAdapterState.CREATED,
-                    runtime.report()
+                    runtime.productionReport()
                             .adapterStatus(ZeroProductionRuntimeBuilder.ADAPTER_KAFKA_RPC)
                             .orElseThrow()
                             .state());
 
             runtime.start();
 
-            assertTrue(runtime.kafkaRpcAdapter().orElseThrow().delegate().isPresent());
-            assertTrue(runtime.mongoClient().isPresent());
-            assertTrue(runtime.redisClient().isPresent());
-            assertTrue(runtime.postgresqlDataAdapter().isPresent());
-            assertTrue(runtime.serviceDiscovery().isPresent());
-            assertFalse(runtime.report().toString().contains(config.get(PostgresqlDriverSettings.PASSWORD_PROPERTY)));
-            assertHealthy(runtime.report(), ZeroProductionRuntimeBuilder.ADAPTER_KAFKA_RPC);
-            assertHealthy(runtime.report(), ZeroProductionRuntimeBuilder.ADAPTER_MONGO_DATA);
-            assertHealthy(runtime.report(), ZeroProductionRuntimeBuilder.ADAPTER_REDIS_DATA);
-            assertHealthy(runtime.report(), ZeroProductionRuntimeBuilder.ADAPTER_REDIS_CACHE);
-            assertHealthy(runtime.report(), ZeroProductionRuntimeBuilder.ADAPTER_POSTGRESQL_DATA);
-            assertHealthy(runtime.report(), ZeroProductionRuntimeBuilder.ADAPTER_NACOS_DISCOVERY);
+            KafkaRpcLifecycleAdapter kafka = (KafkaRpcLifecycleAdapter) runtime.require(
+                    ProductionRuntimeCapabilities.RPC_TRANSPORT);
+            assertTrue(kafka.delegate().isPresent());
+            assertEquals(3, runtime.requireAll(ProductionRuntimeCapabilities.DATA_SERVICES).size());
+            assertTrue(runtime.optional(ProductionRuntimeCapabilities.CACHE_SERVICE).isPresent());
+            assertTrue(runtime.optional(ProductionRuntimeCapabilities.SERVICE_DISCOVERY).isPresent());
+            assertFalse(runtime.productionReport().toString()
+                    .contains(config.get(PostgresqlDriverSettings.PASSWORD_PROPERTY)));
+            assertHealthy(runtime.productionReport(), ZeroProductionRuntimeBuilder.ADAPTER_KAFKA_RPC);
+            assertHealthy(runtime.productionReport(), ZeroProductionRuntimeBuilder.ADAPTER_MONGO_DATA);
+            assertHealthy(runtime.productionReport(), ZeroProductionRuntimeBuilder.ADAPTER_REDIS_DATA);
+            assertHealthy(runtime.productionReport(), ZeroProductionRuntimeBuilder.ADAPTER_REDIS_CACHE);
+            assertHealthy(runtime.productionReport(), ZeroProductionRuntimeBuilder.ADAPTER_POSTGRESQL_DATA);
+            assertHealthy(runtime.productionReport(), ZeroProductionRuntimeBuilder.ADAPTER_NACOS_DISCOVERY);
         }
     }
 
@@ -134,14 +136,14 @@ class ZeroProductionRuntimeExternalIT {
             assertSame(ProductionAdapterErrorCode.STARTUP_HEALTH_FAILED, failure.errorCode());
             assertSafeFailureText(failure, secretClientId, unavailableBootstrap);
 
-            ZeroProductionAdapterStatus status = runtime.report()
+            ZeroProductionAdapterStatus status = runtime.productionReport()
                     .adapterStatus(ZeroProductionRuntimeBuilder.ADAPTER_KAFKA_RPC)
                     .orElseThrow();
             assertEquals(ZeroProductionAdapterState.FAILED, status.state());
             assertEquals(ProductionAdapterFailurePhase.STARTUP_HEALTH, status.failurePhase());
             assertSame(ProductionAdapterErrorCode.STARTUP_HEALTH_FAILED, status.errorCode());
-            assertFalse(runtime.report().containsFragment(secretClientId));
-            assertFalse(runtime.report().containsFragment(unavailableBootstrap));
+            assertFalse(runtime.productionReport().containsFragment(secretClientId));
+            assertFalse(runtime.productionReport().containsFragment(unavailableBootstrap));
         }
     }
 

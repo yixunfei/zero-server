@@ -72,8 +72,10 @@
 
 | 能力 | 状态 | 已有 | 主要缺口 |
 | --- | --- | --- | --- |
+| 阶段 0 本地开箱验收 | implemented | quick/full 统一入口、确定性摘要、独立日志、首错停止、示例与七类脚手架黑盒验证 | 不覆盖真实中间件、容量、长稳或生产就绪 |
 | 本地 Starter | implemented | 无 Docker 默认装配、Builder 覆盖、执行域、诊断、生命周期 | 不是生产线程池/容量策略 |
 | Production Starter | minimum-slice | 严格 selector、必填配置、启动健康/预算、逆序资源事务、安全异常 | 周期健康、自动恢复、完整熔断、硬 wall-clock 取消 |
+| 模块化运行时装配 | minimum-slice | 中立 `zero-runtime`、显式 catalog/preset/profile、typed config、最小依赖图、事务回滚、独立 assembly/startup deadline、启动健康、single-use、安全诊断、共享能力模型、Local Starter 与生成器迁移；Kafka RPC、MongoDB data、Redis shared resource/data/cache、PostgreSQL data、Nacos discovery/RPC resolver 和 network lifecycle provider 已正式接入；Production 门面直接实现 `GameRuntime` | 周期健康、自动恢复、每组件独立预算、完整 production policy 和真实中间件故障验证仍待后续阶段 |
 | Docker/编排 | design-boundary | 外部测试可接真实组件 | 不提供正式 Compose/Kubernetes/云部署发行物 |
 
 ## 性能证据

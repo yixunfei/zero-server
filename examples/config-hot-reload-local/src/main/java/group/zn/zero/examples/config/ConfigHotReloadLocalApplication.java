@@ -9,12 +9,12 @@ import group.zn.zero.hotupdate.config.ConfigTable;
 import group.zn.zero.hotupdate.config.ConfigTableDefinition;
 import group.zn.zero.hotupdate.config.LocalConfigHotReloadService;
 import group.zn.zero.log.InMemoryLogSink;
+import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.starter.LocalRuntime;
+import group.zn.zero.starter.LocalRuntimeBuilder;
 import group.zn.zero.starter.ZeroConfigHotReloadFactory;
-import group.zn.zero.starter.ZeroRuntimeBuilder;
-import group.zn.zero.starter.ZeroRuntimeComponents;
 import group.zn.zero.starter.ZeroRuntimeConfigKeys;
 import group.zn.zero.starter.ZeroRuntimeExecutors;
-import group.zn.zero.starter.ZeroRuntimeFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -69,11 +69,11 @@ public final class ConfigHotReloadLocalApplication {
         copyInitialCsv(source);
         InMemoryLogSink terminalLogSink = new InMemoryLogSink();
         ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("config-example", 2);
-        ZeroRuntimeComponents components = null;
+        GameRuntime runtime = null;
         try {
             RuntimeAssembly assembly = assemble(source, terminalLogSink, executors);
-            components = assembly.components();
-            components.start();
+            runtime = assembly.runtime();
+            runtime.start();
             long initialVersion = assembly.table().snapshot().version();
             Files.writeString(source, validVersionTwo(), StandardCharsets.UTF_8);
             ConfigReloadResult loaded = assembly.service()
@@ -90,7 +90,7 @@ public final class ConfigHotReloadLocalApplication {
                     assembly.table().find(1001).orElseThrow().name(),
                     terminalLogSink.records().size());
         } finally {
-            closeRuntime(components, executors);
+            closeRuntime(runtime, executors);
             Files.deleteIfExists(source);
             Files.deleteIfExists(directory);
         }
@@ -105,7 +105,7 @@ public final class ConfigHotReloadLocalApplication {
                 ZeroRuntimeConfigKeys.CONFIG_HOT_RELOAD_ENABLED, "true",
                 ZeroRuntimeConfigKeys.CONFIG_HOT_RELOAD_WATCH_ENABLED, "false",
                 ZeroRuntimeConfigKeys.CONFIG_HOT_RELOAD_OPERATOR, "example-local"));
-        ZeroRuntimeBuilder builder = ZeroRuntimeFactory.localBuilder(config, terminalLogSink, executors);
+        LocalRuntimeBuilder builder = LocalRuntime.builder(config, terminalLogSink, executors);
         LocalConfigHotReloadService service = ZeroConfigHotReloadFactory
                 .configure(builder, config, builder.logAppender(), executors)
                 .orElseThrow();
@@ -153,12 +153,12 @@ public final class ConfigHotReloadLocalApplication {
     }
 
     private static void closeRuntime(
-            final ZeroRuntimeComponents components,
+            final GameRuntime runtime,
             final ZeroRuntimeExecutors executors) {
-        if (components == null || components.state() == group.zn.zero.core.lifecycle.LifecycleState.NEW) {
+        if (runtime == null) {
             executors.close();
         } else {
-            components.stop();
+            runtime.close();
         }
     }
 
@@ -194,13 +194,13 @@ public final class ConfigHotReloadLocalApplication {
     /**
      * 示例内部 runtime 组合。
      *
-     * @param components Starter 运行时组件。
+     * @param runtime 中立运行时。
      * @param service 配置热重载服务。
      * @param table typed 道具配置表。
      * @author zn
      */
     private record RuntimeAssembly(
-            ZeroRuntimeComponents components,
+            GameRuntime runtime,
             LocalConfigHotReloadService service,
             ConfigTable<Integer, ItemConfig> table) {
     }

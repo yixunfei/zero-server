@@ -9,6 +9,7 @@ import group.zn.zero.log.LogSink;
 import group.zn.zero.log.LogSource;
 import group.zn.zero.log.LogType;
 import group.zn.zero.log.ZeroLogRecord;
+import group.zn.zero.runtime.api.GameRuntime;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -23,7 +24,7 @@ public final class ZeroServerApplication extends AbstractLifecycle {
     /**
      * 运行时组件。
      */
-    private final ZeroRuntimeComponents components;
+    private final GameRuntime runtime;
 
     /**
      * 创建应用实例。
@@ -32,7 +33,7 @@ public final class ZeroServerApplication extends AbstractLifecycle {
      * @throws NullPointerException 当配置为空时抛出。
      */
     public ZeroServerApplication(final ZeroConfig config) {
-        this(ZeroRuntimeFactory.localDefault(config));
+        this(LocalRuntime.create(config));
     }
 
     /**
@@ -43,17 +44,17 @@ public final class ZeroServerApplication extends AbstractLifecycle {
      * @throws NullPointerException 当配置或终端日志 SPI 为空时抛出。
      */
     public ZeroServerApplication(final ZeroConfig config, final LogSink terminalLogSink) {
-        this(ZeroRuntimeFactory.localDefault(config, terminalLogSink));
+        this(LocalRuntime.create(config, terminalLogSink));
     }
 
     /**
      * 创建应用实例。
      *
-     * @param components 运行时组件；不可为空；由应用负责启动和停止。
-     * @throws NullPointerException 当运行时组件为空时抛出。
+     * @param runtime 模块化运行时；不可为空；由应用负责启动和停止。
+     * @throws NullPointerException 当运行时为空时抛出。
      */
-    public ZeroServerApplication(final ZeroRuntimeComponents components) {
-        this.components = Objects.requireNonNull(components, "components");
+    public ZeroServerApplication(final GameRuntime runtime) {
+        this.runtime = Objects.requireNonNull(runtime, "runtime");
     }
 
     /**
@@ -62,7 +63,7 @@ public final class ZeroServerApplication extends AbstractLifecycle {
      * @return 配置对象；不可为空；线程安全。
      */
     public ZeroConfig config() {
-        return components.config();
+        return runtime.require(LocalRuntimeCapabilities.CONFIG);
     }
 
     /**
@@ -70,8 +71,8 @@ public final class ZeroServerApplication extends AbstractLifecycle {
      *
      * @return 运行时组件；不可为空；线程安全。
      */
-    public ZeroRuntimeComponents components() {
-        return components;
+    public GameRuntime runtime() {
+        return runtime;
     }
 
     /**
@@ -81,10 +82,10 @@ public final class ZeroServerApplication extends AbstractLifecycle {
      */
     @Override
     protected void doStart() {
-        components.start();
+        runtime.start();
         String mode = config().get(ZeroRuntimeConfigKeys.ZERO_MODE).orElse("unknown");
         String name = config().get(ZeroRuntimeConfigKeys.ZERO_NAME).orElse("unknown");
-        components.logAppender().append(ZeroLogRecord.create(
+        runtime.require(LocalRuntimeCapabilities.LOG_APPENDER).append(ZeroLogRecord.create(
                 Instant.now(),
                 LogLevel.INFO,
                 LogType.RUNTIME,
@@ -102,7 +103,7 @@ public final class ZeroServerApplication extends AbstractLifecycle {
      */
     @Override
     protected void doStop() {
-        components.stop();
+        runtime.stop();
     }
 
     /**
@@ -111,7 +112,7 @@ public final class ZeroServerApplication extends AbstractLifecycle {
      * @param args 命令行参数；当前版本不读取。
      */
     public static void main(final String[] args) {
-        ZeroServerApplication application = new ZeroServerApplication(ZeroRuntimeFactory.localDefault());
+        ZeroServerApplication application = new ZeroServerApplication(LocalRuntime.create());
         application.start();
         application.stop();
     }

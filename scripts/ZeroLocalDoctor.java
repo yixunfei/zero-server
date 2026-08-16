@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 /**
  * zeroServer 公开开发环境的只读诊断入口。
  *
- * <p>本工具检查 Java、Maven、仓库根目录、核心模块、示例和脚手架入口；不会修改文件、
+ * <p>本工具检查 Java、Maven、Git、仓库根目录、核心模块、示例和脚手架入口；不会修改文件、
  * 启动网络端口、连接外部中间件或创建线程池。适合克隆仓库后的首次自检。
  *
  * @author zn
@@ -29,6 +29,11 @@ public final class ZeroLocalDoctor {
 
     /** Maven 版本提取表达式。 */
     private static final Pattern MAVEN_VERSION_PATTERN = Pattern.compile("Apache Maven\\s+(\\d+\\.\\d+(?:\\.\\d+)?)");
+
+    /** Git 版本提取表达式。 */
+    private static final Pattern GIT_VERSION_PATTERN = Pattern.compile(
+            "git version\\s+(\\d+\\.\\d+(?:\\.\\d+)?(?:\\.windows\\.\\d+)?)",
+            Pattern.CASE_INSENSITIVE);
 
     /** 必须存在的公开仓库路径；按输出顺序保持有序且不可变。 */
     private static final List<RequiredPath> REQUIRED_PATHS = List.of(
@@ -50,6 +55,7 @@ public final class ZeroLocalDoctor {
             path("prototype-runner", "scripts/RunLocalPrototype.java"),
             path("scaffold-runner", "scripts/RunLocalScaffold.java"),
             path("scaffold-verifier", "scripts/VerifyLocalScaffolds.java"),
+            path("stage0-acceptance", "scripts/ZeroStage0Acceptance.java"),
             path("architecture-guard", "scripts/ZeroArchitectureGuard.java"));
 
     /** 禁止实例化。 */
@@ -60,8 +66,8 @@ public final class ZeroLocalDoctor {
      * 执行只读本地环境诊断。
      *
      * @param args 仅支持 `--help`；数组可以为空，不会被修改。
-     * @throws IOException 当 Maven 进程无法启动或输出无法读取时抛出。
-     * @throws InterruptedException 当等待 Maven 进程时被中断；中断状态会被调用方观察。
+     * @throws IOException 当工具进程输出无法读取时抛出。
+     * @throws InterruptedException 当等待工具进程时被中断；中断状态会被调用方观察。
      * @implNote 方法不修改项目数据；仅当前进程同步执行，不承诺多线程调用安全。
      */
     public static void main(final String[] args) throws IOException, InterruptedException {
@@ -78,6 +84,7 @@ public final class ZeroLocalDoctor {
         List<CheckResult> results = new ArrayList<>();
         checkJava(results);
         checkMaven(results);
+        checkGit(results);
         checkPaths(results);
         printResults(results);
 
@@ -128,6 +135,33 @@ public final class ZeroLocalDoctor {
     }
 
     /**
+     * 调用 Git 并检查其是否可用。
+     *
+     * @param results 可变、有序、非线程安全结果集合；方法追加一项。
+     * @throws IOException 当 Git 输出无法读取时抛出。
+     * @throws InterruptedException 当等待 Git 进程时被中断。
+     */
+    private static void checkGit(final List<CheckResult> results) throws IOException, InterruptedException {
+        Process process;
+        try {
+            process = new ProcessBuilder("git", "--version")
+                    .redirectErrorStream(true)
+                    .start();
+        } catch (IOException exception) {
+            results.add(new CheckResult("git", false, "git is not available on PATH"));
+            return;
+        }
+        String output = new String(process.getInputStream().readAllBytes(), Charset.defaultCharset());
+        int exitCode = process.waitFor();
+        Matcher matcher = GIT_VERSION_PATTERN.matcher(output);
+        String version = matcher.find() ? matcher.group(1) : "unknown";
+        results.add(new CheckResult(
+                "git",
+                exitCode == 0 && !"unknown".equals(version),
+                "required=available|actual=" + version + "|exit=" + exitCode));
+    }
+
+    /**
      * 检查公开仓库关键路径。
      *
      * @param results 可变、有序、非线程安全结果集合；方法按固定顺序追加多项。
@@ -162,7 +196,7 @@ public final class ZeroLocalDoctor {
         if (failed == 0) {
             System.out.println();
             System.out.println("Next:");
-            System.out.println("  mvn -B -ntp test");
+            System.out.println("  java scripts/ZeroStage0Acceptance.java --level quick");
             System.out.println("  java scripts/RunLocalPrototype.java --fromKeywords \"rpg scene sync\" "
                     + "--projectName my-game --packageName group.example.mygame --force");
         }
@@ -213,7 +247,7 @@ public final class ZeroLocalDoctor {
         System.out.println("  java scripts/ZeroLocalDoctor.java");
         System.out.println("  java scripts/ZeroLocalDoctor.java --help");
         System.out.println();
-        System.out.println("Checks Java 21+, Maven 3.9+ and public repository entry points.");
+        System.out.println("Checks Java 21+, Maven 3.9+, Git and public repository entry points.");
     }
 
     /**

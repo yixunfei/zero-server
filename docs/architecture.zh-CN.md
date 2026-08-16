@@ -99,7 +99,7 @@ zeroServer 采用四层架构：
 
 这些 API 用于让登录、玩家加载、进入场景、移动等通用行为可以直接接入 starter 原型；生产级鉴权、持久化、分布式 actor、GM 审批和完整审计仍需后续专项。
 
-阶段 3 当前完整闭环验证通过 `Stage3GeneratedBoFullLoopTest` 覆盖：
+阶段 3 当前完整闭环验证通过 `Stage3GeneratedBoFullLoopIT` 覆盖，并由 `integration-tests` profile 在无外部中间件环境执行：
 
 ```text
 .si 协议
@@ -143,8 +143,8 @@ zeroServer 采用四层架构：
 - 可不依赖 Docker。
 - 可使用内存实现或轻量本地实现。
 - 保持与分布式模式一致的业务 API。
-- `zero-server-starter` 默认通过 `ZeroRuntimeFactory.localDefault` 装配本地无 Docker 组件，`ZeroServerApplication` 统一持有、启动和停止这些组件。
-- 业务项目需要替换单个组件时，通过 `ZeroRuntimeFactory.localBuilder` / `ZeroRuntimeBuilder` 显式覆盖组件槽位，并可通过 `ZeroRuntimeAssemblyReport` 查看不含敏感配置值的装配诊断。
+- `zero-server-starter` 默认通过 `LocalRuntime.create()` 装配本地无 Docker 组件，`ZeroServerApplication` 统一持有、启动和停止 `GameRuntime`。
+- 业务项目需要替换单个组件时，通过 `LocalRuntime.builder()` 返回的 `LocalRuntimeBuilder` 按 typed capability 与 provider ID 显式覆盖；构建前可调用 `diagnose()`，构建后可通过 `GameRuntime.plan()` / `report()` 查看不含敏感配置值的装配诊断。
 - 阶段 3 原型可以通过 `ZeroRuntimeExecutors.localPrototype` 使用 starter 管理的 logic、actor、remote IO 和 background 执行域。
 - 真实 Kafka、MongoDB、Redis、PostgreSQL、Nacos Adapter 不属于 starter 默认本地装配；改变生产级 opt-in 契约前应提交 GitHub Design Proposal 并完成维护者评审。
 - starter 当前不做 classpath 自动 SPI 装配，避免引入 Adapter 依赖后隐式改变默认启动行为。
@@ -166,6 +166,21 @@ zeroServer 采用四层架构：
 - Prometheus/Grafana 监控。
 - 分布式 Actor gateway 采用显式 route / remote gateway 边界：`LaneKey` 只表示线程绑定对象，远程地址、topic、consumer group 和实例 metadata 由 `ActorRoute` 与 RPC discovery 协作承载。
 - 远程 Actor 状态不可直接引用，跨进程状态修改仍必须通过消息投递到目标进程的本地 `ActorScheduler`。
+
+### 6.3 阶段 1 中立装配边界（1B/1C/1D 已实现）
+
+只依赖 `zero-core` 的中立 `zero-runtime` 已进入 Reactor 和 BOM，并实现显式 catalog、preset、profile policy、typed config、依赖图、资源事务、启动健康、安全诊断和共享 capability model。Local Starter、示例、生成器和七类模板已经迁移。1D 已将 Kafka RPC、MongoDB、Redis、PostgreSQL、Nacos 和 production network 正式化为显式 provider；`ZeroProductionRuntime` 直接实现 `GameRuntime`，client 统一由中立 build resource ledger 管理，业务只访问 RPC、`DataService`、`CacheService`、`ServiceDiscovery`、resolver 与 network lifecycle 等 typed capability，不公开驱动对象。
+
+该内核遵守以下边界：
+
+- profile 是运行政策，preset 是可打印的显式选择清单，不因 classpath 改变组件。
+- 本地默认装配继续禁止外部连接；production 关键能力禁止回退本地实现。
+- 图规划只发生在启动路径，业务热路径使用构造期取得的不可变 binding。
+- planning/config/create 与 lifecycle start/startup health 使用独立累计 deadline；资源创建耗时不占用启动阶段预算。
+- 运行时拓扑不参与 CSV 业务配置热替换；拓扑变化通过重建 single-use runtime 完成。
+- 1B/1C 没有改变线程/Actor、协议、RPC、存储、缓存或日志语义。
+
+完整方案、公共契约、迁移策略和停止门见[模块化运行时装配设计](modular-runtime-assembly.zh-CN.md)。1D 受影响模块门禁已通过；全仓与阶段 0 full 结果以任务验收档案中的最新记录为准。真实外部中间件和生产容量仍属于后续验证范围。
 
 ## 7. 演进路线
 

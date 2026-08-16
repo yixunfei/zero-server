@@ -12,6 +12,8 @@ import group.zn.zero.player.PlayerLoadRequest;
 import group.zn.zero.player.PlayerLoginRequest;
 import group.zn.zero.player.PlayerLoginResult;
 import group.zn.zero.player.PlayerProfile;
+import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
 import group.zn.zero.scene.LocalSceneService;
 import group.zn.zero.scene.SceneEnterRequest;
 import group.zn.zero.scene.SceneEntityState;
@@ -38,7 +40,7 @@ class Stage3FoundationRuntimeTest {
      */
     @Test
     void foundationModulesShouldRunThroughStarterPrototypeExecutors() {
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localBuilder(
+        GameRuntime components = LocalRuntime.builder(
                 new MapZeroConfig(Map.of(
                         ZeroRuntimeConfigKeys.ZERO_MODE, "stage3-foundation",
                         ZeroRuntimeConfigKeys.ZERO_NAME, "stage3-foundation-runtime")),
@@ -50,11 +52,12 @@ class Stage3FoundationRuntimeTest {
         InMemoryCacheService<Long, PlayerProfile> playerCache = new InMemoryCacheService<>();
         application.start();
         try (LocalPlayerService playerService = new LocalPlayerService(
-                components.actorScheduler(),
+                components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER),
                 request -> 1001L,
                 playerRepository,
                 playerCache);
-                LocalSceneService sceneService = new LocalSceneService(components.actorScheduler())) {
+                LocalSceneService sceneService = new LocalSceneService(
+                        components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER))) {
             PlayerLoginResult loginResult = playerService
                     .login(new PlayerLoginRequest("guest-1001", "token-local", "trace-login"))
                     .toCompletableFuture()
@@ -109,10 +112,9 @@ class Stage3FoundationRuntimeTest {
                     .toCompletableFuture()
                     .join()
                     .isEmpty());
-            assertTrue(components.assemblyReport()
-                    .componentType("actorScheduler")
-                    .orElseThrow()
-                    .endsWith("ExecutorActorScheduler"));
+            assertTrue(components.report().plan().components().stream()
+                    .anyMatch(component -> component.componentId().equals(
+                            StandardRuntimeCapabilityModel.LOCAL_ACTOR)));
         } finally {
             application.stop();
         }

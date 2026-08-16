@@ -20,6 +20,7 @@ import group.zn.zero.hotupdate.config.LocalConfigHotReloadService;
 import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.log.LogType;
 import group.zn.zero.log.ZeroLogRecord;
+import group.zn.zero.runtime.api.GameRuntime;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -54,14 +55,14 @@ class ZeroConfigHotReloadFactoryTest {
         ZeroConfig config = new MapZeroConfig(Map.of());
         InMemoryLogSink logSink = new InMemoryLogSink();
         ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.direct();
-        ZeroRuntimeBuilder builder = ZeroRuntimeFactory.localBuilder(config, logSink, executors);
+        LocalRuntimeBuilder builder = LocalRuntime.builder(config, logSink, executors);
 
         Optional<LocalConfigHotReloadService> service =
                 ZeroConfigHotReloadFactory.configure(builder, config, builder.logAppender(), executors);
 
         assertTrue(service.isEmpty());
-        ZeroRuntimeComponents components = builder.build();
-        assertEquals(1, components.lifecycleComponents().size());
+        GameRuntime components = builder.build();
+        assertTrue(components.requireAll(LocalRuntimeCapabilities.APPLICATION_LIFECYCLES).isEmpty());
         components.start();
         components.stop();
     }
@@ -74,7 +75,7 @@ class ZeroConfigHotReloadFactoryTest {
         ZeroConfig config = config(Map.of(ZeroRuntimeConfigKeys.CONFIG_HOT_RELOAD_ENABLED, "true"));
         InMemoryLogSink logSink = new InMemoryLogSink();
         ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.direct();
-        ZeroRuntimeBuilder builder = ZeroRuntimeFactory.localBuilder(config, logSink, executors);
+        LocalRuntimeBuilder builder = LocalRuntime.builder(config, logSink, executors);
 
         ZeroException failure = assertThrows(
                 ZeroException.class,
@@ -105,7 +106,7 @@ class ZeroConfigHotReloadFactoryTest {
         InMemoryLogSink logSink = new InMemoryLogSink();
         ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("invalid-config", 2);
         try {
-            ZeroRuntimeBuilder builder = ZeroRuntimeFactory.localBuilder(invalidTimeout, logSink, executors);
+            LocalRuntimeBuilder builder = LocalRuntime.builder(invalidTimeout, logSink, executors);
             ZeroException timeoutFailure = assertThrows(
                     ZeroException.class,
                     () -> ZeroConfigHotReloadFactory.configure(
@@ -135,7 +136,7 @@ class ZeroConfigHotReloadFactoryTest {
                 ZeroRuntimeConfigKeys.CONFIG_HOT_RELOAD_OPERATOR, "starter-local"));
         InMemoryLogSink logSink = new InMemoryLogSink();
         ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("config-factory", 2);
-        ZeroRuntimeBuilder builder = ZeroRuntimeFactory.localBuilder(config, logSink, executors);
+        LocalRuntimeBuilder builder = LocalRuntime.builder(config, logSink, executors);
         LocalConfigHotReloadService service = ZeroConfigHotReloadFactory
                 .configure(builder, config, builder.logAppender(), executors)
                 .orElseThrow();
@@ -150,7 +151,7 @@ class ZeroConfigHotReloadFactoryTest {
                     decoderThread.set(Thread.currentThread().getName());
                     return new StarterItem(Integer.parseInt(row.require("id")), row.require("name"));
                 }));
-        ZeroRuntimeComponents components = builder.build();
+        GameRuntime components = builder.build();
 
         components.start();
         try {

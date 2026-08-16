@@ -143,34 +143,7 @@ public record NacosDiscoverySettings(
                 propertyLookup,
                 envLookup)
                 .orElse(DEFAULT_NAMESPACE);
-        String username = read(config,
-                NacosDiscoveryConfigKeys.USERNAME,
-                NacosDiscoveryConfigKeys.SYSTEM_USERNAME,
-                NacosDiscoveryConfigKeys.ENV_USERNAME,
-                propertyLookup,
-                envLookup)
-                .orElse("");
-        String password = read(config,
-                NacosDiscoveryConfigKeys.PASSWORD,
-                NacosDiscoveryConfigKeys.SYSTEM_PASSWORD,
-                NacosDiscoveryConfigKeys.ENV_PASSWORD,
-                propertyLookup,
-                envLookup)
-                .orElse("");
-        String accessKey = read(config,
-                NacosDiscoveryConfigKeys.ACCESS_KEY,
-                NacosDiscoveryConfigKeys.SYSTEM_ACCESS_KEY,
-                NacosDiscoveryConfigKeys.ENV_ACCESS_KEY,
-                propertyLookup,
-                envLookup)
-                .orElse("");
-        String secretKey = read(config,
-                NacosDiscoveryConfigKeys.SECRET_KEY,
-                NacosDiscoveryConfigKeys.SYSTEM_SECRET_KEY,
-                NacosDiscoveryConfigKeys.ENV_SECRET_KEY,
-                propertyLookup,
-                envLookup)
-                .orElse("");
+        NacosCredentials credentials = readCredentials(config, propertyLookup, envLookup);
         String groupName = read(config,
                 NacosDiscoveryConfigKeys.DEFAULT_GROUP,
                 NacosDiscoveryConfigKeys.SYSTEM_DEFAULT_GROUP,
@@ -212,10 +185,10 @@ public record NacosDiscoverySettings(
         return new NacosDiscoverySettings(
                 serverAddr,
                 namespace,
-                username,
-                password,
-                accessKey,
-                secretKey,
+                credentials.username(),
+                credentials.password(),
+                credentials.accessKey(),
+                credentials.secretKey(),
                 groupName,
                 clusterName,
                 timeoutMillis,
@@ -283,6 +256,41 @@ public record NacosDiscoverySettings(
                 .filter(NacosDiscoverySettings::hasText);
     }
 
+    private static NacosCredentials readCredentials(
+            final ZeroConfig config,
+            final Function<String, String> propertyLookup,
+            final Function<String, String> environmentLookup) {
+        String username = read(config,
+                NacosDiscoveryConfigKeys.USERNAME,
+                NacosDiscoveryConfigKeys.SYSTEM_USERNAME,
+                NacosDiscoveryConfigKeys.ENV_USERNAME,
+                propertyLookup,
+                environmentLookup)
+                .orElse("");
+        String password = read(config,
+                NacosDiscoveryConfigKeys.PASSWORD,
+                NacosDiscoveryConfigKeys.SYSTEM_PASSWORD,
+                NacosDiscoveryConfigKeys.ENV_PASSWORD,
+                propertyLookup,
+                environmentLookup)
+                .orElse("");
+        String accessKey = read(config,
+                NacosDiscoveryConfigKeys.ACCESS_KEY,
+                NacosDiscoveryConfigKeys.SYSTEM_ACCESS_KEY,
+                NacosDiscoveryConfigKeys.ENV_ACCESS_KEY,
+                propertyLookup,
+                environmentLookup)
+                .orElse("");
+        String secretKey = read(config,
+                NacosDiscoveryConfigKeys.SECRET_KEY,
+                NacosDiscoveryConfigKeys.SYSTEM_SECRET_KEY,
+                NacosDiscoveryConfigKeys.ENV_SECRET_KEY,
+                propertyLookup,
+                environmentLookup)
+                .orElse("");
+        return new NacosCredentials(username, password, accessKey, secretKey);
+    }
+
     private static Optional<String> readRaw(
             final ZeroConfig config,
             final String configKey,
@@ -348,5 +356,9 @@ public record NacosDiscoverySettings(
         if (!value.isBlank()) {
             properties.setProperty(key, value);
         }
+    }
+
+    /** Sensitive Nacos authentication values kept out of diagnostic text. */
+    private record NacosCredentials(String username, String password, String accessKey, String secretKey) {
     }
 }

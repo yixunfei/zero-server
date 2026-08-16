@@ -1,6 +1,6 @@
 package group.zn.zero.starter.production;
 
-import group.zn.zero.starter.ZeroRuntimeAssemblyReport;
+import group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,7 +24,7 @@ import java.util.Optional;
 public record ZeroProductionAssemblyReport(
         String profile,
         String name,
-        ZeroRuntimeAssemblyReport runtimeReport,
+        RuntimeAssemblyReport runtimeReport,
         Map<String, ZeroProductionAdapterStatus> adapterStatuses,
         List<String> lifecycleComponentTypes,
         List<String> warnings) {
@@ -42,7 +42,6 @@ public record ZeroProductionAssemblyReport(
         profile = requireText(profile, "profile");
         requireText(name, "name");
         name = REDACTED_RUNTIME_NAME;
-        runtimeReport = redactRuntimeReport(runtimeReport);
         adapterStatuses = Collections.unmodifiableMap(new LinkedHashMap<>(Objects.requireNonNull(
                 adapterStatuses,
                 "adapterStatuses")));
@@ -87,24 +86,6 @@ public record ZeroProductionAssemblyReport(
      */
     public boolean containsFragment(final String fragment) {
         return toString().contains(Objects.requireNonNull(fragment, "fragment"));
-    }
-
-    /**
-     * 创建不含配置 runtime name 的 starter 报告副本。
-     *
-     * @param report starter 原始报告；构建前诊断时可为空，不会被保留。
-     * @return 固定脱敏名称的报告副本；输入为空时返回空。
-     */
-    private static ZeroRuntimeAssemblyReport redactRuntimeReport(
-            final ZeroRuntimeAssemblyReport report) {
-        if (report == null) {
-            return null;
-        }
-        return new ZeroRuntimeAssemblyReport(
-                report.mode(),
-                REDACTED_RUNTIME_NAME,
-                report.componentTypes(),
-                report.lifecycleComponentTypes());
     }
 
     private static String requireText(final String value, final String name) {

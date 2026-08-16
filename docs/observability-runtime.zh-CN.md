@@ -43,8 +43,8 @@
 - `LogAppender` 是业务安全写入端口。正式调用方只保存和调用这个接口。
 - `LogPipeline` 实现 `LogAppender`，但不实现 `LogSink`。它同步执行，不创建线程池、不读取 ThreadLocal，也不隐式切换执行域。
 - `LogSink` 是终端装配 SPI，本身不执行结构校验或敏感字段清洗。它只能由顶层装配层传给 `LogPipeline`，不能作为业务、observer 或 GM 的直接依赖。
-- `ZeroRuntimeBuilder` 通过 `terminalLogSink(...)` 接收终端 SPI；首次调用 `logAppender()` 时创建并冻结唯一安全管线，`build()` 复用同一实例。
-- `ZeroRuntimeComponents` 只向业务暴露 `logAppender()`。配置热重载、受管调度器和 production network observer 同样注入 `LogAppender`。
+- `LocalRuntime.builder(config, terminalLogSink, executors)` 在组合根接收终端 SPI，并创建、冻结唯一安全管线；`LocalRuntimeBuilder.logAppender()` 和构建后的 `GameRuntime.require(LocalRuntimeCapabilities.LOG_APPENDER)` 返回同一安全入口。
+- 配置热重载、受管调度器和 production network observer 只注入 `LogAppender`，业务代码不持有 terminal `LogSink`。
 - Netty production lifecycle 会话先通过每连接有序 drain 把 observer 事件提交给共享受管 executor；同一连接保持提交顺序，不同连接仍可并发。该 drain 不创建线程池，也不改变共享执行器生命周期。
 
 顶层装配仍可以选择终端 sink，但业务侧只接收安全端口：

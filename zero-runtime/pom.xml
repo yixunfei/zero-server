@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>group.zn.zero</groupId>
+        <artifactId>zero-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../zero-parent/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>zero-runtime</artifactId>
+    <name>zeroServer Runtime Assembly</name>
+    <description>显式组件选择、typed 配置、确定性规划和事务式生命周期内核。</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-core</artifactId>
+        </dependency>
+    </dependencies>
+</project>

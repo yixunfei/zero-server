@@ -48,11 +48,11 @@ import group.zn.zero.scene.SceneLeaveResult;
 import group.zn.zero.scene.SceneMoveRequest;
 import group.zn.zero.scene.SceneMoveResult;
 import group.zn.zero.scene.ScenePosition;
-import group.zn.zero.starter.ZeroRuntimeAssemblyReport;
-import group.zn.zero.starter.ZeroRuntimeComponents;
+import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.starter.LocalRuntime;
+import group.zn.zero.starter.LocalRuntimeCapabilities;
 import group.zn.zero.starter.ZeroRuntimeConfigKeys;
 import group.zn.zero.starter.ZeroRuntimeExecutors;
-import group.zn.zero.starter.ZeroRuntimeFactory;
 import group.zn.zero.starter.ZeroServerApplication;
 import java.time.Instant;
 import java.util.List;
@@ -128,21 +128,22 @@ public final class RpgProtocolApplication {
     public static ProtocolDemoResult runDemo() {
         InMemoryLogSink terminalLogSink = new InMemoryLogSink();
         MonitorRuntime monitorRuntime = MonitorRuntime.createDefault();
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localBuilder(
+        GameRuntime components = LocalRuntime.builder(
                 new MapZeroConfig(Map.of(
                         ZeroRuntimeConfigKeys.ZERO_MODE, ZeroRuntimeConfigKeys.MODE_LOCAL,
                         ZeroRuntimeConfigKeys.ZERO_NAME, MODULE)),
                 terminalLogSink,
                 ZeroRuntimeExecutors.localPrototype("zero-example-rpg-protocol", 2))
-                .monitorRuntime(monitorRuntime)
+                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime)
                 .build();
         ZeroServerApplication application = new ZeroServerApplication(components);
 
         application.start();
         try (LocalPlayerService playerService = new LocalPlayerService(
-                components.actorScheduler(),
+                components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER),
                 request -> 1001L);
-                LocalSceneService sceneService = new LocalSceneService(components.actorScheduler())) {
+                LocalSceneService sceneService = new LocalSceneService(
+                        components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER))) {
             registerMetrics(monitorRuntime);
             ProtocolFlowResults results = new ProtocolFlowResults();
             GeneratedProtocolDispatcher dispatcher = registerBusinessHandlers(
@@ -166,10 +167,10 @@ public final class RpgProtocolApplication {
             dispatch(dispatcher, ProtocolIds.RPG_GM_QUERY_SCENE_PROTOCOL,
                     RpgGmQuerySceneProtocolDTOCodec.INSTANCE, gmQuerySceneAfterRequest());
 
-            ZeroRuntimeAssemblyReport report = components.assemblyReport();
+            Map<String, String> runtimeConfig = components.require(LocalRuntimeCapabilities.CONFIG).asMap();
             return new ProtocolDemoResult(
-                    report.mode(),
-                    report.name(),
+                    runtimeConfig.get(ZeroRuntimeConfigKeys.ZERO_MODE),
+                    runtimeConfig.get(ZeroRuntimeConfigKeys.ZERO_NAME),
                     results.loginResult().uid(),
                     results.loadedProfile().name(),
                     results.moveResult().currentState().position(),
@@ -185,7 +186,7 @@ public final class RpgProtocolApplication {
     }
 
     private static GeneratedProtocolDispatcher registerBusinessHandlers(
-            final ZeroRuntimeComponents components,
+            final GameRuntime components,
             final LocalPlayerService playerService,
             final LocalSceneService sceneService,
             final ProtocolFlowResults results) {
@@ -340,7 +341,7 @@ public final class RpgProtocolApplication {
         /**
          * 运行时组件。
          */
-        private final ZeroRuntimeComponents components;
+        private final GameRuntime components;
 
         /**
          * 玩家服务。
@@ -358,7 +359,7 @@ public final class RpgProtocolApplication {
         private final ProtocolFlowResults results;
 
         private ProtocolBusinessHandlers(
-                final ZeroRuntimeComponents components,
+                final GameRuntime components,
                 final LocalPlayerService playerService,
                 final LocalSceneService sceneService,
                 final ProtocolFlowResults results) {
@@ -483,7 +484,7 @@ public final class RpgProtocolApplication {
                 final String metricName,
                 final String action) {
             appendLog(traceId, message, action);
-            components.monitorRuntime().registry().record(new MetricSample(
+            components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME).registry().record(new MetricSample(
                     metricName,
                     1D,
                     Map.of("action", action),
@@ -491,7 +492,7 @@ public final class RpgProtocolApplication {
         }
 
         private void appendLog(final String traceId, final String message, final String action) {
-            components.logAppender().append(ZeroLogRecord.create(
+            components.require(LocalRuntimeCapabilities.LOG_APPENDER).append(ZeroLogRecord.create(
                     Instant.now(),
                     LogLevel.INFO,
                     LogType.BUSINESS,

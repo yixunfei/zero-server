@@ -38,7 +38,7 @@ java scripts/ZeroLocalDoctor.java
 Doctor 只检查 Java、Maven、仓库根目录、核心模块、示例和公开工具入口；它不会修改文件或连接外部组件。正常摘要类似：
 
 ```text
-zero-local-doctor=ok|checks=21|passed=21|failed=0
+zero-local-doctor=ok|checks=23|passed=23|failed=0
 ```
 
 如果失败，先修正 Java/Maven PATH 或确认当前目录包含 `pom.xml`、`README.md`、`zero-parent/pom.xml` 和 `templates/`。
@@ -147,6 +147,22 @@ java scripts/RunLocalScaffold.java --projectDir target/my-room
 模板只承诺 local/prototype 闭环。要把模板抽取为正式公共模块，应先在 GitHub 创建 Design Proposal，明确公共 API、Actor 所有权、协议兼容、存储、安全、性能和验证边界。
 
 ## 5. 构建仓库
+
+首次上手或日常关键路径 smoke：
+
+```bash
+java scripts/ZeroStage0Acceptance.java --level quick
+```
+
+提交前或阶段验收：
+
+```bash
+java scripts/ZeroStage0Acceptance.java --level full
+```
+
+`quick` 串联 Doctor、架构守卫、默认测试、SNAPSHOT 安装和需求驱动原型；`full` 进一步验证质量门禁、本地集成测试、Starter、五类独立示例和七类脚手架。输出只写入 `target/stage0-acceptance/`，不会连接外部中间件。详细映射见[阶段 0 开箱即用验收](local-stage0-acceptance.zh-CN.md)。
+
+各层也可以独立运行。
 
 默认测试：
 
@@ -272,7 +288,7 @@ mvn -B -ntp -f examples/observability-local/pom.xml exec:java
 
 ### local
 
-`ZeroRuntimeFactory.localDefault()` 提供无 Docker 默认装配。引入真实 Adapter 依赖不会自动改变行为；替换组件使用 `ZeroRuntimeFactory.localBuilder()` 显式覆盖。
+`LocalRuntime.create()` 提供无 Docker 默认装配。需要替换能力时使用 `LocalRuntime.builder()`，按 `LocalRuntimeCapabilities` 的 typed key 显式注册并选择 provider。引入真实 Adapter 依赖不会自动改变行为。
 
 适合：
 
@@ -338,6 +354,7 @@ mvn -B -ntp -DskipTests install
 ## 12. 下一步
 
 - 理解架构：[总体架构](architecture.zh-CN.md)、[模块图](module-map.md)。
+- 验收本地闭环：[阶段 0 开箱即用验收](local-stage0-acceptance.zh-CN.md)。
 - 写业务：[事件模型](event-model.zh-CN.md)、[线程模型](threading-model.zh-CN.md)、[协议 DSL](protocol-dsl.zh-CN.md)。
 - 接数据：[数据与缓存](data-cache.zh-CN.md)。
 - 做跨服：[RPC](rpc.zh-CN.md)、[Production Adapter](production-adapter-failfast-contract.zh-CN.md)。

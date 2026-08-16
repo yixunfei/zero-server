@@ -52,15 +52,7 @@ final class ProductionIpConnectionRateLimiter implements NetworkRateLimiter {
             final int burstCapacity,
             final int slots,
             final LongSupplier nanoTime) {
-        if (permitsPerSecond < 1) {
-            throw new IllegalArgumentException("permitsPerSecond must be positive");
-        }
-        if (burstCapacity < permitsPerSecond) {
-            throw new IllegalArgumentException("burstCapacity must be at least permitsPerSecond");
-        }
-        if (slots < 16 || slots > 1_048_576 || Integer.bitCount(slots) != 1) {
-            throw new IllegalArgumentException("slots must be a power of two between 16 and 1048576");
-        }
+        validateSettings(permitsPerSecond, burstCapacity, slots);
         this.permitsPerSecond = permitsPerSecond;
         this.burstCapacity = burstCapacity;
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
@@ -69,6 +61,25 @@ final class ProductionIpConnectionRateLimiter implements NetworkRateLimiter {
             buckets[index] = new Bucket();
         }
         this.mask = slots - 1;
+    }
+
+    static void validateSettings(
+            final int permitsPerSecond,
+            final int burstCapacity,
+            final int slots) {
+        if (permitsPerSecond < 1) {
+            throw new IllegalArgumentException("permitsPerSecond must be positive");
+        }
+        if (burstCapacity < permitsPerSecond) {
+            throw new IllegalArgumentException("burstCapacity must be at least permitsPerSecond");
+        }
+        if (!validSlots(slots)) {
+            throw new IllegalArgumentException("slots must be a power of two between 16 and 1048576");
+        }
+    }
+
+    static boolean validSlots(final int slots) {
+        return slots >= 16 && slots <= 1_048_576 && Integer.bitCount(slots) == 1;
     }
 
     /**

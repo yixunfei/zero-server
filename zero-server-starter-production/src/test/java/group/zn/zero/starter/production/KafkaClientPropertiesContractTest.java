@@ -93,8 +93,11 @@ class KafkaClientPropertiesContractTest {
         ZeroProductionRuntime runtime = builder.build();
         supplied.clear();
         try {
-            KafkaRpcSettings settings = runtime.kafkaRpcAdapter().orElseThrow().settings();
-            KafkaClusterHealthCheck healthCheck = kafkaHealthCheck(runtime);
+            KafkaRpcLifecycleAdapter adapter = assertInstanceOf(
+                    KafkaRpcLifecycleAdapter.class,
+                    runtime.require(ProductionRuntimeCapabilities.RPC_TRANSPORT));
+            KafkaRpcSettings settings = adapter.settings();
+            KafkaClusterHealthCheck healthCheck = new KafkaClusterHealthCheck(settings);
             Properties adminProperties = healthCheck.adminProperties(Duration.ofSeconds(2));
 
             for (Map.Entry<String, Object> entry : expected.entrySet()) {
@@ -105,7 +108,7 @@ class KafkaClientPropertiesContractTest {
             assertEquals("2000", adminProperties.getProperty(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG));
             assertEquals("2000", adminProperties.getProperty(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG));
             assertFalse(settings.toString().contains(SECRET));
-            assertFalse(runtime.report().toString().contains(SECRET));
+            assertFalse(runtime.productionReport().toString().contains(SECRET));
         } finally {
             runtime.close();
         }
@@ -120,23 +123,6 @@ class KafkaClientPropertiesContractTest {
     private ZeroProductionRuntimeBuilder isolatedBuilder(final Map<String, String> config) {
         return ZeroProductionRuntimeFactory.productionBuilder(new MapZeroConfig(config))
                 .configSourceLookups(key -> null, key -> null);
-    }
-
-    /**
-     * 从 runtime 实际生命周期装配中取得 Kafka Admin health 探针。
-     *
-     * @param runtime 已构建但未启动的 production runtime；不可为空。
-     * @return Kafka health 探针；不可为空，尚未执行。
-     */
-    private KafkaClusterHealthCheck kafkaHealthCheck(final ZeroProductionRuntime runtime) {
-        return runtime.components().lifecycleComponents().stream()
-                .filter(AdapterHealthCheckLifecycle.class::isInstance)
-                .map(AdapterHealthCheckLifecycle.class::cast)
-                .map(AdapterHealthCheckLifecycle::healthProbe)
-                .filter(KafkaClusterHealthCheck.class::isInstance)
-                .map(KafkaClusterHealthCheck.class::cast)
-                .findFirst()
-                .orElseThrow();
     }
 
     /**

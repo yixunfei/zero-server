@@ -44,6 +44,7 @@
         <module>zero-parent</module>
         <module>zero-bom</module>
         <module>zero-core</module>
+        <module>zero-runtime</module>
         <module>zero-event</module>
         <module>zero-protocol</module>
         <module>zero-codegen</module>

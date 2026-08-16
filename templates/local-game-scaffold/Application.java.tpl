@@ -32,10 +32,11 @@ import group.zn.zero.scene.SceneEnterRequest;
 import group.zn.zero.scene.SceneMoveRequest;
 import group.zn.zero.scene.SceneMoveResult;
 import group.zn.zero.scene.ScenePosition;
-import group.zn.zero.starter.ZeroRuntimeComponents;
+import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.starter.LocalRuntime;
+import group.zn.zero.starter.LocalRuntimeCapabilities;
 import group.zn.zero.starter.ZeroRuntimeConfigKeys;
 import group.zn.zero.starter.ZeroRuntimeExecutors;
-import group.zn.zero.starter.ZeroRuntimeFactory;
 import group.zn.zero.starter.ZeroServerApplication;
 import java.time.Instant;
 import java.util.List;
@@ -94,24 +95,25 @@ public final class __APP_CLASS__ {
     public static DemoResult runDemo() {
         InMemoryLogSink terminalLogSink = new InMemoryLogSink();
         MonitorRuntime monitorRuntime = MonitorRuntime.createDefault();
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localBuilder(
+        GameRuntime runtime = LocalRuntime.builder(
                 new MapZeroConfig(Map.of(
                         ZeroRuntimeConfigKeys.ZERO_MODE, ZeroRuntimeConfigKeys.MODE_LOCAL,
                         ZeroRuntimeConfigKeys.ZERO_NAME, APP_NAME)),
                 terminalLogSink,
                 ZeroRuntimeExecutors.localPrototype(APP_NAME, 2))
-                .monitorRuntime(monitorRuntime)
+                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime)
                 .build();
-        ZeroServerApplication application = new ZeroServerApplication(components);
+        ZeroServerApplication application = new ZeroServerApplication(runtime);
 
         application.start();
         try (LocalPlayerService playerService = new LocalPlayerService(
-                components.actorScheduler(),
+                runtime.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER),
                 request -> 1001L);
-                LocalSceneService sceneService = new LocalSceneService(components.actorScheduler())) {
+                LocalSceneService sceneService = new LocalSceneService(
+                        runtime.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER))) {
             registerMetrics(monitorRuntime);
             FlowResults results = new FlowResults();
-            GeneratedProtocolDispatcher dispatcher = registerHandlers(components, playerService, sceneService, results);
+            GeneratedProtocolDispatcher dispatcher = registerHandlers(runtime, playerService, sceneService, results);
 
             dispatch(dispatcher, ProtocolIds.GAME_LOGIN_PROTOCOL, GameLoginProtocolDTOCodec.INSTANCE, loginRequest());
             dispatch(dispatcher, ProtocolIds.GAME_ENTER_SCENE_PROTOCOL,
@@ -119,8 +121,8 @@ public final class __APP_CLASS__ {
             dispatch(dispatcher, ProtocolIds.GAME_MOVE_PROTOCOL, GameMoveProtocolDTOCodec.INSTANCE, moveRequest());
 
             return new DemoResult(
-                    components.assemblyReport().mode(),
-                    components.assemblyReport().name(),
+                    application.config().getOrDefault(ZeroRuntimeConfigKeys.ZERO_MODE, "unknown"),
+                    application.config().getOrDefault(ZeroRuntimeConfigKeys.ZERO_NAME, "unknown"),
                     results.loginResult().uid(),
                     results.moveResult().currentState().position(),
                     terminalLogSink.records().size(),
@@ -132,12 +134,12 @@ public final class __APP_CLASS__ {
     }
 
     private static GeneratedProtocolDispatcher registerHandlers(
-            final ZeroRuntimeComponents components,
+            final GameRuntime runtime,
             final LocalPlayerService playerService,
             final LocalSceneService sceneService,
             final FlowResults results) {
         GeneratedProtocolDispatcher dispatcher = new GeneratedProtocolDispatcher();
-        LocalGameBO bo = new LocalGameBO(components, playerService, sceneService, results);
+        LocalGameBO bo = new LocalGameBO(runtime, playerService, sceneService, results);
         dispatcher.registerGameLoginEventBO(bo);
         dispatcher.registerGameEnterSceneEventBO(bo);
         dispatcher.registerGameMoveEventBO(bo);
@@ -203,7 +205,7 @@ public final class __APP_CLASS__ {
         /**
          * Runtime components.
          */
-        private final ZeroRuntimeComponents components;
+        private final GameRuntime runtime;
 
         /**
          * Player service.
@@ -221,11 +223,11 @@ public final class __APP_CLASS__ {
         private final FlowResults results;
 
         private LocalGameBO(
-                final ZeroRuntimeComponents components,
+                final GameRuntime runtime,
                 final LocalPlayerService playerService,
                 final LocalSceneService sceneService,
                 final FlowResults results) {
-            this.components = Objects.requireNonNull(components, "components");
+            this.runtime = Objects.requireNonNull(runtime, "runtime");
             this.playerService = Objects.requireNonNull(playerService, "playerService");
             this.sceneService = Objects.requireNonNull(sceneService, "sceneService");
             this.results = Objects.requireNonNull(results, "results");
@@ -282,7 +284,7 @@ public final class __APP_CLASS__ {
                 final String metricName,
                 final String action) {
             appendLog(traceId, message, action);
-            components.monitorRuntime().registry().record(new MetricSample(
+            runtime.require(LocalRuntimeCapabilities.MONITOR_RUNTIME).registry().record(new MetricSample(
                     metricName,
                     1D,
                     Map.of("action", action),
@@ -290,7 +292,7 @@ public final class __APP_CLASS__ {
         }
 
         private void appendLog(final String traceId, final String message, final String action) {
-            components.logAppender().append(ZeroLogRecord.create(
+            runtime.require(LocalRuntimeCapabilities.LOG_APPENDER).append(ZeroLogRecord.create(
                     Instant.now(),
                     LogLevel.INFO,
                     LogType.BUSINESS,

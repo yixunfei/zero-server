@@ -5,6 +5,7 @@ import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.core.scheduler.SchedulerErrorCode;
 import group.zn.zero.log.LogAppender;
 import group.zn.zero.monitor.MonitorRuntime;
+import group.zn.zero.runtime.api.ComponentId;
 import group.zn.zero.starter.scheduler.LocalManagedScheduler;
 import group.zn.zero.starter.scheduler.LocalManagedSchedulerOptions;
 import group.zn.zero.starter.scheduler.LoggingScheduledTaskObserver;
@@ -22,6 +23,8 @@ import java.util.Optional;
  * @author zn
  */
 public final class ZeroManagedSchedulerFactory {
+
+    private static final ComponentId COMPONENT_ID = ComponentId.of("zero.local.managed-scheduler");
 
     private ZeroManagedSchedulerFactory() {
     }
@@ -60,12 +63,12 @@ public final class ZeroManagedSchedulerFactory {
      * @throws ZeroException 当配置非法、后台执行器可能内联或指标注册失败时抛出。
      */
     public static Optional<LocalManagedScheduler> configure(
-            final ZeroRuntimeBuilder builder,
+            final LocalRuntimeBuilder builder,
             final ZeroConfig config,
             final LogAppender logAppender,
             final MonitorRuntime monitorRuntime,
             final ZeroRuntimeExecutors executors) {
-        ZeroRuntimeBuilder checkedBuilder = Objects.requireNonNull(builder, "builder");
+        LocalRuntimeBuilder checkedBuilder = Objects.requireNonNull(builder, "builder");
         ZeroConfig checkedConfig = Objects.requireNonNull(config, "config");
         LogAppender checkedLogAppender = Objects.requireNonNull(logAppender, "logAppender");
         MonitorRuntime checkedMonitor = Objects.requireNonNull(monitorRuntime, "monitorRuntime");
@@ -84,7 +87,7 @@ public final class ZeroManagedSchedulerFactory {
                 checkedExecutors.backgroundExecutor(),
                 observer,
                 options);
-        checkedBuilder.addInfrastructureLifecycleComponent(scheduler);
+        checkedBuilder.addInfrastructureLifecycle(COMPONENT_ID, scheduler);
         return Optional.of(scheduler);
     }
 

@@ -59,6 +59,7 @@
 | --- | --- | --- | --- |
 | Java / Maven 环境 | `java -version`、`mvn -version` | `<填写>` | `<填写>` |
 | 仓库入口 | `java scripts/ZeroLocalDoctor.java` | `<填写>` | `<填写>` |
+| 阶段 0 本地闭环 | `java scripts/ZeroStage0Acceptance.java --level full` | `<填写>` | `target/stage0-acceptance/logs` |
 | 架构边界 | `java scripts/ZeroArchitectureGuard.java` | `<填写>` | `<填写>` |
 | Maven validate | `mvn -B -ntp -DskipTests validate` | `<填写>` | `<填写>` |
 | 默认测试 | `mvn -B -ntp test` | `<填写>` | `<填写>` |

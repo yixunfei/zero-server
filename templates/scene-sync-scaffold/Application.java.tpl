@@ -30,10 +30,11 @@ import group.zn.zero.monitor.MetricSample;
 import group.zn.zero.monitor.MonitorRuntime;
 import group.zn.zero.protocol.buffer.ZeroWriter;
 import group.zn.zero.protocol.codec.ZeroPayloadCodec;
-import group.zn.zero.starter.ZeroRuntimeComponents;
+import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.starter.LocalRuntime;
+import group.zn.zero.starter.LocalRuntimeCapabilities;
 import group.zn.zero.starter.ZeroRuntimeConfigKeys;
 import group.zn.zero.starter.ZeroRuntimeExecutors;
-import group.zn.zero.starter.ZeroRuntimeFactory;
 import group.zn.zero.starter.ZeroServerApplication;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -91,19 +92,19 @@ public final class __APP_CLASS__ {
     public static DemoResult runDemo() {
         InMemoryLogSink terminalLogSink = new InMemoryLogSink();
         MonitorRuntime monitorRuntime = MonitorRuntime.createDefault();
-        ZeroRuntimeComponents components = ZeroRuntimeFactory.localBuilder(
+        GameRuntime runtime = LocalRuntime.builder(
                 new MapZeroConfig(Map.of(
                         ZeroRuntimeConfigKeys.ZERO_MODE, ZeroRuntimeConfigKeys.MODE_LOCAL,
                         ZeroRuntimeConfigKeys.ZERO_NAME, APP_NAME)),
                 terminalLogSink,
                 ZeroRuntimeExecutors.localPrototype(APP_NAME, 2))
-                .monitorRuntime(monitorRuntime)
+                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime)
                 .build();
-        ZeroServerApplication application = new ZeroServerApplication(components);
+        ZeroServerApplication application = new ZeroServerApplication(runtime);
 
         application.start();
         try (SceneSyncActor sceneActor = new SceneSyncActor(
-                components, components.logAppender(), monitorRuntime)) {
+                runtime, runtime.require(LocalRuntimeCapabilities.LOG_APPENDER), monitorRuntime)) {
             registerMetrics(monitorRuntime);
             GeneratedProtocolDispatcher dispatcher = registerHandlers(sceneActor);
 
@@ -119,8 +120,8 @@ public final class __APP_CLASS__ {
                     SceneSyncQueryVisibleProtocolDTOCodec.INSTANCE, queryVisibleRequest(1001L));
 
             return new DemoResult(
-                    components.assemblyReport().mode(),
-                    components.assemblyReport().name(),
+                    application.config().getOrDefault(ZeroRuntimeConfigKeys.ZERO_MODE, "unknown"),
+                    application.config().getOrDefault(ZeroRuntimeConfigKeys.ZERO_NAME, "unknown"),
                     sceneActor.summary(),
                     terminalLogSink.records().size(),
                     monitorRuntime.registry().samples().size(),
@@ -281,10 +282,11 @@ public final class __APP_CLASS__ {
         private final ActorSubscription subscription;
 
         private SceneSyncActor(
-                final ZeroRuntimeComponents components,
+                final GameRuntime runtime,
                 final LogAppender logAppender,
                 final MonitorRuntime monitorRuntime) {
-            this.scheduler = Objects.requireNonNull(components, "components").actorScheduler();
+            this.scheduler = Objects.requireNonNull(runtime, "runtime")
+                    .require(LocalRuntimeCapabilities.ACTOR_SCHEDULER);
             this.logAppender = Objects.requireNonNull(logAppender, "logAppender");
             this.monitorRuntime = Objects.requireNonNull(monitorRuntime, "monitorRuntime");
             this.subscription = scheduler.register(SceneCommand.class, ActorHandler.sync((context, message) -> {

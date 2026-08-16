@@ -10,6 +10,7 @@ zeroServer 的基本形态是“游戏专用运行时内核 + Starter / Adapter 
 flowchart TB
     APP["业务应用 / 运营 API"] --> STARTER["zero-server-starter"]
     APP --> PROD["zero-server-starter-production"]
+    APP --> RUNTIME["zero-runtime"]
     PROD --> STARTER
     PROD --> ADAPTERS["Kafka / MongoDB / Redis / PostgreSQL / Nacos Adapters"]
     STARTER --> GAME["zero-game / zero-player / zero-scene"]
@@ -18,12 +19,14 @@ flowchart TB
     GAME --> FOUNDATION["zero-event / zero-actor / zero-protocol"]
     INFRA --> FOUNDATION
     FOUNDATION --> CORE["zero-core"]
+    RUNTIME --> CORE
     BENCH["zero-benchmarks（显式 profile）"] --> PROD
 ```
 
 硬边界：
 
 - `zero-core` 不依赖 Netty、Kafka、MongoDB、Redis、PostgreSQL、Nacos、日志实现或监控实现。
+- `zero-runtime` 的非测试直接依赖必须且只能是 `zero-core`；它不扫描 classpath，也不反向依赖 Starter、Adapter 或业务模块。
 - `zero-event`、`zero-protocol`、`zero-actor` 只建立在核心抽象之上，不绑定具体基础设施。
 - `zero-rpc`、`zero-data` 提供中立抽象；具体实现位于 `zero-rpc-kafka`、`zero-data-*`。
 - 默认 `zero-server-starter` 保持无外部中间件可运行；真实 Adapter 由业务项目或 `zero-server-starter-production` 显式接入。
@@ -43,6 +46,7 @@ flowchart TB
 | 模块 | 职责 | 核心入口 | 常见修改位置 | 禁止依赖与主要风险 |
 | --- | --- | --- | --- | --- |
 | `zero-core` | 生命周期、配置、错误码、通用基础契约 | `Lifecycle`、`AbstractLifecycle`、`ZeroConfig`、`MapZeroConfig`、`ErrorCode` | `zero-core/src/main/java/group/zn/zero/core` | 禁止任何具体中间件和上层业务依赖；公共契约变化会产生全仓影响 |
+| `zero-runtime` | 显式组件选择、typed config、依赖图、事务式生命周期、健康、安全诊断与共享能力模型 | `RuntimeAssembler`、`GameRuntime`、`ComponentCatalog`、`RuntimeProfile`、`RuntimeCapabilityModel` | `zero-runtime/src/main/java/group/zn/zero/runtime` | 只依赖 `zero-core`；禁止 classpath 自动装配和具体端口/Adapter 依赖；公共契约已用于 1C Local 装配 |
 | `zero-event` | 事件总线、优先级、拦截、重试与死信抽象 | `EventBus`、`InMemoryEventBus`、`EventHandler`、`EventInterceptor` | `zero-event/src/main/java/group/zn/zero/event` | 不绑定网络或消息队列；派发顺序、重试和异常语义属于高风险行为 |
 | `zero-protocol` | 协议模型、注册表、frame 与 codec SPI | `ProtocolCodec`、`ProtocolFrameCodec`、`ProtocolRegistry`、`ProtocolDefinition` | `zero-protocol/src/main/java/group/zn/zero/protocol` | 协议 ID、wire format、兼容策略与编解码变化会影响客户端和跨服通信 |
 | `zero-codegen` | 协议 DSL 解析与 Java / C# / TypeScript / GDScript 代码生成 | `ProtocolCodegenCli`、`ProtocolCodegenRunner`、`DefaultProtocolDslParser`、`DefaultCodeGenerator` | `zero-codegen/src/main/java/group/zn/zero/codegen`、`zero-codegen/src/test` | 生成规则、文件布局和 DTO / BO 接口变化必须同步多语言产物与测试 |
@@ -85,14 +89,32 @@ flowchart TB
 
 | 模块 / 目录 | 职责 | 核心入口 | 常见修改位置 | 禁止依赖与主要风险 |
 | --- | --- | --- | --- | --- |
-| `zero-server-starter` | 聚合本地运行组件，统一生命周期、执行器、配置热更和受管调度 | `ZeroRuntimeBuilder`、`ZeroRuntimeFactory`、`ZeroServerApplication`、`ZeroRuntimeExecutors` | `zero-server-starter/src/main/java/group/zn/zero/starter` | compile/runtime 路径禁止强制引入真实 Adapter；默认路径必须可在无 Docker 环境运行 |
-| `zero-server-starter-production` | 显式 opt-in 真实 Adapter、启动预算、健康检查、fail-fast 与回滚 | `ZeroProductionRuntimeBuilder`、`ZeroProductionRuntimeFactory`、`ProductionResourceScope` | `zero-server-starter-production/src/main/java/group/zn/zero/starter/production` | 配置缺失、连接失败或健康检查失败必须清晰失败；诊断不得输出密码、token 或完整连接串 |
+| `zero-server-starter` | 聚合本地运行组件，统一生命周期、执行器、配置热更和受管调度 | `LocalRuntime`、`LocalRuntimeBuilder`、`LocalRuntimeCapabilities`、`ZeroServerApplication`、`ZeroRuntimeExecutors` | `zero-server-starter/src/main/java/group/zn/zero/starter` | compile/runtime 路径禁止强制引入真实 Adapter；默认路径必须可在无 Docker 环境运行 |
+| `zero-server-starter-production` | 显式 opt-in 真实 Adapter、启动预算、健康检查、fail-fast 与回滚 | `ZeroProductionRuntimeBuilder`、`ZeroProductionRuntimeFactory`、`ZeroProductionRuntime`、`ProductionRuntimeCapabilities` | `zero-server-starter-production/src/main/java/group/zn/zero/starter/production` | 配置缺失、连接失败或健康检查失败必须清晰失败；诊断不得输出密码、token 或完整连接串 |
 | `zero-benchmarks` | JMH 微基准与方向性成本证据 | `LogFieldsBenchmark`、`MetricLabelsBenchmark`、`ProductionNetworkObserverBenchmark` | `zero-benchmarks/src/main/java/group/zn/zero/benchmark` | 只通过 `-Pbenchmarks` 启用；结果不能直接解释为生产吞吐或容量承诺 |
 | `examples/` | 可独立构建运行的最小示例 | 各示例 `*Application` 与 README | `examples/<example>` | 示例默认使用 local/prototype 能力；生产部署必须显式配置安全、容量和真实 Adapter |
 | `templates/` | 七类本地项目脚手架 | `README.md.tpl`、`BUSINESS_GUIDE.md.tpl`、`COMPONENTS.md.tpl`、`NEXT_STEPS.md.tpl` | `templates/<template>` | 修改模板时需批量生成、测试、运行并验证 manifest 与交接文档一致 |
-| `scripts/` | 本地诊断、生成、结构检查与批量验证 | `ZeroLocalDoctor.java`、`NewLocalGame.java`、`RunLocalPrototype.java`、`VerifyLocalScaffolds.java` | `scripts/*.java` | 脚本不应依赖私有协作材料或本机绝对路径；生成操作必须限定输出目录并避免覆盖未知文件 |
+| `scripts/` | 本地诊断、生成、结构检查、统一验收与批量验证 | `ZeroLocalDoctor.java`、`ZeroStage0Acceptance.java`、`NewLocalGame.java`、`RunLocalPrototype.java`、`VerifyLocalScaffolds.java` | `scripts/*.java` | 脚本不应依赖私有协作材料或本机绝对路径；生成操作必须限定输出目录并避免覆盖未知文件 |
 
-## 8. 常见改动的落点
+## 8. 阶段 1 中立装配内核（1B/1C 已实现）
+
+`zero-runtime` 已进入根 Reactor 和 BOM。切片 1B/1C 与 1D-0 已实现中立 API/SPI、显式 catalog/selection、最小依赖闭包、typed config、确定性拓扑、build/start 双资源账本、独立 assembly/startup deadline、启动健康、single-use 生命周期、安全诊断和共享 capability model。具体游戏端口 key 由 Local Starter 或 Production 组合根绑定；中立模块仍不包含真实 Adapter provider。
+
+当前依赖方向：
+
+```text
+业务应用（可直接选择） -> zero-runtime -> zero-core
+Local Starter -> LocalRuntime providers / presets -> zero-runtime
+Production Starter -> explicit Production providers -> zero-runtime
+zero-codegen -> RuntimeCapabilityModel -> zero-runtime
+zero-runtime -X-> 业务模块、Starter、Netty、Kafka、Nacos、数据库驱动
+```
+
+首版 API/SPI 与引擎位于同一模块并按 `api`、`spi`、`assembly`、`config`、`health`、`diagnostics`、`capability` 包隔离。Local Starter、示例、模板和 `zero-codegen` 已切换到该内核及共享模型；1D 已接入 Kafka、MongoDB、Redis、PostgreSQL、Nacos 与 network provider，并删除包内迁移 bridge。业务只通过中立 typed capability 访问运行能力。
+
+完整的方案比较、公共契约、复杂度分层和破坏性迁移计划见[模块化运行时装配设计](modular-runtime-assembly.zh-CN.md)。1D 五项契约已经确认并完成代码收敛；真实外部中间件、容量、恢复与长稳证据仍未完成，因此不得描述为 production ready。
+
+## 9. 常见改动的落点
 
 | 需求 | 首选位置 | 必须联动检查 |
 | --- | --- | --- |
@@ -109,9 +131,10 @@ flowchart TB
 | 结构化日志或指标字段 | `zero-log` / `zero-monitor` | 脱敏、基数、错误码、审计、告警与基准 |
 | GM / 审批 / 审计 | `zero-gm` | 鉴权、权限、dry-run、归因、失败状态与安全测试 |
 | 本地或生产装配 | 对应 Starter | 生命周期顺序、回滚、配置泄漏、资源关闭和示例 |
+| 中立组件装配契约 | `zero-runtime` | 依赖图、选择来源、配置 schema、回滚、健康、诊断脱敏和 API/SPI 编译面 |
 | 新增正式模块或改变依赖方向 | 根 `pom.xml`、`zero-bom`、本文 | 架构守卫、CI、README、兼容性和迁移说明 |
 
-## 9. 变更检查
+## 10. 变更检查
 
 修改模块结构或依赖后，至少执行：
 

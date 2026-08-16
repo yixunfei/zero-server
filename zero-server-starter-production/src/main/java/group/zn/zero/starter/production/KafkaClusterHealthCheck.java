@@ -2,6 +2,7 @@ package group.zn.zero.starter.production;
 
 import group.zn.zero.rpc.kafka.KafkaRpcSettings;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
@@ -32,13 +33,10 @@ final class KafkaClusterHealthCheck implements ProductionHealthProbe {
      * 创建 Kafka broker 健康检查。
      *
      * @param settings Kafka RPC 配置；不可为空。
-     * @param clientProperties 经过白名单校验的公共客户端属性；不可为空，调用后会复制。
      */
-    KafkaClusterHealthCheck(
-            final KafkaRpcSettings settings,
-            final Map<String, Object> clientProperties) {
+    KafkaClusterHealthCheck(final KafkaRpcSettings settings) {
         this.settings = Objects.requireNonNull(settings, "settings");
-        this.clientProperties = Map.copyOf(Objects.requireNonNull(clientProperties, "clientProperties"));
+        this.clientProperties = securityProperties(settings);
     }
 
     /**
@@ -123,6 +121,16 @@ final class KafkaClusterHealthCheck implements ProductionHealthProbe {
                 ProductionAdapterErrorCode.STARTUP_HEALTH_FAILED,
                 ProductionAdapterErrorCode.STARTUP_HEALTH_FAILED.message(),
                 failure);
+    }
+
+    private Map<String, Object> securityProperties(final KafkaRpcSettings currentSettings) {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        currentSettings.producerProperties().forEach((key, value) -> {
+            if (ProductionKafkaRpcProvider.allowedClientProperty(key)) {
+                properties.put(key, value);
+            }
+        });
+        return Map.copyOf(properties);
     }
 
     private Duration requirePositive(final Duration timeout) {
