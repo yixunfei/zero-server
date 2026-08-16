@@ -30,7 +30,7 @@
         <jedis.version>7.2.0</jedis.version>
         <nacos.client.version>3.2.2</nacos.client.version>
         <postgresql.jdbc.version>42.7.11</postgresql.jdbc.version>
-        <maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
+        <maven.compiler.plugin.version>3.15.0</maven.compiler.plugin.version>
         <maven.surefire.plugin.version>3.2.5</maven.surefire.plugin.version>
         <maven.failsafe.plugin.version>3.2.5</maven.failsafe.plugin.version>
         <maven.enforcer.plugin.version>3.5.0</maven.enforcer.plugin.version>
