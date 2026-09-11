@@ -8,13 +8,6 @@ import group.zn.zero.examples.rpg.generated.bo.RpgLeaveSceneEventBO;
 import group.zn.zero.examples.rpg.generated.bo.RpgLoadPlayerEventBO;
 import group.zn.zero.examples.rpg.generated.bo.RpgLoginEventBO;
 import group.zn.zero.examples.rpg.generated.bo.RpgMoveEventBO;
-import group.zn.zero.examples.rpg.generated.dto.RpgEnterSceneProtocolDTO;
-import group.zn.zero.examples.rpg.generated.dto.RpgGmQueryPlayerProtocolDTO;
-import group.zn.zero.examples.rpg.generated.dto.RpgGmQuerySceneProtocolDTO;
-import group.zn.zero.examples.rpg.generated.dto.RpgLeaveSceneProtocolDTO;
-import group.zn.zero.examples.rpg.generated.dto.RpgLoadPlayerProtocolDTO;
-import group.zn.zero.examples.rpg.generated.dto.RpgLoginProtocolDTO;
-import group.zn.zero.examples.rpg.generated.dto.RpgMoveProtocolDTO;
 import group.zn.zero.examples.rpg.generated.dto.codec.RpgEnterSceneProtocolDTOCodec;
 import group.zn.zero.examples.rpg.generated.dto.codec.RpgGmQueryPlayerProtocolDTOCodec;
 import group.zn.zero.examples.rpg.generated.dto.codec.RpgGmQuerySceneProtocolDTOCodec;
@@ -22,8 +15,15 @@ import group.zn.zero.examples.rpg.generated.dto.codec.RpgLeaveSceneProtocolDTOCo
 import group.zn.zero.examples.rpg.generated.dto.codec.RpgLoadPlayerProtocolDTOCodec;
 import group.zn.zero.examples.rpg.generated.dto.codec.RpgLoginProtocolDTOCodec;
 import group.zn.zero.examples.rpg.generated.dto.codec.RpgMoveProtocolDTOCodec;
-import group.zn.zero.examples.rpg.generated.protocol.ProtocolIds;
+import group.zn.zero.examples.rpg.generated.dto.RpgEnterSceneProtocolDTO;
+import group.zn.zero.examples.rpg.generated.dto.RpgGmQueryPlayerProtocolDTO;
+import group.zn.zero.examples.rpg.generated.dto.RpgGmQuerySceneProtocolDTO;
+import group.zn.zero.examples.rpg.generated.dto.RpgLeaveSceneProtocolDTO;
+import group.zn.zero.examples.rpg.generated.dto.RpgLoadPlayerProtocolDTO;
+import group.zn.zero.examples.rpg.generated.dto.RpgLoginProtocolDTO;
+import group.zn.zero.examples.rpg.generated.dto.RpgMoveProtocolDTO;
 import group.zn.zero.examples.rpg.generated.protocol.dispatch.GeneratedProtocolDispatcher;
+import group.zn.zero.examples.rpg.generated.protocol.ProtocolIds;
 import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.log.LogLevel;
 import group.zn.zero.log.LogOperation;
@@ -41,6 +41,13 @@ import group.zn.zero.player.PlayerLoginResult;
 import group.zn.zero.player.PlayerProfile;
 import group.zn.zero.protocol.buffer.ZeroWriter;
 import group.zn.zero.protocol.codec.ZeroPayloadCodec;
+import group.zn.zero.runtime.actor.ActorRuntime;
+import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.bootstrap.RuntimeBasics;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
+import group.zn.zero.runtime.log.LogRuntime;
+import group.zn.zero.runtime.monitor.MonitorRuntimeComponent;
 import group.zn.zero.scene.LocalSceneService;
 import group.zn.zero.scene.SceneEnterRequest;
 import group.zn.zero.scene.SceneLeaveRequest;
@@ -48,17 +55,13 @@ import group.zn.zero.scene.SceneLeaveResult;
 import group.zn.zero.scene.SceneMoveRequest;
 import group.zn.zero.scene.SceneMoveResult;
 import group.zn.zero.scene.ScenePosition;
-import group.zn.zero.runtime.api.GameRuntime;
 import group.zn.zero.starter.LocalRuntime;
-import group.zn.zero.starter.LocalRuntimeCapabilities;
-import group.zn.zero.starter.ZeroRuntimeConfigKeys;
-import group.zn.zero.starter.ZeroRuntimeExecutors;
 import group.zn.zero.starter.ZeroServerApplication;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * RPG 协议驱动本地示例。
@@ -134,16 +137,16 @@ public final class RpgProtocolApplication {
                         ZeroRuntimeConfigKeys.ZERO_NAME, MODULE)),
                 terminalLogSink,
                 ZeroRuntimeExecutors.localPrototype("zero-example-rpg-protocol", 2))
-                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime)
+                .replace(MonitorRuntimeComponent.MONITOR_RUNTIME, monitorRuntime)
                 .build();
         ZeroServerApplication application = new ZeroServerApplication(components);
 
         application.start();
         try (LocalPlayerService playerService = new LocalPlayerService(
-                components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER),
+                components.require(ActorRuntime.ACTOR_SCHEDULER),
                 request -> 1001L);
                 LocalSceneService sceneService = new LocalSceneService(
-                        components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER))) {
+                        components.require(ActorRuntime.ACTOR_SCHEDULER))) {
             registerMetrics(monitorRuntime);
             ProtocolFlowResults results = new ProtocolFlowResults();
             GeneratedProtocolDispatcher dispatcher = registerBusinessHandlers(
@@ -167,7 +170,7 @@ public final class RpgProtocolApplication {
             dispatch(dispatcher, ProtocolIds.RPG_GM_QUERY_SCENE_PROTOCOL,
                     RpgGmQuerySceneProtocolDTOCodec.INSTANCE, gmQuerySceneAfterRequest());
 
-            Map<String, String> runtimeConfig = components.require(LocalRuntimeCapabilities.CONFIG).asMap();
+            Map<String, String> runtimeConfig = components.require(RuntimeBasics.CONFIG).asMap();
             return new ProtocolDemoResult(
                     runtimeConfig.get(ZeroRuntimeConfigKeys.ZERO_MODE),
                     runtimeConfig.get(ZeroRuntimeConfigKeys.ZERO_NAME),
@@ -484,7 +487,7 @@ public final class RpgProtocolApplication {
                 final String metricName,
                 final String action) {
             appendLog(traceId, message, action);
-            components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME).registry().record(new MetricSample(
+            components.require(MonitorRuntimeComponent.MONITOR_RUNTIME).registry().record(new MetricSample(
                     metricName,
                     1D,
                     Map.of("action", action),
@@ -492,7 +495,7 @@ public final class RpgProtocolApplication {
         }
 
         private void appendLog(final String traceId, final String message, final String action) {
-            components.require(LocalRuntimeCapabilities.LOG_APPENDER).append(ZeroLogRecord.create(
+            components.require(LogRuntime.LOG_APPENDER).append(ZeroLogRecord.create(
                     Instant.now(),
                     LogLevel.INFO,
                     LogType.BUSINESS,

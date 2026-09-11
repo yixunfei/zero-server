@@ -6,12 +6,13 @@
 我要做某类游戏服务器原型，应该从哪个模板开始？
 ```
 
-当前模板全部是 local / prototype 形态，目标是让用户快速理解协议驱动、生成 BO、本地 starter、Actor lane、日志和指标如何组合。它们不是生产部署模板，也不冻结正式公共 API。涉及正式模块、跨进程一致性、连接治理、存储格式、权限和线程模型的改动，应先提交 GitHub Design Proposal 并完成维护者评审。
+当前提供七类业务原型和一个按需 `runtime` 模板。业务模板默认组合协议生成、Actor、日志和监控；`runtime` 从配置与执行器起步，可显式添加组件和替换实现。模板不是生产部署证明；选中外部 Adapter 后仍需真实服务验证。
 
 ## 1. 快速选择
 
 | 需求 | 模板参数 | 适合验证 | 主要生产缺口 |
 | --- | --- | --- | --- |
+| 最小内核 / 自选组件 | `--template runtime` | 最小依赖、显式装配、实现替换 | 外部服务与部署验证 |
 | RPG 最小本地流程 | `--template local` | 登录、进入场景、移动、玩家 / 场景服务组合 | 账号鉴权、断线重连、正式在线状态和持久化策略 |
 | 房间 / 对战小局 | `--template room` | 创建房间、加入、准备、开始、提交帧输入 | 匹配、广播、断线恢复、观战、结算和跨服房间；正式化前阅读 [房间组件最小契约草案](room-component-minimum-contract.zh-CN.md) |
 | 场景同步 / 简单 AOI | `--template scene-sync` | 进入场景、移动、可见性查询 | 正式 AOI、广播、delta 压缩、快照协议和跨服迁移；正式化前阅读 [AOI / 状态同步最小契约草案](aoi-state-sync-minimum-contract.zh-CN.md) |
@@ -68,7 +69,7 @@ java scripts/NewLocalGame.java `
   --outputDir target\my-game
 ```
 
-生成后执行：
+七类默认业务模板生成后执行：
 
 ```powershell
 java scripts/RunLocalScaffold.java --projectDir target/my-game
@@ -87,19 +88,47 @@ java scripts/RunLocalPrototype.java `
 
 如果没有指定 `--template` 或 `--fromKeywords`，默认使用 `local`。
 
-每个生成项目都包含：
+七类业务模板的生成项目都包含：
 
 - `src/main/protocol/*.si` 和 `protoId.txt`。
 - Maven `generate-sources` 阶段 codegen。
 - 生成 DTO、codec、BO、dispatcher。
 - 手写 BO 实现。
-- 本地 starter / Actor lane / 日志 / 指标接入；业务只保存安全 `LogAppender`，指标定义显式声明有序标签 schema。
+- 独立 `RuntimeAssembly.java` 装配 Actor、日志和监控；业务只保存安全 `LogAppender`，指标定义显式声明有序标签 schema。
 - 一个 smoke test。
 - `README.md`，说明当前模板边界，并在 `Next Business Step` 中交接到 `BUSINESS_GUIDE.md` 的 `First Business Change`。
 - `BUSINESS_GUIDE.md`，说明业务开发入口、协议修改位置、手写 BO 逻辑位置、本地验证命令、按模板差异化的第一个业务改动 recipe 和生产边界。
 - `COMPONENTS.md`，说明生成协议流、框架组件触点和生产晋升边界。
 - `NEXT_STEPS.md`，说明生产晋升缺口、推荐命令和高风险暂停点。
 - `zero-scaffold.json`，提供模板名称、协议文件、摘要前缀、组件触点和原型边界等机器可读元数据。
+
+## 按需组件选择
+
+先运行 `mvn -B -ntp -q -DskipTests install` 安装本次框架与生成工具。`--components` 接收逗号分隔的组件 ID，附加到模板必须能力上。未知 ID 会在写入工程前失败。
+
+支持：`bootstrap`、`actor`、`event`、`protocol`、`rpc`、`data`、`cache`、`log`、`monitor`、`discovery`、`redis`、`custom-actor`。基础配置/执行器始终存在，组件依赖自动补齐。`redis` 选择 Redis 数据工厂；`custom-actor` 用应用 provider 替换 Actor 调度器。
+
+| 路径 | 生成参数 | 默认验收行为 |
+| --- | --- | --- |
+| 最小运行时 | `--template runtime` | 仅 3 个框架依赖，启动后关闭 |
+| 事件 / Actor | `--template runtime --components event,actor` | 7 个框架依赖，启动后关闭 |
+| 本地 RPG | `--template local` | 原有登录、场景进入与移动流程 |
+| 单 Redis | `--template runtime --components redis` | 装配和关闭，输出 `started=false` |
+| 自定义实现 | `--template local --components custom-actor` | 同一业务源码使用 `LocalActorScheduler` |
+
+```powershell
+java scripts/NewLocalGame.java --template runtime --components event,actor --projectName my-runtime --outputDir target/my-runtime
+mvn -q -f target/my-runtime/pom.xml clean test exec:java
+java scripts/VerifyGeneratedCompositions.java
+```
+
+POM 由所选 provider 的 Maven 坐标及模板源码需要组成。RPG 的 player/scene 仍传递需要 game、data、cache 抽象；这些类存在不代表安装了对应运行时 provider。其他六类业务模板不会固定引入 player/scene。codegen 是 exec 插件依赖，不进入应用运行类路径。最小 `runtime` 模板没有协议文件或协议构建插件。
+
+每个工程还生成 `config/application.properties.example` 和 `RuntimeAssembly.java`，清单增加 `selectedComponents`、`selectedProviders`、`runtimeCapabilities`。`data` 和 `redis` 自动将 Repository 角色 `main` 绑定到对应来源，业务接入见 [Repository 指南](repository-composition-guide.zh-CN.md)。
+
+配置文件通过 `ZERO_CONFIG_FILE` 或 `-Dzero.config.file` 交给 `ZeroConfigLoader`。Redis runtime 模板默认不连接服务；使用样例配置后执行 `mvn -q exec:java '-Dexec.args=--start'` 才进行真实启动健康检查。给业务模板额外添加 Redis 后，业务启动路径需要该外部服务，不属于七类默认本地 smoke。
+
+`VerifyGeneratedCompositions` 为五条路径独立构建、运行测试，检查 Maven 解析后的完整框架依赖集合，并在隔离 classloader 中验证未选 SDK 与 codegen 类缺席。七类业务回归仍使用 `VerifyLocalScaffolds`；两者均纳入阶段 0 full。
 
 `RunLocalScaffold` 会先调用 `InspectLocalScaffold` 快速检查项目结构、manifest、协议入口和 local/prototype 边界，再执行 Maven `clean test` 和 `exec:java`，并校验输出摘要。它不替代 external-tests、压测或生产验收。
 
@@ -398,3 +427,32 @@ java scripts/VerifyLocalScaffolds.java --outputDir target\scaffold-verify
 ```
 
 该命令会生成并验证七种 local/prototype 项目，检查 README `Next Business Step` / `BUSINESS_GUIDE.md` 首改 recipe / `COMPONENTS.md` / `zero-scaffold.json`，通过 `RunLocalScaffold` 执行结构检查、`clean test`、`exec:java` 和摘要校验。它仍然不连接真实中间件，也不证明生产就绪；正式模块推进前应提交 GitHub Design Proposal 并完成维护者评审。
+
+## 7. 按需组装接入闭环
+
+| 场景 | 入口 | 验证范围 |
+| --- | --- | --- |
+| 最小 runtime 与自选组件 | `NewLocalGame --template runtime --components ...`，随后直接运行 Maven | 生成依赖、组装、诊断、运行 |
+| 七类默认业务原型 | `RunLocalPrototype` 或 `RunLocalScaffold` | 协议生成、业务首改流程与本地 smoke |
+| 业务原型结构检查 | `InspectLocalScaffold` | 七类业务模板的协议和文档约定，不适用于纯 runtime |
+| 全部公开组件选择 | `VerifyGeneratedCompositions` | 每项选择真实编译运行，代表路径检查最小 classpath，混合选择检查 provider/capability |
+| 真实 Repository 实现 | `VerifyRepositoryDrivers.ps1` | 本轮专用数据库中的同一业务契约 |
+
+从仓库根目录执行：
+
+```powershell
+. ./scripts/dev-env.ps1
+mvn -B -ntp -q -DskipTests install
+java scripts/NewLocalGame.java --template runtime --components event,custom-actor --projectName my-runtime --packageName group.example.runtime --outputDir target/my-runtime
+mvn -B -ntp -q -f target/my-runtime/pom.xml clean test
+mvn -B -ntp -q -f target/my-runtime/pom.xml exec:java '-Dexec.args=--diagnose'
+mvn -B -ntp -q -f target/my-runtime/pom.xml exec:java
+```
+
+在生成的 `RuntimeAssembly.java` 中替换 provider；业务服务继续依赖能力接口。`custom-actor` 给出显式注册和 override 示例。选择 `data` 或 `redis` 时，生成的 Repository 角色 `main` 分别绑定 `local` 或 `redis`；自定义角色与 MongoDB/PostgreSQL 接入见 [Repository 指南](repository-composition-guide.zh-CN.md)。
+
+`--diagnose` 与 `--start` 分开执行。Redis 默认只构建与关闭，需根据 `config/application.properties.example` 设置 `ZERO_CONFIG_FILE`，检查外部诊断报告的 `missingConfigKeys`，再执行 `mvn ... exec:java '-Dexec.args=--start'`。诊断成功不表示服务可达。
+
+脚手架在写入文件前拒绝未知参数、重复参数（包括别名重复）、非法组件、Java 关键字包名及不能形成合法类名的项目名。例如 `123-game` 被拒绝，`game-123` 可生成 `Game123Application`。`--components` 必须准确拼写；不会将拼错的参数静默变成默认选择。
+
+`VerifyGeneratedCompositions` 从代码生成器组件目录读取选择集合，不单独维护另一份组件目录。当前包含五条代表消费路径、十二个单组件选择和两条混合路径，共十九个生成消费者。清单/POM 的结构检查使用 JSON/XML 解析，runtime 模板测试再对照实际 runtime plan 检查所选 provider 与 capability。

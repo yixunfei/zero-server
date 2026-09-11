@@ -136,7 +136,7 @@ public final class InspectLocalScaffold {
 
     private static void checkPom(final InspectionReport report, final Path pom, final String text) {
         requireContains(report, "pom-zero-dependency", text, "<groupId>group.zn.zero</groupId>", pom);
-        requireContains(report, "pom-starter", text, "<artifactId>zero-server-starter</artifactId>", pom);
+        requireContains(report, "pom-bootstrap", text, "<artifactId>zero-runtime-bootstrap</artifactId>", pom);
         requireContains(report, "pom-codegen", text, "<artifactId>zero-codegen</artifactId>", pom);
         requireContains(report, "pom-generate-sources", text, "<phase>generate-sources</phase>", pom);
         requireContains(report, "pom-protocol-input", text, "src/main/protocol", pom);
@@ -245,7 +245,7 @@ public final class InspectLocalScaffold {
         checkBoundaryBoolean(report, booleans, "prototype", true);
         checkBoundaryBoolean(report, booleans, "connectsExternalMiddleware", false);
         checkBoundaryBoolean(report, booleans, "opensNetworkPorts", false);
-        requireContains(report, "manifest-components", text, "\"zero-codegen\"", manifest);
+        requireContains(report, "manifest-components", text, "\"zero-runtime-bootstrap\"", manifest);
         requireContains(report, "manifest-business-guide", text, "\"BUSINESS_GUIDE.md\"", manifest);
         requireContains(report, "manifest-documents", text, "\"COMPONENTS.md\"", manifest);
         requireContains(report, "manifest-next-steps", text, "\"NEXT_STEPS.md\"", manifest);

@@ -21,7 +21,7 @@ java scripts/ZeroArchitectureGuard.java --help
 正常摘要类似：
 
 ```text
-zero-architecture-guard=ok|modules=28|rules=17|violations=0|warnings=0
+zero-architecture-guard=ok|modules=47|rules=18|violations=0|warnings=0
 ```
 
 其中：
@@ -38,7 +38,7 @@ zero-architecture-guard=ok|modules=28|rules=17|violations=0|warnings=0
 脚本会检查：
 
 - 当前目录是否包含 `pom.xml`、`CONTRIBUTING.md` 和 `docs/module-map.md`。
-- 根 `pom.xml` 是否声明当前 28 个预期模块。
+- 根 `pom.xml` 是否声明当前 47 个预期模块。
 - 每个预期模块是否存在 `pom.xml`。
 
 当前守卫关注的模块包括 `zero-core`、`zero-runtime`、`zero-event`、`zero-protocol`、`zero-actor`、`zero-game`、`zero-player`、`zero-scene`、`zero-net`、`zero-rpc`、`zero-data`、`zero-cache`、`zero-log`、`zero-monitor`、`zero-gm`、`zero-hot-update`、`zero-server-starter` 和 `zero-server-starter-production` 等。
@@ -61,7 +61,8 @@ zero-architecture-guard=ok|modules=28|rules=17|violations=0|warnings=0
 - `zero-rpc` 不直接依赖 `zero-rpc-kafka`、`zero-discovery-nacos`、Kafka client 或 Nacos SDK。
 - `zero-data` 不依赖 `zero-actor`。
 - `zero-server-starter` 的 compile/runtime 依赖不包含真实 Adapter 模块；测试 scope 允许用于 smoke 或 external-test 验证。
-- `zero-server-starter-production` 显式依赖 `zero-server-starter`、`zero-rpc-kafka`、`zero-data-mongo`、`zero-data-redis`、`zero-data-postgresql` 和 `zero-discovery-nacos`。
+- `zero-server-starter-production` 显式依赖全量本地 Starter 和独立的 Kafka、MongoDB、Redis、PostgreSQL、Nacos、network runtime 集成模块。
+- `integration-boundaries` 递归检查 `zero-runtime-*`、中立 discovery 与 RPC discovery 的仓内 compile/runtime 依赖闭包，禁止反向依赖 Starter 或引入无关 Adapter。
 
 这些规则保护 local 默认路径和 production opt-in 路径的差异：本地 starter 负责无 Docker、无真实中间件的开箱体验；真实 Adapter 必须由 production starter 或业务项目显式接入。
 
@@ -105,7 +106,7 @@ O1 后新增的五项守卫会确认：
 - Maven 全量测试通过。
 - quality profile、PMD、SpotBugs、Checkstyle 或 JaCoCo 通过。
 - external-tests 能连接真实中间件。
-- 传递依赖完全符合预期。
+- Maven 最终解析的第三方传递依赖完全符合预期；此项由 `examples/modular-composition` 的 Enforcer 与实际 classpath 测试补充。
 - Java import/package 层没有越界引用。
 - 生产容量、长稳、压测或性能基线已经完成。
 - 公共 API、SPI、协议、线程模型、存储格式、日志字段或权限模型已经冻结。

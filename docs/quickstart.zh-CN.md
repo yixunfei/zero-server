@@ -45,6 +45,16 @@ zero-local-doctor=ok|checks=23|passed=23|failed=0
 
 ## 3. 最短路径：生成并运行游戏原型
 
+只需基础运行时或指定组件时，可先安装框架，再生成独立工程：
+
+```powershell
+mvn -B -ntp -q -DskipTests install
+java scripts/NewLocalGame.java --template runtime --components event,actor --projectName my-runtime --outputDir target/my-runtime
+mvn -q -f target/my-runtime/pom.xml clean test exec:java
+```
+
+省略 `--components` 只安装配置和执行器。组件选择、单 Redis 和自定义 provider 见[脚手架目录](scaffold-templates.zh-CN.md)；同一业务切换数据来源见[Repository 接入指南](repository-composition-guide.zh-CN.md)。下面的命令用于生成完整游戏原型。
+
 PowerShell：
 
 ```powershell
@@ -160,7 +170,7 @@ java scripts/ZeroStage0Acceptance.java --level quick
 java scripts/ZeroStage0Acceptance.java --level full
 ```
 
-`quick` 串联 Doctor、架构守卫、默认测试、SNAPSHOT 安装和需求驱动原型；`full` 进一步验证质量门禁、本地集成测试、Starter、五类独立示例和七类脚手架。输出只写入 `target/stage0-acceptance/`，不会连接外部中间件。详细映射见[阶段 0 开箱即用验收](local-stage0-acceptance.zh-CN.md)。
+`quick` 串联 Doctor、架构守卫、默认测试、SNAPSHOT 安装和需求驱动原型；`full` 进一步验证质量门禁、本地集成测试、Starter、六类独立示例、七类业务脚手架和五条按需生成路径。输出写入 `target/stage0-acceptance/` 与 `target/generated-composition-verify/`，不会连接外部中间件。详细映射见[阶段 0 开箱即用验收](local-stage0-acceptance.zh-CN.md)。
 
 各层也可以独立运行。
 
@@ -288,7 +298,7 @@ mvn -B -ntp -f examples/observability-local/pom.xml exec:java
 
 ### local
 
-`LocalRuntime.create()` 提供无 Docker 默认装配。需要替换能力时使用 `LocalRuntime.builder()`，按 `LocalRuntimeCapabilities` 的 typed key 显式注册并选择 provider。引入真实 Adapter 依赖不会自动改变行为。
+`LocalRuntime.create()` 提供无 Docker 全量默认装配。精简工程使用 `RuntimeBasics.builder().install(...)`，按组件集成入口的 typed key 显式注册并选择 provider；例如 `ActorRuntime.ACTOR_SCHEDULER`。引入真实 Adapter 依赖不会自动改变行为。组件依赖、替换、生命周期和迁移示例见[按需装配指南](modular-composition-guide.zh-CN.md)。
 
 适合：
 

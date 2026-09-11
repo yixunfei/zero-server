@@ -2,11 +2,13 @@ package group.zn.zero.data.postgresql;
 
 import group.zn.zero.data.adapter.AbstractRepositoryAdapter;
 import group.zn.zero.data.envelope.ZeroDataEntityCodec;
+import group.zn.zero.data.envelope.EnvelopeRepositoryFactory;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeCrudRepository;
 import group.zn.zero.data.mapping.ZeroDataObjectMetadata;
 import group.zn.zero.data.model.VersionedEntity;
 import group.zn.zero.protocol.codec.ZeroPayloadCodec;
 import java.util.Objects;
+import javax.sql.DataSource;
 
 /**
  * PostgreSQL 数据适配器。
@@ -20,6 +22,21 @@ public final class PostgresqlDataAdapter extends AbstractRepositoryAdapter {
      */
     public PostgresqlDataAdapter() {
         super("postgresql");
+    }
+
+    /** Connections are opened per operation and closed by the existing JDBC envelope store. */
+    public EnvelopeRepositoryFactory repositoryFactory(final PostgresqlDriverSettings settings) {
+        Objects.requireNonNull(settings, "settings");
+        return new EnvelopeRepositoryFactory(metadata -> new PostgresqlDriverEnvelopeStore(
+                metadata.namespace(), metadata.collection(), settings));
+    }
+
+    /** Uses a caller-owned source with auto-commit connections; the composition root chooses the pool. */
+    public EnvelopeRepositoryFactory repositoryFactory(final DataSource source, final String tableName) {
+        Objects.requireNonNull(source, "source");
+        String table = PostgresqlDriverSettings.requireIdentifier(tableName);
+        return new EnvelopeRepositoryFactory(metadata -> new PostgresqlDriverEnvelopeStore(
+                metadata.namespace(), metadata.collection(), table, source));
     }
 
     /**

@@ -15,6 +15,8 @@ import group.zn.zero.data.envelope.ZeroDataEnvelope;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeStore;
 import group.zn.zero.data.error.DataErrorCode;
 import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -56,8 +58,13 @@ public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
             final String collectionName) {
         this.namespace = requireText(namespace, "namespace");
         this.collectionName = requireText(collectionName, "collectionName");
-        this.mongoCollection = Objects.requireNonNull(database, "database")
-                .getCollection(physicalCollectionName(this.namespace, this.collectionName));
+        MongoDatabase checkedDatabase = Objects.requireNonNull(database, "database");
+        String physicalName = physicalCollectionName(this.namespace, this.collectionName);
+        // Use the sharded namespace limit so a later sharding change remains possible.
+        if (checkedDatabase.getName().getBytes(StandardCharsets.UTF_8).length + 1 + physicalName.length() > 235) {
+            throw new IllegalArgumentException("encoded MongoDB namespace exceeds 235 bytes");
+        }
+        this.mongoCollection = checkedDatabase.getCollection(physicalName);
     }
 
     /**
@@ -192,12 +199,14 @@ public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
     }
 
     private String physicalCollectionName(final String namespace, final String collectionName) {
-        return safeMongoSegment(namespace) + "__" + safeMongoSegment(collectionName);
+        return "z_" + encodeMongoSegment(namespace) + "__" + encodeMongoSegment(collectionName);
     }
 
-    private String safeMongoSegment(final String value) {
-        String current = requireText(value, "mongoCollectionSegment");
-        return current.replaceAll("[^A-Za-z0-9_]", "_");
+    private String encodeMongoSegment(final String value) {
+        if (!StandardCharsets.UTF_8.newEncoder().canEncode(value)) {
+            throw new IllegalArgumentException("MongoDB logical name must contain valid Unicode");
+        }
+        return HexFormat.of().formatHex(value.getBytes(StandardCharsets.UTF_8));
     }
 
     private String requireText(final String value, final String name) {

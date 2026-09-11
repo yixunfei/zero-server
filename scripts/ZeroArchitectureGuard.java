@@ -40,6 +40,25 @@ public final class ZeroArchitectureGuard {
             "zero-bom",
             "zero-core",
             "zero-runtime",
+            "zero-runtime-bootstrap",
+            "zero-runtime-event",
+            "zero-runtime-actor",
+            "zero-runtime-protocol",
+            "zero-runtime-rpc",
+            "zero-runtime-data",
+            "zero-runtime-cache",
+            "zero-runtime-log",
+            "zero-runtime-monitor",
+            "zero-discovery",
+            "zero-rpc-discovery",
+            "zero-runtime-discovery",
+            "zero-runtime-production",
+            "zero-runtime-kafka",
+            "zero-runtime-mongo",
+            "zero-runtime-redis",
+            "zero-runtime-postgresql",
+            "zero-runtime-nacos",
+            "zero-runtime-net",
             "zero-event",
             "zero-protocol",
             "zero-codegen",
@@ -80,11 +99,13 @@ public final class ZeroArchitectureGuard {
      */
     private static final Set<String> PRODUCTION_REQUIRED_MODULES = Set.of(
             "zero-server-starter",
-            "zero-rpc-kafka",
-            "zero-data-mongo",
-            "zero-data-redis",
-            "zero-data-postgresql",
-            "zero-discovery-nacos");
+            "zero-runtime-production",
+            "zero-runtime-kafka",
+            "zero-runtime-mongo",
+            "zero-runtime-redis",
+            "zero-runtime-postgresql",
+            "zero-runtime-nacos",
+            "zero-runtime-net");
 
     /** benchmark 允许直接依赖的框架运行时模块。 */
     private static final Set<String> BENCHMARK_RUNTIME_MODULES = Set.of(
@@ -100,6 +121,7 @@ public final class ZeroArchitectureGuard {
 
     /** 允许直接持有 terminal LogSink 的顶层装配源码。 */
     private static final Set<String> TERMINAL_LOG_SINK_ASSEMBLY_FILES = Set.of(
+            "zero-runtime-log/src/main/java/group/zn/zero/runtime/log/LogRuntime.java",
             "zero-server-starter/src/main/java/group/zn/zero/starter/LocalRuntime.java",
             "zero-server-starter/src/main/java/group/zn/zero/starter/LocalRuntimeBuilder.java",
             "zero-server-starter/src/main/java/group/zn/zero/starter/LocalRuntimeCapabilities.java",
@@ -180,6 +202,7 @@ public final class ZeroArchitectureGuard {
         checkModulePoms(report);
         checkZeroCoreBoundary(report);
         checkRuntimeBoundary(report);
+        checkIntegrationBoundaries(report);
         checkFoundationBoundaries(report);
         checkRpcBoundary(report);
         checkActorBoundary(report);
@@ -368,10 +391,56 @@ public final class ZeroArchitectureGuard {
                 .toList();
         if (missing.isEmpty()) {
             report.pass("production-starter-boundary", "zero-server-starter-production explicitly depends on starter "
-                    + "and required real adapter modules.");
+                    + "and independently consumable integration modules.");
         } else {
             report.fail("production-starter-boundary", "zero-server-starter-production missing dependencies: "
                     + String.join(", ", missing));
+        }
+    }
+
+    private static void checkIntegrationBoundaries(final GuardReport report) throws IOException {
+        List<String> violations = new ArrayList<>();
+        for (String module : EXPECTED_MODULES) {
+            if (!module.startsWith("zero-runtime-") && !"zero-discovery".equals(module)
+                    && !"zero-rpc-discovery".equals(module)) {
+                continue;
+            }
+            Set<String> closure = new HashSet<>();
+            collectRuntimeClosure(report, module, closure);
+            if (closure.stream().anyMatch(dependency -> dependency.startsWith("zero-server-starter"))) {
+                violations.add(module + " depends on a Starter");
+            }
+            Set<String> adapters = new HashSet<>(closure);
+            adapters.retainAll(REAL_ADAPTER_MODULES);
+            String allowed = switch (module) {
+                case "zero-runtime-kafka" -> "zero-rpc-kafka";
+                case "zero-runtime-mongo" -> "zero-data-mongo";
+                case "zero-runtime-redis" -> "zero-data-redis";
+                case "zero-runtime-postgresql" -> "zero-data-postgresql";
+                case "zero-runtime-nacos" -> "zero-discovery-nacos";
+                default -> "";
+            };
+            adapters.remove(allowed);
+            if (!adapters.isEmpty()) {
+                violations.add(module + " pulls unrelated adapters " + adapters.stream().sorted().toList());
+            }
+        }
+        if (violations.isEmpty()) {
+            report.pass("integration-boundaries", "Integration runtime closures exclude Starters and unrelated adapters.");
+        } else {
+            report.fail("integration-boundaries", String.join("; ", violations));
+        }
+    }
+
+    private static void collectRuntimeClosure(
+            final GuardReport report, final String module, final Set<String> visited) throws IOException {
+        if (!visited.add(module)) {
+            return;
+        }
+        for (Dependency dependency : dependenciesOf(report, module)) {
+            if (!dependency.isTestOnly() && "group.zn.zero".equals(dependency.groupId())) {
+                collectRuntimeClosure(report, dependency.artifactId(), visited);
+            }
         }
     }
 

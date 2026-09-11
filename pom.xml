@@ -69,6 +69,25 @@
         <module>zero-hot-update</module>
         <module>zero-server-starter</module>
         <module>zero-server-starter-production</module>
+        <module>zero-runtime-bootstrap</module>
+        <module>zero-runtime-event</module>
+        <module>zero-runtime-actor</module>
+        <module>zero-runtime-protocol</module>
+        <module>zero-runtime-rpc</module>
+        <module>zero-runtime-data</module>
+        <module>zero-runtime-cache</module>
+        <module>zero-runtime-log</module>
+        <module>zero-runtime-monitor</module>
+        <module>zero-discovery</module>
+        <module>zero-rpc-discovery</module>
+        <module>zero-runtime-discovery</module>
+        <module>zero-runtime-production</module>
+        <module>zero-runtime-kafka</module>
+        <module>zero-runtime-mongo</module>
+        <module>zero-runtime-redis</module>
+        <module>zero-runtime-postgresql</module>
+        <module>zero-runtime-nacos</module>
+        <module>zero-runtime-net</module>
     </modules>
 
     <profiles>

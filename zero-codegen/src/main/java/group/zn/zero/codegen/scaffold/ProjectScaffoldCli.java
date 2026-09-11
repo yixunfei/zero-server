@@ -3,9 +3,7 @@ package group.zn.zero.codegen.scaffold;
 import group.zn.zero.codegen.scaffold.ProjectScaffoldGenerator.ProjectScaffoldResult;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /** zero-codegen 项目脚手架命令行入口。 */
@@ -25,27 +23,28 @@ public final class ProjectScaffoldCli {
      * @throws IOException 模板读取或项目写入失败。
      */
     public static void main(final String[] args) throws IOException {
+        Map<String, String> arguments = ScaffoldArguments.parse(args);
         ScaffoldCatalog catalog = ScaffoldCatalog.standard();
         ScaffoldSelector selector = new ScaffoldSelector(catalog);
-        if (hasFlag(args, "--help", "-h")) {
+        if (arguments.containsKey("--help")) {
             printHelp(catalog);
             return;
         }
-        String recommendation = optionValue(args, "--recommend", "--recommendTemplate", "--recommend-template");
+        String recommendation = arguments.get("--recommend");
         if (recommendation != null) {
             printRecommendations(catalog, selector, recommendation);
             return;
         }
-        String details = optionValue(args, "--describeTemplate", "--describe-template");
+        String details = arguments.get("--describetemplate");
         if (details != null) {
             printTemplateDetails(catalog.require(details));
             return;
         }
-        if (hasFlag(args, "--listTemplates", "--list-templates")) {
+        if (arguments.containsKey("--listtemplates")) {
             printTemplateList(catalog);
             return;
         }
-        Options options = Options.parse(args);
+        Options options = Options.parse(arguments);
         ScaffoldTemplate template = options.fromKeywords().isBlank()
                 ? catalog.require(options.template())
                 : selector.select(options.fromKeywords());
@@ -57,6 +56,7 @@ public final class ProjectScaffoldCli {
                 template,
                 options.templateRoot(),
                 options.fromKeywords(),
+                options.components(),
                 options.force());
         ProjectScaffoldResult result = new ProjectScaffoldGenerator(catalog.capabilityModel()).generate(request);
         printResult(request, result);
@@ -74,8 +74,11 @@ public final class ProjectScaffoldCli {
         }
         System.out.println("  project: " + result.projectName());
         System.out.println("  package: " + request.packageName());
-        System.out.println("  runtimeProfile: local");
-        System.out.println("  runtimeCapabilities: " + request.template().capabilityIds().size());
+        var selection = new ScaffoldComponents(ScaffoldCatalog.standard().capabilityModel())
+                .resolve(request.template().capabilityIds(), request.components());
+        System.out.println("  runtimeProfile: " + (selection.external() ? "external-test" : "local"));
+        System.out.println("  components: " + String.join(", ", selection.components()));
+        System.out.println("  runtimeCapabilities: " + selection.capabilities().size());
         System.out.println("Next:");
         System.out.println("  mvn -q -f \"" + target.resolve("pom.xml") + "\" clean test");
         System.out.println("  mvn -q -f \"" + target.resolve("pom.xml") + "\" exec:java");
@@ -156,6 +159,8 @@ public final class ProjectScaffoldCli {
         System.out.println("  --outputDir <path>        Output directory. Default: projectName");
         System.out.println("  --zeroVersion <version>   zeroServer dependency version. Default: " + DEFAULT_ZERO_VERSION);
         System.out.println("  --template <template>     Scaffold template. Default: local");
+        System.out.println("  --components <ids>       Additional components, comma-separated: "
+                + String.join(",", ScaffoldComponents.supported()));
         System.out.println("  --fromKeywords <words>    Select scaffold template from business keywords");
         System.out.println("  --force                   Overwrite known scaffold files in outputDir");
         System.out.println("  --listTemplates           Print supported templates");
@@ -168,31 +173,6 @@ public final class ProjectScaffoldCli {
         System.out.println("Template catalog: docs/scaffold-templates.zh-CN.md");
     }
 
-    private static boolean hasFlag(final String[] args, final String... flags) {
-        for (String arg : args) {
-            for (String flag : flags) {
-                if (flag.equalsIgnoreCase(arg)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private static String optionValue(final String[] args, final String... names) {
-        for (int index = 0; index < args.length; index++) {
-            for (String name : names) {
-                if (name.equalsIgnoreCase(args[index])) {
-                    if (index + 1 >= args.length || args[index + 1].startsWith("--")) {
-                        throw new IllegalArgumentException("missing value for argument: " + args[index]);
-                    }
-                    return args[index + 1];
-                }
-            }
-        }
-        return null;
-    }
-
     private record Options(
             String projectName,
             String packageName,
@@ -201,27 +181,14 @@ public final class ProjectScaffoldCli {
             String template,
             String fromKeywords,
             Path templateRoot,
+            List<String> components,
             boolean force) {
 
-        private static Options parse(final String[] args) {
-            Map<String, String> values = new LinkedHashMap<>();
-            boolean force = false;
-            for (int index = 0; index < args.length; index++) {
-                String key = args[index];
-                if ("--force".equalsIgnoreCase(key)) {
-                    force = true;
-                } else {
-                    if (!key.startsWith("--") || index + 1 >= args.length || args[index + 1].startsWith("--")) {
-                        throw new IllegalArgumentException("invalid argument: " + key);
-                    }
-                    values.put(key.toLowerCase(Locale.ROOT), args[++index]);
-                }
-            }
+        private static Options parse(final Map<String, String> values) {
             String projectName = values.getOrDefault("--projectname", DEFAULT_PROJECT_NAME);
             String packageName = values.getOrDefault("--packagename", DEFAULT_PACKAGE_NAME);
             String output = values.getOrDefault("--outputdir", projectName);
-            String fromKeywords = values.getOrDefault("--fromkeywords",
-                    values.getOrDefault("--from-keywords", ""));
+            String fromKeywords = values.getOrDefault("--fromkeywords", "");
             if (!fromKeywords.isBlank() && values.containsKey("--template")) {
                 throw new IllegalArgumentException("--template and --fromKeywords cannot be used together");
             }
@@ -233,7 +200,15 @@ public final class ProjectScaffoldCli {
                     values.getOrDefault("--template", "local"),
                     fromKeywords,
                     Path.of(values.getOrDefault("--templateroot", "templates")),
-                    force);
+                    parseComponents(values.getOrDefault("--components", "")),
+                    values.containsKey("--force"));
+        }
+
+        private static List<String> parseComponents(final String value) {
+            if (value.isBlank()) {
+                return List.of();
+            }
+            return java.util.Arrays.stream(value.split(",", -1)).map(String::trim).toList();
         }
     }
 }

@@ -1,7 +1,7 @@
 package group.zn.zero.starter;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -9,13 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import group.zn.zero.actor.LaneKey;
 import group.zn.zero.cache.InMemoryCacheService;
+import group.zn.zero.codegen.dsl.ProtocolDslDocument;
 import group.zn.zero.codegen.ProtocolCodegenOptions;
 import group.zn.zero.codegen.ProtocolCodegenRunner;
-import group.zn.zero.codegen.dsl.ProtocolDslDocument;
 import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.core.lifecycle.AbstractLifecycle;
-import group.zn.zero.discovery.nacos.InMemoryServiceDiscovery;
-import group.zn.zero.discovery.nacos.ServiceInstance;
+import group.zn.zero.discovery.InMemoryServiceDiscovery;
+import group.zn.zero.discovery.ServiceInstance;
 import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.log.LogAppender;
 import group.zn.zero.log.LogType;
@@ -25,18 +25,22 @@ import group.zn.zero.logic.LogicFlowResult;
 import group.zn.zero.protocol.ProtocolDirection;
 import group.zn.zero.runtime.api.ComponentId;
 import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.bootstrap.RuntimeBasics;
+import group.zn.zero.runtime.cache.CacheRuntime;
+import group.zn.zero.runtime.data.DataRuntime;
 import group.zn.zero.runtime.diagnostics.RuntimeAssemblyException;
 import group.zn.zero.runtime.diagnostics.RuntimeErrorCode;
-import java.io.IOException;
+import group.zn.zero.runtime.rpc.RpcRuntime;
 import java.io.InputStream;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.Test;
 
 /**
  * zeroServer 应用启动测试。
@@ -80,13 +84,13 @@ class ZeroServerApplicationTest {
 
         assertSame(components, application.runtime());
         assertTrue(components.running());
-        assertTrue(components.require(LocalRuntimeCapabilities.PERSISTENCE_MANAGER).running());
+        assertTrue(components.require(DataRuntime.PERSISTENCE_MANAGER).running());
 
         application.stop();
 
         assertFalse(application.running());
         assertFalse(components.running());
-        assertFalse(components.require(LocalRuntimeCapabilities.PERSISTENCE_MANAGER).running());
+        assertFalse(components.require(DataRuntime.PERSISTENCE_MANAGER).running());
     }
 
     /**
@@ -121,15 +125,15 @@ class ZeroServerApplicationTest {
         GameRuntime components = LocalRuntime.builder(new MapZeroConfig(Map.of(
                         "zero.mode", "custom",
                         "zero.name", "custom-runtime")))
-                .replace(LocalRuntimeCapabilities.CACHE_SERVICE, cacheService)
+                .replace(CacheRuntime.CACHE_SERVICE, cacheService)
                 .build();
 
         group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport report = components.report();
 
-        assertSame(cacheService, components.require(LocalRuntimeCapabilities.CACHE_SERVICE));
-        assertEquals("custom", components.require(LocalRuntimeCapabilities.CONFIG).get("zero.mode").orElseThrow());
+        assertSame(cacheService, components.require(CacheRuntime.CACHE_SERVICE));
+        assertEquals("custom", components.require(RuntimeBasics.CONFIG).get("zero.mode").orElseThrow());
         assertEquals("custom-runtime",
-                components.require(LocalRuntimeCapabilities.CONFIG).get("zero.name").orElseThrow());
+                components.require(RuntimeBasics.CONFIG).get("zero.name").orElseThrow());
         assertTrue(report.plan().components().stream()
                 .anyMatch(component -> component.componentId().equals(
                         ComponentId.of("application.zero.cache.service"))));
@@ -148,7 +152,11 @@ class ZeroServerApplicationTest {
         LogAppender logAppender = builder.logAppender();
         GameRuntime components = builder.build();
 
-        assertSame(logAppender, components.require(LocalRuntimeCapabilities.LOG_APPENDER));
+        ZeroServerApplication application = new ZeroServerApplication(components);
+        application.start();
+        logAppender.append(terminalLogSink.records().getFirst());
+        assertEquals(2, terminalLogSink.records().size());
+        application.stop();
         assertThrows(IllegalStateException.class, builder::build);
     }
 
@@ -194,7 +202,7 @@ class ZeroServerApplicationTest {
     void runtimeBuilderShouldRejectUnknownRpcProvider() {
         RuntimeAssemblyException exception = assertThrows(RuntimeAssemblyException.class, () -> LocalRuntime
                 .builder(new MapZeroConfig(Map.of("zero.mode", "test")))
-                .override(LocalRuntimeCapabilities.RPC_TRANSPORT, ComponentId.of("test.rpc.missing"))
+                .override(RpcRuntime.RPC_TRANSPORT, ComponentId.of("test.rpc.missing"))
                 .build());
 
         assertSame(RuntimeErrorCode.RUNTIME_UNKNOWN_PROVIDER, exception.errorCode());
@@ -208,10 +216,10 @@ class ZeroServerApplicationTest {
         GameRuntime components = LocalRuntime.create(new MapZeroConfig(Map.of("zero.mode", "test")));
 
         assertSame(
-                components.require(LocalRuntimeCapabilities.RPC_TRANSPORT),
-                components.require(LocalRuntimeCapabilities.RPC_HANDLER_REGISTRY));
+                components.require(RpcRuntime.RPC_TRANSPORT),
+                components.require(RpcRuntime.RPC_HANDLER_REGISTRY));
         assertInstanceOf(group.zn.zero.rpc.local.InMemoryRpcTransport.class,
-                components.require(LocalRuntimeCapabilities.RPC_TRANSPORT));
+                components.require(RpcRuntime.RPC_TRANSPORT));
     }
 
     /**

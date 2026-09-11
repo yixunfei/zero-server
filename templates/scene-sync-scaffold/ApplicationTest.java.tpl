@@ -19,7 +19,7 @@ class __TEST_CLASS__ {
         String summary = result.summaryLine();
 
         assertAll("local scene sync scaffold result",
-                () -> assertEquals("local", result.mode()),
+                () -> assertEquals("__RUNTIME_PROFILE__", result.mode()),
                 () -> assertEquals("__PROJECT_NAME__", result.name()),
                 () -> assertEquals(
                         "scene=scene-1,entities=3,focus=1001,visible=2,visibleIds=1002,1003,lastDelta=move:1003@8,8",
@@ -27,7 +27,7 @@ class __TEST_CLASS__ {
                 () -> assertEquals(6, result.logCount()),
                 () -> assertEquals(5, result.metricCount()),
                 () -> assertEquals(92105, result.maxProtocolId()),
-                () -> assertTrue(summary.startsWith("scene-sync=ok|mode=local|name=__PROJECT_NAME__")),
+                () -> assertTrue(summary.startsWith("scene-sync=ok|mode=__RUNTIME_PROFILE__|name=__PROJECT_NAME__")),
                 () -> assertTrue(summary.endsWith("|maxProtocolId=92105")));
     }
 }

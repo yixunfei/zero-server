@@ -5,14 +5,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import group.zn.zero.cache.CacheService;
 import group.zn.zero.data.DataService;
-import group.zn.zero.discovery.nacos.ServiceDiscovery;
+import group.zn.zero.discovery.ServiceDiscovery;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
 import group.zn.zero.rpc.discovery.RpcServiceResolver;
 import group.zn.zero.rpc.spi.RpcHandlerRegistry;
 import group.zn.zero.rpc.spi.RpcTransport;
 import group.zn.zero.runtime.api.BindingCardinality;
+import group.zn.zero.runtime.cache.CacheRuntime;
 import group.zn.zero.runtime.capability.MavenCoordinate;
 import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
+import group.zn.zero.runtime.data.DataRuntime;
+import group.zn.zero.runtime.discovery.DiscoveryRuntime;
+import group.zn.zero.runtime.net.NetworkRuntime;
+import group.zn.zero.runtime.rpc.RpcRuntime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -25,37 +30,37 @@ class ProductionRuntimeCapabilitiesTest {
                 StandardRuntimeCapabilityModel.RPC_TRANSPORT,
                 RpcTransport.class,
                 BindingCardinality.SINGLE,
-                ProductionRuntimeCapabilities.RPC_TRANSPORT);
+                RpcRuntime.RPC_TRANSPORT);
         assertKey(
                 StandardRuntimeCapabilityModel.RPC_HANDLER_REGISTRY,
                 RpcHandlerRegistry.class,
                 BindingCardinality.SINGLE,
-                ProductionRuntimeCapabilities.RPC_HANDLER_REGISTRY);
+                RpcRuntime.RPC_HANDLER_REGISTRY);
         assertKey(
                 StandardRuntimeCapabilityModel.DATA_SERVICES,
                 DataService.class,
                 BindingCardinality.MULTIPLE,
-                ProductionRuntimeCapabilities.DATA_SERVICES);
+                DataRuntime.DATA_SERVICES);
         assertKey(
                 StandardRuntimeCapabilityModel.CACHE_SERVICE,
                 CacheService.class,
                 BindingCardinality.SINGLE,
-                ProductionRuntimeCapabilities.CACHE_SERVICE);
+                CacheRuntime.CACHE_SERVICE);
         assertKey(
                 StandardRuntimeCapabilityModel.SERVICE_DISCOVERY,
                 ServiceDiscovery.class,
                 BindingCardinality.SINGLE,
-                ProductionRuntimeCapabilities.SERVICE_DISCOVERY);
+                DiscoveryRuntime.SERVICE_DISCOVERY);
         assertKey(
                 StandardRuntimeCapabilityModel.RPC_SERVICE_RESOLVER,
                 RpcServiceResolver.class,
                 BindingCardinality.SINGLE,
-                ProductionRuntimeCapabilities.RPC_SERVICE_RESOLVER);
+                RpcRuntime.RPC_SERVICE_RESOLVER);
         assertKey(
                 StandardRuntimeCapabilityModel.NETWORK_LIFECYCLE,
                 ProductionNetworkLifecycle.class,
                 BindingCardinality.SINGLE,
-                ProductionRuntimeCapabilities.NETWORK_LIFECYCLE);
+                NetworkRuntime.NETWORK_LIFECYCLE);
     }
 
     @Test
@@ -82,8 +87,9 @@ class ProductionRuntimeCapabilitiesTest {
                 .contains(StandardRuntimeCapabilityModel.PROFILE_PRODUCTION));
         assertEquals(
                 List.of(
-                        MavenCoordinate.zero("zero-discovery-nacos"),
-                        MavenCoordinate.zero("zero-rpc")),
+                        MavenCoordinate.zero("zero-discovery"),
+                        MavenCoordinate.zero("zero-rpc"),
+                        MavenCoordinate.zero("zero-runtime-nacos")),
                 StandardRuntimeCapabilityModel.instance().artifactsForProviders(List.of(
                         StandardRuntimeCapabilityModel.PRODUCTION_NACOS_DISCOVERY,
                         StandardRuntimeCapabilityModel.PRODUCTION_NACOS_RPC_RESOLVER)));
@@ -93,26 +99,28 @@ class ProductionRuntimeCapabilitiesTest {
                         MavenCoordinate.zero("zero-log"),
                         MavenCoordinate.zero("zero-monitor"),
                         MavenCoordinate.zero("zero-net"),
-                        MavenCoordinate.zero("zero-server-starter")),
+                        MavenCoordinate.zero("zero-runtime-bootstrap"),
+                        MavenCoordinate.zero("zero-runtime-net")),
                 StandardRuntimeCapabilityModel.instance().artifactsForProviders(
                         List.of(StandardRuntimeCapabilityModel.PRODUCTION_NETWORK_LIFECYCLE)));
         assertEquals(
                 List.of(
                         MavenCoordinate.zero("zero-data"),
-                        MavenCoordinate.zero("zero-data-postgresql")),
+                        MavenCoordinate.zero("zero-runtime-postgresql")),
                 StandardRuntimeCapabilityModel.instance().artifactsForProviders(
                         List.of(StandardRuntimeCapabilityModel.PRODUCTION_POSTGRESQL_DATA)));
         assertEquals(
                 List.of(
                         MavenCoordinate.zero("zero-data"),
-                        MavenCoordinate.zero("zero-data-mongo")),
+                        MavenCoordinate.zero("zero-runtime-mongo")),
                 StandardRuntimeCapabilityModel.instance().artifactsForProviders(
                         List.of(StandardRuntimeCapabilityModel.PRODUCTION_MONGO_DATA)));
         assertEquals(
                 List.of(
                         MavenCoordinate.zero("zero-cache"),
                         MavenCoordinate.zero("zero-data"),
-                        MavenCoordinate.zero("zero-data-redis")),
+                        MavenCoordinate.zero("zero-data-redis"),
+                        MavenCoordinate.zero("zero-runtime-redis")),
                 StandardRuntimeCapabilityModel.instance().artifactsForProviders(List.of(
                         StandardRuntimeCapabilityModel.PRODUCTION_REDIS_CACHE,
                         StandardRuntimeCapabilityModel.PRODUCTION_REDIS_DATA,

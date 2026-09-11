@@ -12,6 +12,14 @@ import group.zn.zero.core.lifecycle.Lifecycle;
 import group.zn.zero.runtime.api.ComponentId;
 import group.zn.zero.runtime.api.GameRuntime;
 import group.zn.zero.runtime.api.RuntimeState;
+import group.zn.zero.runtime.production.ProductionAdapterDiagnostic;
+import group.zn.zero.runtime.production.ProductionAdapterErrorCode;
+import group.zn.zero.runtime.production.ProductionAdapterException;
+import group.zn.zero.runtime.production.ProductionAdapterFailurePhase;
+import group.zn.zero.runtime.production.ProductionAdapterFailures;
+import group.zn.zero.runtime.production.ProductionAdapterNames;
+import group.zn.zero.runtime.production.ZeroProductionAdapterState;
+import group.zn.zero.runtime.production.ZeroProductionRuntime;
 import group.zn.zero.starter.LocalRuntime;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -96,7 +104,7 @@ class ZeroProductionRuntimeRollbackTest {
     @Test
     void adapterAttributionShouldSurviveNeutralRuntimeNormalization() {
         ProductionAdapterDiagnostic diagnostic = new ProductionAdapterDiagnostic(
-                ZeroProductionRuntimeBuilder.ADAPTER_KAFKA_RPC,
+                ProductionAdapterNames.ADAPTER_KAFKA_RPC,
                 ZeroProductionAdapterState.CREATED,
                 List.of(),
                 List.of(),
@@ -111,7 +119,7 @@ class ZeroProductionRuntimeRollbackTest {
                 ProductionAdapterException.class,
                 runtime::start);
 
-        assertEquals(ZeroProductionRuntimeBuilder.ADAPTER_KAFKA_RPC, failure.adapterName());
+        assertEquals(ProductionAdapterNames.ADAPTER_KAFKA_RPC, failure.adapterName());
         assertEquals(ProductionAdapterFailurePhase.STARTUP_HEALTH, failure.failurePhase());
         assertSame(ProductionAdapterErrorCode.STARTUP_HEALTH_FAILED, failure.errorCode());
         assertNull(failure.getCause());
@@ -156,7 +164,7 @@ class ZeroProductionRuntimeRollbackTest {
         @Override
         protected void doStart() {
             ProductionAdapterException failure = ProductionAdapterFailures.failure(
-                    ZeroProductionRuntimeBuilder.ADAPTER_KAFKA_RPC,
+                    ProductionAdapterNames.ADAPTER_KAFKA_RPC,
                     ProductionAdapterFailurePhase.STARTUP_HEALTH,
                     ProductionAdapterErrorCode.STARTUP_HEALTH_FAILED,
                     ProductionAdapterErrorCode.STARTUP_HEALTH_FAILED.message());

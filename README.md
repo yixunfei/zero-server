@@ -19,7 +19,7 @@ zeroServer 是一个面向实时在线游戏的通用 Java 21 服务端框架。
 - **业务先行**：从 `.si` 协议生成 DTO、Codec、EventBO、默认实现、Dispatcher、ErrorCode、测试和多语言客户端代码。
 - **状态有主**：玩家在线状态绑定 player lane，场景状态绑定 scene lane；跨 Actor 修改通过消息完成。
 - **本地简单**：默认 Starter 不需要 Docker 或外部中间件，适合原型、教学、测试和单进程服务。
-- **生产显式**：真实 Kafka、MongoDB、Redis、PostgreSQL、Nacos 只通过 Production Starter 显式启用；缺配置、健康失败或预算耗尽时 fail-fast，不静默退回本地实现。
+- **生产显式**：真实 Kafka、MongoDB、Redis、PostgreSQL、Nacos 通过独立集成模块或全量 Production Starter 显式启用；缺配置、健康失败或预算耗尽时 fail-fast，不静默退回本地实现。
 - **核心低依赖**：`zero-core`、`zero-event`、`zero-actor`、`zero-protocol` 不依赖具体中间件；中立 `zero-runtime` 只依赖 `zero-core`。
 - **性能可验证**：关键路径关注分配、锁、队列、复制、阻塞和背压；性能结论必须附工作负载、环境与复现方法。
 - **运营可追踪**：TraceId、统一 ErrorCode、结构化日志、敏感字段安全门、低基数指标、GM dry-run 和审计归因贯穿运行时。
@@ -81,6 +81,16 @@ mvn -B -ntp -f examples/rpg-minimal/pom.xml test exec:java
 
 完整说明见[快速上手](docs/quickstart.zh-CN.md)。
 
+需要按需组装时，可直接生成精简工程：
+
+```powershell
+mvn -B -ntp -q -DskipTests install
+java scripts/NewLocalGame.java --template runtime --components event,actor --projectName my-runtime --outputDir target/my-runtime
+mvn -q -f target/my-runtime/pom.xml clean test exec:java
+```
+
+省略 `--components` 得到最小运行时；选择 `redis` 或 `custom-actor` 可生成单 Redis 装配或实现替换示例。详见[按需装配](docs/modular-composition-guide.zh-CN.md)、[Repository 业务接入](docs/repository-composition-guide.zh-CN.md)与[脚手架组件选择](docs/scaffold-templates.zh-CN.md)。
+
 ## 核心能力
 
 | 领域 | 当前能力 |
@@ -94,7 +104,7 @@ mvn -B -ntp -f examples/rpg-minimal/pom.xml test exec:java
 | 网络 | Netty TCP/UDP/HTTP、粘包拆包、Frame 桥接、生产 TCP 生命周期最小实现 |
 | RPC | request/response、oneway、broadcast 抽象、接口代理、本地传输、Kafka Adapter |
 | 服务发现 | 本地注册表、Nacos Adapter、实例查询/订阅、RPC metadata 映射 |
-| 数据 | Repository/DataService、对象映射、版本实体、envelope、MongoDB/Redis/PostgreSQL Adapter |
+| 数据 | 中立 Repository 工厂、命名来源/角色绑定、对象映射、版本实体、envelope、MongoDB/Redis/PostgreSQL Adapter |
 | 缓存 | L1/L2、cache-aside、single-flight、负缓存、版本写入、Redis L2、统计与健康状态 |
 | 配置与定时 | CSV 原子热重载、失败保旧、WatchService；受管 once/fixed-delay/fixed-rate 任务 |
 | GM | 命令 DSL、注册、dry-run、执行、提交状态、ErrorCode 和审计归因 |
@@ -214,10 +224,13 @@ flowchart LR
 | `zero-data-redis` | Redis 数据、追加日志、L2 Cache | 数据 key 由策略生成；业务禁止手拼 key |
 | `zero-data-postgresql` | PostgreSQL envelope store 和健康检查 | 适合平台、账号、后台和关系数据 |
 | `zero-cache` | L1/L2、load、single-flight、负缓存、统计 | 必须处理击穿、穿透、失效、版本和降级 |
-| `zero-discovery-nacos` | 本地/Nacos 服务发现、订阅和 RPC metadata | Nacos 是可选 Adapter，不能污染 RPC/Core |
+| `zero-discovery`、`zero-rpc-discovery` | 中立服务发现、本地实现和 RPC metadata 映射 | 不依赖 Nacos SDK |
+| `zero-discovery-nacos` | Nacos 服务发现 Adapter | 单向依赖中立 discovery；不能污染 RPC/Core |
 | `zero-log` | 统一日志、Appender/Sink、安全门和脱敏 | 业务只能接收 `LogAppender`，不能绕过 Pipeline |
 | `zero-monitor` | 指标、Prometheus、Grafana、告警和系统探针 | 禁止 playerId/traceId/IP 等高基数标签 |
-| `zero-runtime` | 显式组件选择、typed config、依赖图、生命周期事务、安全诊断与共享能力模型 | 1B/1C 已实现；Local Starter、生成器和模板已迁移；真实 Adapter provider 留在 1D；不扫描 classpath |
+| `zero-runtime` | 显式组件选择、typed config、依赖图、生命周期事务、安全诊断与共享能力模型 | 已接入所有现有 provider；只依赖 core，不扫描 classpath |
+| `zero-runtime-bootstrap`、本地 `zero-runtime-*` | 最小启动与各组件的独立能力键/provider | `RuntimeBasics.builder().install(...)`；按需声明 Maven 依赖 |
+| `zero-runtime-production`、真实 Adapter `zero-runtime-*` | 共享生产装配与各 Adapter 的独立接入 | `ProductionAssembly`；单 Redis 无需其他驱动 |
 | `zero-server-starter` | 本地默认装配、Builder、生命周期和 demo | 默认不连接外部组件，不扫描 classpath 自动启用 Adapter |
 | `zero-server-starter-production` | 真实 Adapter 显式装配、健康、预算和回滚 | single-use runtime；fail-fast；当前仍非 production ready |
 | `zero-benchmarks` | opt-in JMH workload | 仅 `-Pbenchmarks` 加入 Reactor；不设 CI 性能阈值 |
@@ -316,7 +329,7 @@ mvn -B -ntp -DskipTests install
 java scripts/ZeroStage0Acceptance.java --level quick
 ```
 
-提交前运行完整阶段 0 验收；它串联环境、架构、Maven 门禁、五类独立示例和七类脚手架，并将日志限制在 `target/stage0-acceptance/`：
+提交前运行完整阶段 0 验收；它串联环境、架构、Maven 门禁、六类独立示例、七类业务脚手架和五条按需生成路径，并将日志写入 `target/stage0-acceptance/` 与 `target/generated-composition-verify/`：
 
 ```bash
 java scripts/ZeroStage0Acceptance.java --level full
@@ -418,7 +431,9 @@ zero.adapter.startup-timeout-millis=10000
 
 启用某 Adapter 后必须提供对应隔离配置。例如 Kafka 使用 `zero.rpc.kafka.bootstrap-servers` 或 `ZERO_KAFKA_BOOTSTRAP_SERVERS`，MongoDB 使用 `ZERO_MONGO_URI`/`ZERO_MONGO_DATABASE`，Redis 使用 `ZERO_REDIS_URI`，PostgreSQL 使用 `ZERO_POSTGRESQL_URL`/`ZERO_POSTGRES_USER`/`ZERO_POSTGRES_PASSWORD`，Nacos 使用 `ZERO_NACOS_SERVER_ADDR` 等。
 
-`ZeroProductionRuntime` 直接实现 `GameRuntime`。业务从 `ProductionRuntimeCapabilities` 选择中立接口，通过 `require(...)`、`optional(...)` 或 `requireAll(...)` 访问 RPC、data、cache、discovery、resolver 和 network lifecycle；驱动 client 不作为公共能力暴露。Adapter 状态使用 `productionReport()`，标准组件图与资源状态使用 `report()`。启用 production network 时还必须对 builder 显式提供 `networkPolicy(...)` 和不会内联 remote IO 的 `ZeroRuntimeExecutors`。
+`ZeroProductionRuntime` 直接实现 `GameRuntime`。业务从 `RpcRuntime`、`DataRuntime`、`CacheRuntime`、`DiscoveryRuntime`、`NetworkRuntime` 取得中立能力键，通过 `require(...)`、`optional(...)` 或 `requireAll(...)` 访问组件；驱动 client 不作为公共能力暴露。Adapter 状态使用 `productionReport()`，标准组件图与资源状态使用 `report()`。启用 production network 时必须显式提供 policy 和不会内联 remote IO 的 `ZeroRuntimeExecutors`。
+
+精简依赖的业务工程可直接使用 `RuntimeBasics.builder().install(...)` 或 `ProductionAssembly.builder(config).install(...)`。完整入口、依赖表、实现替换与 0.x 迁移见[按需装配指南](docs/modular-composition-guide.zh-CN.md)；[四种独立消费者](examples/modular-composition/README.md)验证实际 classpath 和传递依赖隔离。
 
 不要把真实值写入仓库。生产装配报告和异常只显示配置键、来源、Adapter、阶段、状态和 ErrorCode，不回显 URI、host、database、topic、namespace、group、账号、密码或第三方异常原文。
 

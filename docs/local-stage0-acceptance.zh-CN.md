@@ -21,7 +21,7 @@
 | 层级 | 用途 | 检查内容 |
 | --- | --- | --- |
 | `quick` | 克隆后首次上手、日常关键路径 smoke | Doctor、架构守卫、默认测试、安装当前 SNAPSHOT、需求驱动本地原型 |
-| `full` | 提交前、阶段验收和 CI | `quick` 全部内容，加质量门禁、本地集成测试、本地 Starter、五类独立示例和七类脚手架 |
+| `full` | 提交前、阶段验收和 CI | 共 17 项：`quick` 全部内容，加质量门禁、本地集成测试、四种精简消费者、本地 Starter、六类独立示例、七类业务脚手架和十九种按需生成工程 |
 
 默认层级是 `quick`。快速验收：
 
@@ -52,14 +52,17 @@ ZeroLocalDoctor
   -> quality verify
   -> integration-tests verify
   -> install 当前 SNAPSHOT
+  -> 四种按需装配独立消费者（modular-consumers）
   -> 本地 Starter 完整 Demo
   -> CSV 热重载示例
   -> 受管 Scheduler 示例
   -> 可观测性安全门示例
   -> RPG 本地业务示例
   -> TCP generated dispatcher 示例
+  -> Repository 业务替换示例（本地读写）
   -> 需求关键词本地原型
   -> 七类脚手架批量验证
+  -> 十九种按需生成工程、实际依赖闭包、诊断与自定义实现检查
 ```
 
 检查在首个失败后停止，避免缺少前置制品时继续制造级联错误。每项检查默认最多运行 600 秒，可在 30～3600 秒范围内调整：
@@ -85,6 +88,8 @@ target/stage0-acceptance/
 
 每个子命令的完整输出写入独立 UTF-8 日志。成功摘要示例：
 
+按需生成验收还在 `target/generated-composition-verify/` 保存生成工程、Maven 构建日志与 `target/runtime-classpath.txt`。单 Redis 只装配与关闭，默认不执行外部服务启动或数据读写。
+
 ```text
 zero-stage0-acceptance=ok|level=quick|checks=5|passed=5|failed=0|skipped=0|durationMs=...|externalMiddleware=false|productionReady=false|outputDir=target/stage0-acceptance
 ```
@@ -95,13 +100,25 @@ CI 应匹配最终 `zero-stage0-acceptance=ok` 和进程退出码，不应只搜
 
 仓库 CI 直接运行同一个 `full` 入口，不维护第二套拆分命令。GitHub Actions 的任务日志保留最终机器摘要；无论验收成功或失败，`target/stage0-acceptance/logs` 都会作为 `stage0-acceptance-logs` 制品上传并保留 7 天，便于按稳定检查 ID 定位问题。
 
-本次本地基线的最终摘要为：
+2026-09-06 按需装配三批完成后的最终验收摘要为：
 
 ```text
-zero-stage0-acceptance=ok|level=full|checks=14|passed=14|failed=0|skipped=0|durationMs=291135|externalMiddleware=false|productionReady=false|outputDir=target/stage0-acceptance
+zero-stage0-acceptance=ok|level=full|checks=17|passed=17|failed=0|skipped=0|durationMs=420935|externalMiddleware=false|productionReady=false|outputDir=target/stage0-acceptance
 ```
 
 该数字是一次完整串行验收记录，不是单项耗时承诺；CI 机器、Maven 缓存和硬件不同会改变 `durationMs`。
+
+该次 full 的 Surefire 为 516 tests，本地 Failsafe 为 1 test，失败、错误和跳过均为 0。复核修正 discovery/RPC resolver 的生成清单后增加 1 项回归，当时 Reactor 共 517 tests；相关模块 quality、全部本地可选组件组合及五种生成消费者复验通过。四种独立消费者和五种生成工程同时验证依赖闭包与实际 classpath。该批次未执行真实数据库读写。
+
+2026-09-07 审核修复与能力巩固后的完整复验：
+
+```text
+zero-stage0-acceptance=ok|level=full|checks=17|passed=17|failed=0|skipped=0|durationMs=503608|externalMiddleware=false|productionReady=false|outputDir=target/stage0-acceptance
+```
+
+当前 Reactor Surefire 为 527 tests，本地 Failsafe 为 1 test，失败、错误和跳过均为 0。生成验收扩展为十九个消费者，覆盖组件目录的全部十二个选择、五条代表路径和两种混合组装，并实际执行 runtime 配置诊断。架构守卫保持 47 modules / 18 rules。
+
+另通过 `scripts/VerifyRepositoryDrivers.ps1` 在本轮专用 Docker 容器完成 local/MongoDB/PostgreSQL/Redis 的同一业务契约，三个真实驱动的外部 Failsafe 各 1/1、无跳过；测试容器、卷和网络已清理。该外部验证没有并入默认 full，不包含服务端故障恢复或压测。完整变更与证据见[审核与实施记录](reports/composition-review-2026-09-07.zh-CN.md)。
 
 ## 5. 源码长度质量门禁
 
@@ -110,7 +127,7 @@ zero-stage0-acceptance=ok|level=full|checks=14|passed=14|failed=0|skipped=0|dura
 - Java 单个源码文件最多 1500 行。
 - Java 单个方法或构造方法最多 100 行。
 
-当前工作区 `target/` 外 766 个 Java 文件没有超限，最大文件为 1494 行；`ZeroProductionRuntimeBuilder.java` 已在 1D 按 Kafka、MongoDB、Redis、PostgreSQL、Nacos 和 network provider 职责降至 539 个物理行。长度门禁用于暴露职责混杂，不要求为了数字机械拆分类或方法。
+按需装配将 Adapter provider 移至各自集成模块，`ZeroProductionRuntimeBuilder` 只保留全量组合入口，共享配置和生命周期交给 `ProductionAssembly`。长度门禁用于暴露职责混杂，不要求为了数字机械拆分类或方法。
 
 ## 6. 文件和进程安全
 
@@ -159,3 +176,9 @@ mvn -B -ntp -DskipTests install
 - 协议、数据、缓存、配置和部署迁移/回滚演练。
 
 完整发布分层见[发布检查单](release-checklist.zh-CN.md)，当前能力边界见[能力矩阵](capability-matrix.zh-CN.md)。
+
+## 9. 最近复验
+
+2026-09-08，在 PostgreSQL 连接池及资源关闭回归修正后重新执行 full：17/17 通过，耗时 492191 ms，失败和跳过均为 0。Reactor Surefire 531 项、本地 Failsafe 1 项全部通过；质量门禁、47 模块 / 18 规则架构守卫以及十九种生成消费者均通过。未选择 PostgreSQL 的生成消费者额外验证 HikariCP 类缺席。
+
+真实 Repository 的停启、并发与持续运行通过独立 `scripts/VerifyRepositoryDrivers.ps1 -Resilience` 入口验证，不计入本地 full。具体记录与下一阶段顺序见[按需组装推进方案](demand-driven-composition.zh-CN.md)。

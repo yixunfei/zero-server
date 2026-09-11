@@ -41,23 +41,31 @@ public final class ProjectScaffoldGenerator {
         if (!sourceRoot.startsWith(current.templateRoot()) || !Files.isDirectory(sourceRoot)) {
             throw new IllegalStateException("template directory not found: " + sourceRoot);
         }
-        String applicationClass = toPascalName(current.projectName()) + "Application";
+        String applicationClass = ScaffoldJavaNames.applicationClass(current.projectName());
         String testClass = applicationClass + "Test";
         String packagePath = current.packageName().replace('.', '/');
-        Map<String, String> values = placeholders(current, applicationClass, testClass, packagePath);
+        var selection = new ScaffoldComponents(capabilityModel).resolve(current.template().capabilityIds(), current.components());
+        Map<String, String> values = placeholders(current, applicationClass, testClass, packagePath, selection);
         List<FileMapping> mappings = mappings(current.template(), applicationClass, testClass, packagePath);
         Files.createDirectories(target);
         for (FileMapping mapping : mappings) {
             render(sourceRoot, target, mapping, values);
         }
-        return new ProjectScaffoldResult(target, current.template().id(), current.projectName(), mappings.size());
+        var assembly = new ScaffoldAssemblyRenderer();
+        Files.writeString(target.resolve("src/main/java/" + packagePath + "/RuntimeAssembly.java"),
+                assembly.render(current, selection), StandardCharsets.UTF_8);
+        Files.createDirectories(target.resolve("config"));
+        Files.writeString(target.resolve("config/application.properties.example"),
+                assembly.configExample(current, selection), StandardCharsets.UTF_8);
+        return new ProjectScaffoldResult(target, current.template().id(), current.projectName(), mappings.size() + 2);
     }
 
     private Map<String, String> placeholders(
             final ProjectScaffoldRequest request,
             final String applicationClass,
             final String testClass,
-            final String packagePath) {
+            final String packagePath,
+            final ScaffoldComponents.Selection selection) {
         ScaffoldTemplate template = request.template();
         Map<String, String> values = new LinkedHashMap<>();
         values.put("__PROJECT_NAME__", request.projectName());
@@ -73,9 +81,25 @@ public final class ProjectScaffoldGenerator {
         values.put("__SUMMARY_PREFIX__", template.summaryPrefix());
         values.put("__PRODUCTION_GAP__", template.productionGap());
         addJsonPlaceholders(values, request);
-        values.put("__FRAMEWORK_DEPENDENCIES_XML__", dependenciesXml(template.directDependencies()));
-        values.put("__FRAMEWORK_COMPONENTS_JSON__", frameworkComponentsJson(template));
-        values.put("__RUNTIME_CAPABILITIES_JSON__", jsonLines(template.capabilityIds()));
+        List<ScaffoldDependency> dependencies = new ArrayList<>(template.directDependencies());
+        for (MavenCoordinate coordinate : selection.artifacts()) {
+            dependencies.add(new ScaffoldDependency(coordinate, ""));
+        }
+        dependencies = dependencies.stream().distinct().sorted().toList();
+        values.put("__FRAMEWORK_DEPENDENCIES_XML__", dependenciesXml(dependencies));
+        values.put("__FRAMEWORK_COMPONENTS_JSON__", jsonLines(dependencies.stream()
+                .map(dependency -> dependency.coordinate().artifactId()).distinct().sorted().toList()));
+        values.put("__RUNTIME_CAPABILITIES_JSON__", jsonLines(selection.capabilities()));
+        values.put("__SELECTED_COMPONENTS_JSON__", jsonLines(selection.components()));
+        values.put("__SELECTED_PROVIDERS_JSON__", jsonLines(selection.providers()));
+        values.put("__SELECTED_COMPONENTS__", String.join(", ", selection.components()));
+        values.put("__RUNTIME_PROFILE__", selection.external() ? "external-test" : "local");
+        values.put("__EXTERNAL_COMPONENTS__", Boolean.toString(selection.external()));
+        values.put("__DEFAULT_START__", Boolean.toString(!selection.external()));
+        values.put("__CONFIG_DEFAULTS__", selection.external()
+                ? "\"zero.mode\", \"external-test\", \"zero.adapter.data.redis.enabled\", \"true\",\n"
+                    + "                \"zero.redis.uri\", \"redis://127.0.0.1:6379\""
+                : "\"zero.mode\", \"local\"");
         return values;
     }
 
@@ -92,16 +116,6 @@ public final class ProjectScaffoldGenerator {
         values.put("__PROTOCOL_FILE_JSON__", jsonString(template.protocolOutput()));
         values.put("__SUMMARY_PREFIX_JSON__", jsonString(template.summaryPrefix()));
         values.put("__PRODUCTION_GAP_JSON__", jsonString(template.productionGap()));
-    }
-
-    private String frameworkComponentsJson(final ScaffoldTemplate template) {
-        List<String> artifactIds = new ArrayList<>(template.frameworkArtifacts(capabilityModel).stream()
-                .map(MavenCoordinate::artifactId)
-                .toList());
-        template.directDependencies().stream()
-                .map(dependency -> dependency.coordinate().artifactId())
-                .forEach(artifactIds::add);
-        return jsonLines(artifactIds.stream().distinct().sorted().toList());
     }
 
     private String dependenciesXml(final List<ScaffoldDependency> dependencies) {
@@ -131,10 +145,8 @@ public final class ProjectScaffoldGenerator {
             final String applicationClass,
             final String testClass,
             final String packagePath) {
-        return List.of(
+        List<FileMapping> result = new ArrayList<>(List.of(
                 new FileMapping("pom.xml.tpl", "pom.xml"),
-                new FileMapping(template.protocolTemplate(), template.protocolOutput()),
-                new FileMapping("protoId.txt.tpl", "src/main/protocol/protoId.txt"),
                 new FileMapping("Application.java.tpl",
                         "src/main/java/" + packagePath + '/' + applicationClass + ".java"),
                 new FileMapping("ApplicationTest.java.tpl",
@@ -143,7 +155,12 @@ public final class ProjectScaffoldGenerator {
                 new FileMapping("BUSINESS_GUIDE.md.tpl", "BUSINESS_GUIDE.md"),
                 new FileMapping("COMPONENTS.md.tpl", "COMPONENTS.md"),
                 new FileMapping("NEXT_STEPS.md.tpl", "NEXT_STEPS.md"),
-                new FileMapping("zero-scaffold.json.tpl", "zero-scaffold.json"));
+                new FileMapping("zero-scaffold.json.tpl", "zero-scaffold.json")));
+        if (template.generatesProtocol()) {
+            result.add(new FileMapping(template.protocolTemplate(), template.protocolOutput()));
+            result.add(new FileMapping("protoId.txt.tpl", "src/main/protocol/protoId.txt"));
+        }
+        return List.copyOf(result);
     }
 
     private void render(
@@ -168,24 +185,6 @@ public final class ProjectScaffoldGenerator {
         try (var stream = Files.list(path)) {
             return stream.findAny().isPresent();
         }
-    }
-
-    private String toPascalName(final String value) {
-        StringBuilder builder = new StringBuilder(value.length());
-        boolean upperNext = true;
-        for (int index = 0; index < value.length(); index++) {
-            char current = value.charAt(index);
-            if (!Character.isLetterOrDigit(current)) {
-                upperNext = true;
-            } else {
-                builder.append(upperNext ? Character.toUpperCase(current) : current);
-                upperNext = false;
-            }
-        }
-        if (builder.isEmpty()) {
-            throw new IllegalArgumentException("projectName must contain at least one letter or digit");
-        }
-        return builder.toString();
     }
 
     private String jsonString(final String value) {

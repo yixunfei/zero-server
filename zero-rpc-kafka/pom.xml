@@ -18,6 +18,11 @@
     <dependencies>
         <dependency>
             <groupId>group.zn.zero</groupId>
+            <artifactId>zero-rpc-discovery</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
             <artifactId>zero-rpc</artifactId>
         </dependency>
         <dependency>

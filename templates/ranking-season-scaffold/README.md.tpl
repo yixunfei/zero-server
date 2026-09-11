@@ -59,5 +59,5 @@ Read `zero-scaffold.json` when a tool needs machine-readable scaffold metadata.
 - It serializes season ranking state through a local Actor lane.
 - It demonstrates score submit, top query, player-rank query and season reset only.
 - It does not implement Redis sorted set, cross-server ranking, settlement, rewards, anti-cheat, idempotent compensation or capacity planning.
-- It does not connect external middleware or open network ports.
+- The default selection does not connect external middleware or open network ports. Adding Redis requires an external service at startup.
 - It is not a production RankingService / SeasonService API commitment.

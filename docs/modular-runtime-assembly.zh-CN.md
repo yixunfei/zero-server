@@ -1,6 +1,8 @@
 # 模块化运行时装配设计
 
 > 状态：阶段 1 切片 1B、1C、1D 已完成代码收敛，最终全仓验收记录见任务档案
+
+> 按需装配第一批已完成：独立集成层、延迟创建和四种精简消费者已通过 full 15/15；新接入方式及能力键迁移见[按需装配指南](modular-composition-guide.zh-CN.md)。
 >
 > 适用版本：`0.1.0-SNAPSHOT` 之后的首个破坏性 `0.x` 演进切片
 >
@@ -77,7 +79,7 @@ minimal：只装配被业务明确请求的本地能力
 - 为什么选中某个实现；
 - 缺失、歧义、冲突和循环的统一诊断。
 
-`ZeroProductionRuntimeBuilder` 当前只负责将既有选择器映射为 provider selection、解析共享启动预算并驱动中立 `LocalRuntimeBuilder`。Kafka、MongoDB、Redis、PostgreSQL、Nacos 与 network 的配置、创建、健康和资源职责已经迁入各自 provider，源码为 539 行；旧 package-private bridge 和重复 resource scope 已删除。
+`ZeroProductionRuntimeBuilder` 当前仅提供全量便利组合，并委托无驱动依赖的 `ProductionAssembly`。Kafka、MongoDB、Redis、PostgreSQL、Nacos 与 network 的配置、创建、健康和资源职责位于各自 `zero-runtime-*` 集成模块；精简业务工程可直接安装所需模块。旧 package-private bridge 和重复 resource scope 已删除。
 
 Local Starter 与 Production Starter 的装配知识都已迁入中立、可验证的模型；剩余集中风险主要位于真实中间件故障恢复、完整 production policy 和容量证据，而不是继续扩大 Production Builder。
 
@@ -148,8 +150,8 @@ flowchart TB
 
 - `zero-runtime` 只依赖 `zero-core`，不得依赖 Netty、Kafka、Nacos、数据库驱动、业务模块或任何 Starter。
 - `zero-core` 不依赖 `zero-runtime`，现有事件、Actor、协议、RPC、数据、缓存、日志和监控抽象也不反向依赖 Starter。
-- 阶段 1 的内置 provider wrapper 位于对应 Starter 的 catalog/provider 包；现有中立模块不为了装配而强制依赖 `zero-runtime`。
-- `zero-runtime` 只定义泛型 key 类型；引用 `EventBus`、`RpcTransport`、`CacheService` 等具体端口类型的 key 常量与 provider wrapper 一起位于对应 Starter 装配包，不能为了放置 key 迫使中立端口模块依赖 `zero-runtime`。
+- 内置 provider wrapper 位于独立 `zero-runtime-*` 集成模块；现有中立端口模块不为了装配而强制依赖 `zero-runtime`。
+- `zero-runtime` 只定义泛型 key 类型；引用 `EventBus`、`RpcTransport`、`CacheService` 等具体端口类型的 key 常量与 provider wrapper 一起位于对应集成模块，不能为了放置 key 迫使中立端口模块依赖 `zero-runtime`。
 - 第三方组件如果希望直接发布 runtime provider，可以显式依赖 `zero-runtime`；纯 Adapter 仍可只实现原有中立 SPI。
 - `zero-server-starter` 只能注册本地、安全、无外部连接的 provider。
 - `zero-server-starter-production` 把严格 enabled/mode/network 选择器显式映射为中立 selection；每个真实 Adapter 已拆成 descriptor/provider。显式注册不等于选中，选中不等于健康。
@@ -320,8 +322,8 @@ public interface GameRuntime extends Lifecycle, AutoCloseable {
 ```java
 try (GameRuntime runtime = LocalRuntime.create(config)) {
     runtime.start();
-    ActorScheduler actorScheduler = runtime.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER);
-    LogAppender logAppender = runtime.require(LocalRuntimeCapabilities.LOG_APPENDER);
+    ActorScheduler actorScheduler = runtime.require(ActorRuntime.ACTOR_SCHEDULER);
+    LogAppender logAppender = runtime.require(LogRuntime.LOG_APPENDER);
     GameApplication application = new GameApplication(actorScheduler, logAppender);
     application.start();
 }
@@ -375,7 +377,7 @@ required capability 没有显式映射时报告 missing；映射到 catalog 外 
 
 | preset | 初始 requirement 与 provider 映射 | 外部连接 |
 | --- | --- | --- |
-| `minimal` | 仅以 bootstrap config、安全日志、受管执行器为根；常用 local 映射仅在业务 require 后激活 | 禁止 |
+| Local Starter 的 `minimal` preset | 以 config、安全日志、执行器为根；只裁剪运行时选择，全量 Starter 依赖仍在。精简 Maven 工程使用仅 config/执行器的 `RuntimeBasics.builder()` | 禁止 |
 | `local` | 完整本地根能力，并携带全部 local provider 显式映射；已由 `LocalRuntimePresets.local()` 实现 | 禁止 |
 | `standalone` | 以单进程网络、日志、监控为根；持久化和缓存映射由部署显式补充 | 允许但不默认 |
 | `external-test` | 真实 Adapter 的隔离测试选择模板 | 仅显式测试环境 |
@@ -404,7 +406,7 @@ profile 不因 classpath 改变选择。报告必须分别展示 profile、prese
 
 阶段 1C 已将脚手架枚举和依赖映射迁入 `zero-codegen` 的独立 `scaffold` 包，使其依赖轻量的 `zero-runtime` 模型。`scripts/NewLocalGame.java` 和需求关键词入口只保留环境检查、参数转发与工具启动，不再拥有第二份 template-to-module 映射。该依赖方向仅存在于构建工具：`zero-codegen -> zero-runtime -> zero-core`，runtime 不依赖 codegen。
 
-每个 `ScaffoldTemplate` 声明能力根、模板资源和用户可读用途；generator 通过共享模型的 `artifactsFor(...)` 计算逻辑依赖闭包和 Maven 坐标，再从同一模板生成 `pom.xml`、`zero-scaffold.json`、`COMPONENTS.md` 和生产缺口说明。七类模板已经完成生成、协议代码生成、测试和运行验证；架构与脚手架检查继续负责发现未知能力、模板依赖或文档漂移。
+每个 `ScaffoldTemplate` 声明实际必须的能力、业务源码依赖和模板资源；`ScaffoldComponents` 从共享 provider 模型计算依赖闭包及集成模块坐标，结合 `--components` 生成 `pom.xml`、`RuntimeAssembly.java`、配置样例和 `zero-scaffold.json`。七类业务模板只默认装配 Actor/日志/监控，协议生成器属于构建插件依赖；新增 `runtime` 模板支持最小工程、事件/Actor、Redis 和自定义 provider。标准模型当前有 22 个 capability、22 个 provider；应用 Repository 目录及本地 discovery 的扩展 provider 在组件接入层登记。验收同时检查生成工程的实际 Maven 依赖和隔离运行类路径。
 
 ## 8. typed config 设计
 
@@ -773,7 +775,7 @@ RUNTIME_REUSE_REJECTED
 | 装配诊断 | `LocalRuntimeBuilder.diagnose()`、`GameRuntime.plan()` / `report()` | 使用 `RuntimeAssemblyPlan` / `RuntimeAssemblyReport`，包含选择来源、拓扑、配置元数据和阶段状态 |
 | Production 中立入口 | `ZeroProductionRuntime` 直接实现 `GameRuntime` | 使用 `require/optional/requireAll` 读取中立能力；标准图报告为 `report()`，Adapter 诊断为 `productionReport()` |
 | Production Adapter 选择 | 现有严格 enabled/mode 配置 | 1D 在规划前映射为显式 provider selection，不改变精确解析语义 |
-| Production Adapter 对象 | 不提供驱动 getter | 业务只依赖 `ProductionRuntimeCapabilities` 的中立 typed capability |
+| Production Adapter 对象 | 不提供驱动 getter | 业务依赖各 `zero-runtime-*` 集成入口提供的中立 typed capability |
 
 上述入口是当前实现，不是候选命名。仓内调用方已在同一 `0.x` 切片完成编译迁移，不保留旧公共 facade。
 

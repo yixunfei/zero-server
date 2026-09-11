@@ -56,6 +56,6 @@ Read `zero-scaffold.json` when a tool needs machine-readable scaffold metadata.
 ## Boundaries
 
 - This project is a local / prototype scaffold.
-- It does not connect Kafka, MongoDB, Redis, PostgreSQL or Nacos.
+- The default selection does not connect external middleware. Adding Redis requires an external service at startup.
 - It does not open network ports.
 - It does not include account authentication, AOI, broadcast, frame sync, GM security or production deployment config.

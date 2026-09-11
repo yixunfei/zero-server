@@ -3,10 +3,14 @@ package group.zn.zero.starter.production;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import group.zn.zero.core.config.MapZeroConfig;
-import group.zn.zero.discovery.nacos.NacosDiscoveryConfigKeys;
 import group.zn.zero.discovery.nacos.NacosDiscoveryAdapter;
-import group.zn.zero.discovery.nacos.ServiceDiscoveryRpcServiceResolver;
-import group.zn.zero.starter.ZeroRuntimeConfigKeys;
+import group.zn.zero.discovery.nacos.NacosDiscoveryConfigKeys;
+import group.zn.zero.rpc.discovery.ServiceDiscoveryRpcServiceResolver;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
+import group.zn.zero.runtime.discovery.DiscoveryRuntime;
+import group.zn.zero.runtime.production.ZeroProductionRuntime;
+import group.zn.zero.runtime.production.ZeroProductionRuntimeConfigKeys;
+import group.zn.zero.runtime.rpc.RpcRuntime;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -30,10 +34,10 @@ class ProductionNacosProvidersTest {
         try {
             assertInstanceOf(
                     NacosDiscoveryAdapter.class,
-                    runtime.require(ProductionRuntimeCapabilities.SERVICE_DISCOVERY));
+                    runtime.require(DiscoveryRuntime.SERVICE_DISCOVERY));
             assertInstanceOf(
                     ServiceDiscoveryRpcServiceResolver.class,
-                    runtime.require(ProductionRuntimeCapabilities.RPC_SERVICE_RESOLVER));
+                    runtime.require(RpcRuntime.RPC_SERVICE_RESOLVER));
         } finally {
             runtime.close();
         }

@@ -44,8 +44,10 @@ public final class NewLocalGame {
         command.add("-cp");
         command.add(toolJar.toString());
         command.add(MAIN_CLASS);
-        command.add("--templateRoot");
-        command.add(repositoryRoot.resolve("templates").toString());
+        if (java.util.Arrays.stream(args).noneMatch(arg -> arg.equalsIgnoreCase("--templateRoot"))) {
+            command.add("--templateRoot");
+            command.add(repositoryRoot.resolve("templates").toString());
+        }
         command.addAll(List.of(args));
         int exitCode = run(command, repositoryRoot);
         if (exitCode != 0) {

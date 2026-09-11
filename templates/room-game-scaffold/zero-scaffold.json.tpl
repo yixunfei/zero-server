@@ -10,9 +10,16 @@
   "protocolFile": __PROTOCOL_FILE_JSON__,
   "summaryPrefix": __SUMMARY_PREFIX_JSON__,
   "prototype": true,
-  "connectsExternalMiddleware": false,
+  "connectsExternalMiddleware": __EXTERNAL_COMPONENTS__,
   "opensNetworkPorts": false,
-  "runtimeProfile": "local",
+  "runtimeProfile": "__RUNTIME_PROFILE__",
+  "requiresExternalServices": __EXTERNAL_COMPONENTS__,
+  "selectedComponents": [
+__SELECTED_COMPONENTS_JSON__
+  ],
+  "selectedProviders": [
+__SELECTED_PROVIDERS_JSON__
+  ],
   "runtimeCapabilities": [
 __RUNTIME_CAPABILITIES_JSON__
   ],

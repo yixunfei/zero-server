@@ -79,7 +79,7 @@ business / observer / GM
 
 - `LogAppender` 是唯一业务安全写入端口。
 - `LogSink` 是不带安全保证的 terminal SPI，只能在装配层使用。
-- Starter 创建并复用唯一 `LogPipeline`；装配阶段通过 `LocalRuntimeBuilder.logAppender()` 取得，运行阶段通过 `GameRuntime.require(LocalRuntimeCapabilities.LOG_APPENDER)` 取得。
+- 所选 `LogRuntime` provider 创建安全 `LogPipeline`；运行阶段通过 `GameRuntime.require(LogRuntime.LOG_APPENDER)` 取得。启动观察器可以预先保留 `LocalRuntimeBuilder.logAppender()` 转发入口，但只能在成功 build 后写入。
 - 默认策略不可关闭，附加 `SensitiveFieldPolicy` 只能收紧。
 - 默认拒绝 token、password、secret、credential、raw command、凭据 URI/连接文本。
 - 默认脱敏 IP、operator、accountId、playerId、targetId。

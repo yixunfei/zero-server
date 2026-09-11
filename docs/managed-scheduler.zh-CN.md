@@ -202,7 +202,7 @@ MonitorRuntime monitorRuntime = MonitorRuntime.createDefault();
 ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("game", 4);
 LocalRuntimeBuilder builder = LocalRuntime
         .builder(config, terminalLogSink, executors)
-        .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime);
+        .replace(MonitorRuntimeComponent.MONITOR_RUNTIME, monitorRuntime);
 ManagedScheduler scheduler = ZeroManagedSchedulerFactory
         .configure(builder, config, builder.logAppender(), monitorRuntime, executors)
         .orElseThrow();

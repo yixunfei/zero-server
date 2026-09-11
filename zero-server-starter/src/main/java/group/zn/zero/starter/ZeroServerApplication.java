@@ -10,6 +10,9 @@ import group.zn.zero.log.LogSource;
 import group.zn.zero.log.LogType;
 import group.zn.zero.log.ZeroLogRecord;
 import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.bootstrap.RuntimeBasics;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
+import group.zn.zero.runtime.log.LogRuntime;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -63,7 +66,7 @@ public final class ZeroServerApplication extends AbstractLifecycle {
      * @return 配置对象；不可为空；线程安全。
      */
     public ZeroConfig config() {
-        return runtime.require(LocalRuntimeCapabilities.CONFIG);
+        return runtime.require(RuntimeBasics.CONFIG);
     }
 
     /**
@@ -85,7 +88,7 @@ public final class ZeroServerApplication extends AbstractLifecycle {
         runtime.start();
         String mode = config().get(ZeroRuntimeConfigKeys.ZERO_MODE).orElse("unknown");
         String name = config().get(ZeroRuntimeConfigKeys.ZERO_NAME).orElse("unknown");
-        runtime.require(LocalRuntimeCapabilities.LOG_APPENDER).append(ZeroLogRecord.create(
+        runtime.require(LogRuntime.LOG_APPENDER).append(ZeroLogRecord.create(
                 Instant.now(),
                 LogLevel.INFO,
                 LogType.RUNTIME,

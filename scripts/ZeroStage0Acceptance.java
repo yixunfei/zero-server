@@ -248,11 +248,18 @@ public final class ZeroStage0Acceptance {
         }
         checks.add(mavenCheck("install", "安装当前 SNAPSHOT", List.of("-DskipTests", "install")));
         if (level == AcceptanceLevel.FULL) {
+            checks.add(new CheckSpec(
+                    "modular-consumers",
+                    "独立消费者与传递依赖隔离",
+                    mavenCommand(List.of("-f", "examples/modular-composition/pom.xml", "clean", "verify")),
+                    "modular-consumer=ok|profile=redis"));
             addExampleChecks(checks);
         }
         checks.add(prototypeCheck(outputDirectory));
         if (level == AcceptanceLevel.FULL) {
             checks.add(scaffoldCheck(outputDirectory));
+            checks.add(javaCheck("generated-compositions", "按需生成工程与真实依赖闭包",
+                    "scripts/VerifyGeneratedCompositions.java", "generated-compositions=ok|consumers="));
         }
         return List.copyOf(checks);
     }
@@ -295,6 +302,9 @@ public final class ZeroStage0Acceptance {
                 "example-rpg", "RPG 本地业务闭环", "examples/rpg-minimal/pom.xml", "rpg-minimal=ok"));
         checks.add(exampleCheck(
                 "example-tcp", "TCP generated dispatcher", "examples/rpg-tcp-generated/pom.xml", "rpg-tcp=ok"));
+        checks.add(exampleCheck(
+                "example-repository", "中立 Repository 业务读写", "examples/repository-composition/pom.xml",
+                "repository-composition=ok|backend=local|amount=15|version=2"));
     }
 
     /**

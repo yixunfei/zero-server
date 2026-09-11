@@ -10,9 +10,11 @@ zeroServer 的基本形态是“游戏专用运行时内核 + Starter / Adapter 
 flowchart TB
     APP["业务应用 / 运营 API"] --> STARTER["zero-server-starter"]
     APP --> PROD["zero-server-starter-production"]
-    APP --> RUNTIME["zero-runtime"]
+    APP --> INTEGRATIONS["zero-runtime-bootstrap / 所选 zero-runtime-* 集成模块"]
+    INTEGRATIONS --> RUNTIME["zero-runtime"]
     PROD --> STARTER
-    PROD --> ADAPTERS["Kafka / MongoDB / Redis / PostgreSQL / Nacos Adapters"]
+    PROD --> INTEGRATIONS
+    INTEGRATIONS --> ADAPTERS["各自的端口与 Adapter"]
     STARTER --> GAME["zero-game / zero-player / zero-scene"]
     STARTER --> INFRA["zero-net / zero-rpc / zero-data / zero-cache / zero-log / zero-monitor / zero-gm / zero-hot-update"]
     ADAPTERS --> INFRA
@@ -30,7 +32,7 @@ flowchart TB
 - `zero-event`、`zero-protocol`、`zero-actor` 只建立在核心抽象之上，不绑定具体基础设施。
 - `zero-rpc`、`zero-data` 提供中立抽象；具体实现位于 `zero-rpc-kafka`、`zero-data-*`。
 - 默认 `zero-server-starter` 保持无外部中间件可运行；真实 Adapter 由业务项目或 `zero-server-starter-production` 显式接入。
-- 业务代码不得自行创建线程池；执行域和调度器由 Starter 统一装配。
+- 业务代码不得自行创建线程池；执行域由 bootstrap 集成统一装配，受管调度器由对应组合根管理。
 - 玩家、场景等核心状态遵循 Actor / lane 线程绑定；跨 Actor 修改通过消息完成。
 - `zero-benchmarks` 是显式启用的证据叶子，任何运行时模块都不得反向依赖它。
 
@@ -74,7 +76,9 @@ flowchart TB
 | `zero-data-redis` | Redis 数据 envelope、追加式 journal 与健康检查 | `RedisDataAdapter`、`RedisDriverEnvelopeStore`、`RedisDriverClientFactory` | `zero-data-redis/src/main/java/group/zn/zero/data/redis` | 不与缓存职责混淆；连接、Lua / CAS、key 规范和故障恢复需单独验证 |
 | `zero-data-postgresql` | PostgreSQL JDBC envelope 存储与健康检查 | `PostgresqlDataAdapter`、`PostgresqlDriverEnvelopeStore`、`JdbcConnectionFactory` | `zero-data-postgresql/src/main/java/group/zn/zero/data/postgresql` | 关注连接管理、事务、SQL 方言、超时和资源关闭 |
 | `zero-cache` | L1 / L2 cache-aside、加载协调、版本、失效与统计 | `CacheService`、`LayeredCacheService`、`CacheStore`、`RedisDistributedCacheService` | `zero-cache/src/main/java/group/zn/zero/cache` | 缓存不能成为主数据真相；key、TTL、版本、击穿/穿透保护和降级语义变化需并发验证 |
-| `zero-discovery-nacos` | Nacos 服务发现、配置映射和 RPC metadata 适配 | `NacosDiscoveryFactory`、`NacosDiscoveryAdapter`、`NacosNamingServiceFactory` | `zero-discovery-nacos/src/main/java/group/zn/zero/discovery/nacos` | Nacos SDK 不得渗入核心/RPC 抽象；注册、续约、摘除、鉴权和网络故障需真实环境验证 |
+| `zero-discovery` | 中立服务发现接口、模型和本地实现 | `ServiceDiscovery`、`InMemoryServiceDiscovery` | `zero-discovery/src/main/java/group/zn/zero/discovery` | 不依赖 Nacos 或 RPC |
+| `zero-rpc-discovery` | 服务发现到 RPC 的中立映射 | `ServiceDiscoveryRpcServiceResolver`、`NacosRpcMetadataMapper` | `zero-rpc-discovery/src/main/java/group/zn/zero/rpc/discovery` | 不引入 Nacos SDK；mapper 名称保留既有命名 |
+| `zero-discovery-nacos` | Nacos 服务发现和配置映射 | `NacosDiscoveryFactory`、`NacosDiscoveryAdapter`、`NacosNamingServiceFactory` | `zero-discovery-nacos/src/main/java/group/zn/zero/discovery/nacos` | 单向依赖中立 discovery；注册、续约、摘除、鉴权和网络故障需真实环境验证 |
 
 ## 6. 日志、监控、GM 与热更
 
@@ -89,23 +93,41 @@ flowchart TB
 
 | 模块 / 目录 | 职责 | 核心入口 | 常见修改位置 | 禁止依赖与主要风险 |
 | --- | --- | --- | --- | --- |
-| `zero-server-starter` | 聚合本地运行组件，统一生命周期、执行器、配置热更和受管调度 | `LocalRuntime`、`LocalRuntimeBuilder`、`LocalRuntimeCapabilities`、`ZeroServerApplication`、`ZeroRuntimeExecutors` | `zero-server-starter/src/main/java/group/zn/zero/starter` | compile/runtime 路径禁止强制引入真实 Adapter；默认路径必须可在无 Docker 环境运行 |
-| `zero-server-starter-production` | 显式 opt-in 真实 Adapter、启动预算、健康检查、fail-fast 与回滚 | `ZeroProductionRuntimeBuilder`、`ZeroProductionRuntimeFactory`、`ZeroProductionRuntime`、`ProductionRuntimeCapabilities` | `zero-server-starter-production/src/main/java/group/zn/zero/starter/production` | 配置缺失、连接失败或健康检查失败必须清晰失败；诊断不得输出密码、token 或完整连接串 |
+| `zero-server-starter` | 全量本地组合、配置热更和受管调度 | `LocalRuntime`、`LocalRuntimeBuilder`、`ZeroServerApplication` | `zero-server-starter/src/main/java/group/zn/zero/starter` | 便利组合包并非最小依赖入口；默认路径无外部服务 |
+| `zero-server-starter-production` | 全量生产便利组合 | `ZeroProductionRuntimeBuilder`、`ZeroProductionRuntimeFactory` | `zero-server-starter-production/src/main/java/group/zn/zero/starter/production` | 委托独立 ProductionAssembly 和各集成模块；选择少数组件不裁剪这个全量包 |
 | `zero-benchmarks` | JMH 微基准与方向性成本证据 | `LogFieldsBenchmark`、`MetricLabelsBenchmark`、`ProductionNetworkObserverBenchmark` | `zero-benchmarks/src/main/java/group/zn/zero/benchmark` | 只通过 `-Pbenchmarks` 启用；结果不能直接解释为生产吞吐或容量承诺 |
 | `examples/` | 可独立构建运行的最小示例 | 各示例 `*Application` 与 README | `examples/<example>` | 示例默认使用 local/prototype 能力；生产部署必须显式配置安全、容量和真实 Adapter |
-| `templates/` | 七类本地项目脚手架 | `README.md.tpl`、`BUSINESS_GUIDE.md.tpl`、`COMPONENTS.md.tpl`、`NEXT_STEPS.md.tpl` | `templates/<template>` | 修改模板时需批量生成、测试、运行并验证 manifest 与交接文档一致 |
+| `templates/` | 七类业务模板和按需 runtime 模板 | `RuntimeAssembly.java`、`README.md.tpl`、`BUSINESS_GUIDE.md.tpl`、`COMPONENTS.md.tpl` | `templates/<template>`、`zero-codegen/.../scaffold` | 组件选择决定依赖与装配；协议生成器仅在构建插件中；批量验证生成与依赖闭包 |
 | `scripts/` | 本地诊断、生成、结构检查、统一验收与批量验证 | `ZeroLocalDoctor.java`、`ZeroStage0Acceptance.java`、`NewLocalGame.java`、`RunLocalPrototype.java`、`VerifyLocalScaffolds.java` | `scripts/*.java` | 脚本不应依赖私有协作材料或本机绝对路径；生成操作必须限定输出目录并避免覆盖未知文件 |
 
-## 8. 阶段 1 中立装配内核（1B/1C 已实现）
+### 7.1 可独立消费的装配模块
 
-`zero-runtime` 已进入根 Reactor 和 BOM。切片 1B/1C 与 1D-0 已实现中立 API/SPI、显式 catalog/selection、最小依赖闭包、typed config、确定性拓扑、build/start 双资源账本、独立 assembly/startup deadline、启动健康、single-use 生命周期、安全诊断和共享 capability model。具体游戏端口 key 由 Local Starter 或 Production 组合根绑定；中立模块仍不包含真实 Adapter provider。
+当前根 Reactor 共 47 个模块（benchmark 仅由显式 profile 启用）。新增集成层放置端口能力键和 provider；端口与纯 Adapter 不反向依赖 runtime。
+
+| 模块 | 职责 / 入口 |
+| --- | --- |
+| `zero-runtime-bootstrap` | 配置、受管执行器与最小组合入口 `RuntimeBasics` |
+| `zero-runtime-event`、`zero-runtime-actor`、`zero-runtime-protocol` | 事件、Actor、协议的本地集成 |
+| `zero-runtime-rpc`、`zero-runtime-data`、`zero-runtime-cache` | RPC、持久化/命名 Repository 来源及角色目录、缓存集成 |
+| `zero-runtime-log`、`zero-runtime-monitor`、`zero-runtime-discovery` | 日志、监控、本地发现集成 |
+| `zero-runtime-production` | 无驱动依赖的 `ProductionAssembly`、配置、预算、诊断与 Runtime |
+| `zero-runtime-kafka`、`zero-runtime-mongo`、`zero-runtime-redis` | 各自 Adapter provider、健康与资源管理 |
+| `zero-runtime-postgresql`、`zero-runtime-nacos`、`zero-runtime-net` | 各自 Adapter provider、健康与资源管理 |
+
+这些集成模块不能依赖 Starter 或无关的真实 Adapter。完整选择示例见[按需装配指南](modular-composition-guide.zh-CN.md)。
+
+`zero-data/repository` 的 `RepositoryDefinition`、`RepositoryFactory`、`RepositorySource`、`RepositoryCatalog` 形成中立业务入口；工厂按需创建既有 envelope Repository。`examples/repository-composition` 演示同一余额业务切换四种来源，生命周期和执行域要求见 [Repository 指南](repository-composition-guide.zh-CN.md)。`VerifyGeneratedCompositions.java` 检查生成消费者的 Maven 依赖、SDK 缺席与自定义实现选择。
+
+## 8. 中立装配内核与独立集成
+
+`zero-runtime` 已进入根 Reactor 和 BOM，提供中立 API/SPI、显式 catalog/selection、最小依赖闭包、typed config、确定性拓扑、build/start 双资源账本、独立 assembly/startup deadline、启动健康、single-use 生命周期、安全诊断和共享 capability model。`RuntimeComposition` / `RuntimeModule` 为显式组合提供轻量入口；具体端口 key 由对应集成模块绑定，中立内核不包含真实 Adapter provider。
 
 当前依赖方向：
 
 ```text
-业务应用（可直接选择） -> zero-runtime -> zero-core
-Local Starter -> LocalRuntime providers / presets -> zero-runtime
-Production Starter -> explicit Production providers -> zero-runtime
+业务应用 -> zero-runtime-bootstrap + 所选集成模块 -> zero-runtime -> zero-core
+Local Starter -> 本地集成模块 -> 中立端口
+Production Starter -> zero-runtime-production + 各真实集成模块 -> 对应 Adapter
 zero-codegen -> RuntimeCapabilityModel -> zero-runtime
 zero-runtime -X-> 业务模块、Starter、Netty、Kafka、Nacos、数据库驱动
 ```
@@ -130,7 +152,7 @@ zero-runtime -X-> 业务模块、Starter、Netty、Kafka、Nacos、数据库驱�
 | 缓存策略 | `zero-cache` | Redis、版本、击穿/穿透、降级与一致性 |
 | 结构化日志或指标字段 | `zero-log` / `zero-monitor` | 脱敏、基数、错误码、审计、告警与基准 |
 | GM / 审批 / 审计 | `zero-gm` | 鉴权、权限、dry-run、归因、失败状态与安全测试 |
-| 本地或生产装配 | 对应 Starter | 生命周期顺序、回滚、配置泄漏、资源关闭和示例 |
+| 本地或生产装配 | 对应 `zero-runtime-*` 集成模块；全量组合再改 Starter | 独立消费者依赖、生命周期顺序、回滚、配置泄漏、资源关闭和示例 |
 | 中立组件装配契约 | `zero-runtime` | 依赖图、选择来源、配置 schema、回滚、健康、诊断脱敏和 API/SPI 编译面 |
 | 新增正式模块或改变依赖方向 | 根 `pom.xml`、`zero-bom`、本文 | 架构守卫、CI、README、兼容性和迁移说明 |
 

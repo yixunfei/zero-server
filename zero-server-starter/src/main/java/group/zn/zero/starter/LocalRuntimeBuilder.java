@@ -9,15 +9,18 @@ import group.zn.zero.runtime.api.ComponentId;
 import group.zn.zero.runtime.api.ComponentKey;
 import group.zn.zero.runtime.api.ComponentSetKey;
 import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.api.RuntimeLifecycleCapabilities;
 import group.zn.zero.runtime.assembly.ComponentCatalog;
 import group.zn.zero.runtime.assembly.RuntimeAssembler;
 import group.zn.zero.runtime.assembly.RuntimePreset;
 import group.zn.zero.runtime.assembly.RuntimeProfile;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
 import group.zn.zero.runtime.capability.RuntimeCapabilityModel;
 import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
 import group.zn.zero.runtime.config.ConfigSource;
 import group.zn.zero.runtime.config.ZeroConfigSource;
 import group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan;
+import group.zn.zero.runtime.log.LogRuntime;
 import group.zn.zero.runtime.spi.ComponentKind;
 import group.zn.zero.runtime.spi.RuntimeComponentProvider;
 import java.time.Duration;
@@ -26,6 +29,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Local Starter 的显式 provider 装配入口。
@@ -38,8 +42,7 @@ import java.util.Set;
 public final class LocalRuntimeBuilder {
 
     private final ZeroConfig config;
-    private final LogSink terminalLogSink;
-    private final LogAppender logAppender;
+    private volatile GameRuntime builtRuntime;
     private final ZeroRuntimeExecutors executors;
     private final RuntimeCapabilityModel capabilityModel;
     private final List<RuntimeComponentProvider> baseProviders;
@@ -56,19 +59,17 @@ public final class LocalRuntimeBuilder {
 
     LocalRuntimeBuilder(
             final ZeroConfig config,
-            final LogSink terminalLogSink,
-            final LogAppender logAppender,
+            final Supplier<? extends LogSink> terminalLogSink,
             final ZeroRuntimeExecutors executors,
             final RuntimePreset preset,
             final RuntimeProfile profile) {
         this.config = Objects.requireNonNull(config, "config");
-        this.terminalLogSink = Objects.requireNonNull(terminalLogSink, "terminalLogSink");
-        this.logAppender = Objects.requireNonNull(logAppender, "logAppender");
+        Objects.requireNonNull(terminalLogSink, "terminalLogSink");
         this.executors = Objects.requireNonNull(executors, "executors");
         this.preset = Objects.requireNonNull(preset, "preset");
         this.profile = Objects.requireNonNull(profile, "profile");
         capabilityModel = StandardRuntimeCapabilityModel.instance();
-        baseProviders = LocalRuntimeProviders.defaults(config, terminalLogSink, logAppender, executors);
+        baseProviders = LocalRuntimeProviders.defaults(config, terminalLogSink, executors);
         capabilityModel.validateDescriptors(
                 baseProviders.stream().map(RuntimeComponentProvider::descriptor).toList(),
                 StandardRuntimeCapabilityModel.PROFILE_LOCAL);
@@ -78,8 +79,15 @@ public final class LocalRuntimeBuilder {
         return config;
     }
 
+    /** Bootstrap observers may retain this handle; writes require a successful build. */
     public LogAppender logAppender() {
-        return logAppender;
+        return record -> {
+            GameRuntime runtime = builtRuntime;
+            if (runtime == null) {
+                throw new IllegalStateException("bootstrap logging requires a built runtime");
+            }
+            runtime.require(LogRuntime.LOG_APPENDER).append(record);
+        };
     }
 
     public ZeroRuntimeExecutors executors() {
@@ -177,14 +185,14 @@ public final class LocalRuntimeBuilder {
             final ComponentId componentId,
             final Lifecycle lifecycle) {
         register(LocalRuntimeProviders.infrastructureLifecycle(componentId, lifecycle));
-        return contribute(LocalRuntimeCapabilities.INFRASTRUCTURE_LIFECYCLES, componentId);
+        return contribute(RuntimeLifecycleCapabilities.INFRASTRUCTURE_LIFECYCLES, componentId);
     }
 
     public LocalRuntimeBuilder addApplicationLifecycle(
             final ComponentId componentId,
             final Lifecycle lifecycle) {
         register(LocalRuntimeProviders.applicationLifecycle(componentId, lifecycle));
-        return contribute(LocalRuntimeCapabilities.APPLICATION_LIFECYCLES, componentId);
+        return contribute(RuntimeLifecycleCapabilities.APPLICATION_LIFECYCLES, componentId);
     }
 
     /**
@@ -205,12 +213,9 @@ public final class LocalRuntimeBuilder {
     public GameRuntime build() {
         requireMutable();
         buildClaimed = true;
-        try {
-            return assembler().build();
-        } catch (RuntimeException | Error failure) {
-            closeExecutorsAfterFailure(failure);
-            throw failure;
-        }
+        GameRuntime runtime = assembler().build();
+        builtRuntime = runtime;
+        return runtime;
     }
 
     private RuntimeAssembler.Builder assembler() {
@@ -257,16 +262,6 @@ public final class LocalRuntimeBuilder {
             throw new IllegalArgumentException(label + " must be positive");
         }
         return checked;
-    }
-
-    private void closeExecutorsAfterFailure(final Throwable failure) {
-        try {
-            executors.close();
-        } catch (RuntimeException | Error closeFailure) {
-            if (closeFailure != failure) {
-                failure.addSuppressed(closeFailure);
-            }
-        }
     }
 
     private record SingleSelection(ComponentKey<?> key, ComponentId providerId) {

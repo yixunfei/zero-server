@@ -20,11 +20,11 @@ class ProjectScaffoldGeneratorTest {
     private Path temporaryDirectory;
 
     @Test
-    void catalogShouldSelectAllSevenTemplatesFromOneCapabilityModel() {
+    void catalogShouldSelectTemplatesFromOneCapabilityModel() {
         ScaffoldCatalog catalog = ScaffoldCatalog.standard();
         ScaffoldSelector selector = new ScaffoldSelector(catalog);
 
-        assertEquals(7, catalog.templates().size());
+        assertEquals(8, catalog.templates().size());
         assertEquals("world-shard", selector.select("open world shard migration").id());
         assertEquals("scene-sync", selector.select("aoi scene visibility").id());
         assertTrue(catalog.templates().stream().allMatch(template ->
@@ -46,22 +46,47 @@ class ProjectScaffoldGeneratorTest {
                 template,
                 templateRoot,
                 "local rpg",
+                List.of(),
                 false);
 
         ProjectScaffoldGenerator.ProjectScaffoldResult result =
                 new ProjectScaffoldGenerator(catalog.capabilityModel()).generate(request);
 
-        assertEquals(10, result.fileCount());
+        assertEquals(12, result.fileCount());
         String pom = Files.readString(output.resolve("pom.xml"), StandardCharsets.UTF_8);
         String manifest = Files.readString(output.resolve("zero-scaffold.json"), StandardCharsets.UTF_8);
-        assertTrue(pom.contains("<artifactId>zero-server-starter</artifactId>"));
-        assertTrue(pom.contains("<artifactId>zero-codegen</artifactId>"));
+        assertFalse(pom.contains("<artifactId>zero-server-starter</artifactId>"));
+        assertFalse(pom.contains("<artifactId>zero-codegen</artifactId>"));
+        assertTrue(pom.contains("<artifactId>zero-runtime-bootstrap</artifactId>"));
+        assertTrue(pom.contains("<artifactId>zero-player</artifactId>"));
         assertTrue(manifest.contains("zero.actor.scheduler"));
         assertTrue(manifest.contains("zero-runtime"));
         assertFalse(pom.contains("__"));
         assertFalse(manifest.contains("__"));
         assertThrows(IllegalStateException.class, () ->
                 new ProjectScaffoldGenerator(catalog.capabilityModel()).generate(request));
+    }
+
+    @Test
+    void realTemplatesSeparateBuildToolsAndGenerateOnlySelectedDependencies() throws Exception {
+        ScaffoldCatalog catalog = ScaffoldCatalog.standard();
+        Path root = Path.of("../templates").toAbsolutePath().normalize();
+        for (String id : List.of("runtime", "local", "room")) {
+            Path output = temporaryDirectory.resolve(id);
+            new ProjectScaffoldGenerator(catalog.capabilityModel()).generate(new ProjectScaffoldRequest(
+                    "sample-game", "group.zn.sample.game", output, "0.1.0-SNAPSHOT", catalog.require(id),
+                    root, "", List.of(), false));
+            var document = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                    .parse(output.resolve("pom.xml").toFile());
+            var xpath = javax.xml.xpath.XPathFactory.newInstance().newXPath();
+            assertEquals("0", xpath.evaluate("count(/project/dependencies/dependency[artifactId='zero-codegen'])", document));
+            assertEquals("0", xpath.evaluate("count(/project/dependencies/dependency[artifactId='zero-server-starter'])", document));
+            String buildTools = xpath.evaluate("count(/project/build/plugins/plugin/dependencies/dependency[artifactId='zero-codegen'])", document);
+            assertEquals(id.equals("runtime") ? "0" : "1", buildTools);
+            String player = xpath.evaluate("count(/project/dependencies/dependency[artifactId='zero-player'])", document);
+            assertEquals(id.equals("local") ? "1" : "0", player);
+            assertEquals(!id.equals("runtime"), Files.exists(output.resolve("src/main/protocol")));
+        }
     }
 
     private void createMinimalTemplate(final Path root, final ScaffoldTemplate template) throws IOException {

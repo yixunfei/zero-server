@@ -51,6 +51,13 @@ __FRAMEWORK_DEPENDENCIES_XML__
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.3.0</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>group.zn.zero</groupId>
+                        <artifactId>zero-codegen</artifactId>
+                        <version>${zero.version}</version>
+                    </dependency>
+                </dependencies>
                 <executions>
                     <execution>
                         <id>generate-zero-protocol</id>
@@ -60,7 +67,8 @@ __FRAMEWORK_DEPENDENCIES_XML__
                         </goals>
                         <configuration>
                             <mainClass>group.zn.zero.codegen.ProtocolCodegenCli</mainClass>
-                            <classpathScope>compile</classpathScope>
+                            <includeProjectDependencies>false</includeProjectDependencies>
+                            <includePluginDependencies>true</includePluginDependencies>
                             <arguments>
                                 <argument>--input</argument>
                                 <argument>${project.basedir}/src/main/protocol</argument>

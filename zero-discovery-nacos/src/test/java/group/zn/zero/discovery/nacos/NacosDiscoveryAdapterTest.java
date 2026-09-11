@@ -6,19 +6,28 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.alibaba.nacos.api.PropertyKeyConst;
 import com.alibaba.nacos.api.exception.NacosException;
 import com.alibaba.nacos.api.naming.NamingService;
+import com.alibaba.nacos.api.PropertyKeyConst;
 import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.core.error.ZeroException;
+import group.zn.zero.discovery.DiscoveryErrorCode;
+import group.zn.zero.discovery.InMemoryServiceDiscovery;
+import group.zn.zero.discovery.ServiceDiscovery;
+import group.zn.zero.discovery.ServiceDiscoveryConstants;
+import group.zn.zero.discovery.ServiceEvent;
+import group.zn.zero.discovery.ServiceEventType;
+import group.zn.zero.discovery.ServiceInstance;
+import group.zn.zero.discovery.ServiceQuery;
+import group.zn.zero.discovery.ServiceSubscription;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
