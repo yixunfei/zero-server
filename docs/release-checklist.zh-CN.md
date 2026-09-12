@@ -1,5 +1,7 @@
 # zeroServer 发布检查单
 
+<!-- ZeroFrameworkGapLedger evidence: zero-release-checklist=template|sections=10|scope=true|layeredVerification=true|rollbackRecovery=true|releaseAuthorization=false -->
+
 本检查单用于维护者准备 GitHub Release、Maven 制品或生产部署。它是证据清单，不是自动发布授权；每一项都应记录“通过 / 失败 / 未运行 / 不适用”和可复核证据。
 
 ## 1. 发布元数据

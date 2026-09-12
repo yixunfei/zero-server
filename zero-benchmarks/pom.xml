@@ -23,6 +23,11 @@
     <dependencies>
         <dependency>
             <groupId>group.zn.zero</groupId>
+            <artifactId>zero-protocol</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
             <artifactId>zero-log</artifactId>
         </dependency>
         <dependency>
@@ -100,4 +105,29 @@
             </plugin>
         </plugins>
     </build>
+    <profiles>
+        <profile>
+            <id>performance-gate</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>run-protocol-codec-gate</id>
+                                <phase>verify</phase>
+                                <goals><goal>java</goal></goals>
+                                <configuration>
+                                    <mainClass>group.zn.zero.benchmark.ProtocolCodecGate</mainClass>
+                                    <classpathScope>runtime</classpathScope>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

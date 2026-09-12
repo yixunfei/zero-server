@@ -4,7 +4,7 @@
 
 状态：`minimum-slice-implemented / confirmed=true / productionReady=false`
 
-该切片已经把统一日志字段、安全写入边界、指标标签 schema 和 GM 安全审计归因落到运行时代码；它没有提供生产日志落地、Prometheus HTTP endpoint、容量或长稳结论。
+该切片已经把统一日志字段、安全写入边界、指标标签 schema、GM 安全审计归因和低依赖 Prometheus HTTP endpoint 落到运行时代码；它没有提供生产日志落地、认证/TLS、容量或长稳结论。
 
 ## 1. 适用范围
 
@@ -19,7 +19,7 @@
 当前不包含：
 
 - 生产文件滚动、Kafka 日志 sink、异步批量、背压、重试或降级策略。
-- Prometheus HTTP endpoint、完整 Grafana 部署、远程告警通道或告警静默/去重。
+- Prometheus 认证/TLS、完整 Grafana 部署、远程告警通道或告警静默/去重。
 - OpenTelemetry 自动埋点，或 TraceId 在 RPC、DB、MQ、Actor、线程池之间的全仓自动传播。
 - GM REST/RPC 入口、RBAC、IP 白名单、完整审批流和运营后台。
 - 吞吐、p99、容量、长稳、SLO 或 SLA 证明。
@@ -164,7 +164,7 @@ registry.record(new MetricSample(
 - `PrometheusExporter` 按定义中的标签顺序确定性输出，正确转义 HELP/label，并显式输出 `NaN`、`+Inf`、`-Inf`；非法样本不会被静默跳过。
 - `MonitorRuntime.collectOnce()` 返回 `MonitorCollectionResult`。单个系统探针失败通过 `SystemMetricCollectionReport` 显式报告，只保留受控探针枚举和异常类型名，不持有 Throwable 或原异常消息。
 
-`PrometheusExporter` 只生成文本，不启动 HTTP 服务。`MonitorRuntime` 也不创建后台线程；调度必须由 Starter 的统一线程管理提供。
+`PrometheusExporter` 只生成文本；`PrometheusHttpEndpoint` 在显式 bind 地址上提供同步 JDK `HttpServer` 的 `/metrics` 和 `/health`，并由调用方显式 `start/stop` 管理。它不创建隐式线程池、不连接外部系统，默认只适合受控网络边界，明确不含认证、TLS、限流或代理策略。`MonitorRuntime` 也不创建后台线程；调度必须由 Starter 的统一线程管理提供。
 
 ## 6. GM 安全审计归因
 
@@ -252,7 +252,7 @@ java -jar zero-benchmarks/target/benchmarks.jar
 准备从该最小运行时晋升生产前，至少需要另行完成：
 
 1. 选择并验证生产文件/Kafka sink，明确同步或异步模型、队列容量、批量、背压和失败降级。
-2. 提供受鉴权的 Prometheus HTTP endpoint，验证 dashboard、告警路由、去重和静默。
+2. 为具体部署补充 endpoint 的网络隔离、认证/TLS、dashboard、告警路由、去重和静默验证。
 3. 为具体游戏类型执行并发、p95/p99、容量、长稳和故障注入验证，冻结环境、参数和原始结果。
 4. 补齐 TraceId 在网络、RPC、Actor、DB、MQ 与异步边界的显式传播契约。
 5. 单独推进 GM RBAC、IP 白名单、审批流和后台鉴权，不把本切片的安全归因误认为完整 GM 安全能力。

@@ -47,7 +47,7 @@ public final class ZeroStage0Acceptance {
      * 执行阶段 0 验收。
      *
      * @param args 支持 level、输出目录、单项超时、plan 和 help；数组不会被修改。
-     * @implNote 命令按确定顺序串行执行；仅输出读取使用每个子进程一个短生命周期虚拟线程。
+     * @implNote 命令按确定顺序串行执行；仅输出读取使用每个子进程一个短生命周期线程。
      */
     public static void main(final String[] args) {
         try {
@@ -178,7 +178,7 @@ public final class ZeroStage0Acceptance {
      * @param output 当前检查的可变输出缓冲；仅新线程写入。
      * @param outputFailure 输出读取错误槽；仅新线程写入。
      * @param checkId 检查 ID，用于线程命名；不可为空。
-     * @return 已启动的虚拟线程；不会为空。
+     * @return 已启动的输出读取线程；不会为空。
      */
     private static Thread startOutputReader(
             final Process process,
@@ -186,7 +186,7 @@ public final class ZeroStage0Acceptance {
             final StringBuilder output,
             final AtomicReference<IOException> outputFailure,
             final String checkId) {
-        return Thread.ofVirtual().name("zero-stage0-output-" + checkId).start(() -> {
+        Thread outputReader = new Thread(() -> {
             try (BufferedReader reader = process.inputReader(processOutputCharset());
                     BufferedWriter writer = Files.newBufferedWriter(
                             logFile,
@@ -205,6 +205,9 @@ public final class ZeroStage0Acceptance {
                 outputFailure.set(exception);
             }
         });
+        outputReader.setName("zero-stage0-output-" + checkId);
+        outputReader.start();
+        return outputReader;
     }
 
     /**
@@ -214,7 +217,8 @@ public final class ZeroStage0Acceptance {
      * @throws InterruptedException 等待优雅终止时被中断。
      */
     private static void terminateProcessTree(final Process process) throws InterruptedException {
-        List<ProcessHandle> descendants = process.descendants().toList().reversed();
+        List<ProcessHandle> descendants = new ArrayList<>(process.descendants().toList());
+        java.util.Collections.reverse(descendants);
         descendants.forEach(ProcessHandle::destroy);
         process.destroy();
         if (!process.waitFor(PROCESS_STOP_GRACE.toMillis(), TimeUnit.MILLISECONDS)) {
@@ -242,6 +246,9 @@ public final class ZeroStage0Acceptance {
         checks.add(javaCheck("doctor", "环境和公开入口", "scripts/ZeroLocalDoctor.java", "zero-local-doctor=ok"));
         checks.add(javaCheck(
                 "architecture", "模块依赖边界", "scripts/ZeroArchitectureGuard.java", "zero-architecture-guard=ok"));
+        checks.add(javaCheck(
+                "framework-boundary", "框架与脚手架无正式玩法边界", "scripts/ZeroFrameworkBoundaryGuard.java",
+                "zero-framework-boundary-guard=ok"));
         checks.add(mavenCheck("unit-tests", "默认单元测试", List.of("test")));
         if (level == AcceptanceLevel.FULL) {
             addFullBuildChecks(checks);

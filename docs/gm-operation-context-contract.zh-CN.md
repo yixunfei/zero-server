@@ -2,14 +2,17 @@
 
 本文是 `gm-operation-context-contract` 的只读确认草案，用于在实现正式 GM REST/RPC 入口、RBAC、IP 白名单、审批流、安全日志和审计闭环前，把 GM 操作上下文、dry-run / execute、权限拒绝、审批阻断、审计事件、脱敏诊断和 focused tests 先收敛成可讨论输入。
 
-状态：`draft / requiresConfirmation=true`
+状态：`minimum-slice-implemented / productionReady=false`
+
+本轮已确认并实现最小框架切片：`GmCommandContext`、`GmOperationAuthorizer`、可替换 `GmSourceIpPolicy`、可替换 `GmApprovalVerifier`、RBAC/permission 检查、exact/CIDR 来源匹配、审批决策、双人复核和脱敏拒绝审计事件。该切片不提供生产身份系统、持久化策略或传输入口。
 
 重要边界：
 
-- 本文不是已经确认的正式 GM API、权限模型、审计 schema 或安全日志 schema。
-- 本文不修改 `zero-gm`、`zero-log`、`zero-monitor`、`zero-rpc`、production starter 或任何业务运行时代码。
-- 本文不新增 RBAC、IP 白名单、审批流、REST/RPC GM API、ErrorCode 枚举值、数据库表、Kafka topic 或 Prometheus 指标实现。
-- 后续任何 GM API、权限系统、审批流、审计日志、安全日志、ErrorCode、线程模型或模块依赖方向变更，都应先通过 GitHub Design Proposal 说明威胁模型、权限边界、兼容性、审计与验证方案，并等待维护者评审。
+- 本文不是完整 GM API、账号系统、审批引擎或生产审计 sink。
+- 该切片不实现 REST/Kafka RPC 入口、密码/JWT/SSO、RBAC 存储、IP 白名单存储或审批工单系统。
+- 可信入口必须先验证并传入来源 IP；框架不解析或信任 `X-Forwarded-For`。
+- 任何 GM API、权限系统、审批流、审计日志、安全日志、ErrorCode、线程模型或模块依赖方向扩展，都应继续通过 Design Proposal 说明威胁模型、权限边界、兼容性、审计与验证方案。
+
 
 ## 1. 目标
 
@@ -254,9 +257,20 @@ IP 白名单只是辅助鉴权，不是独立权限。
 - 数据访问必须通过 Repository / DataService 抽象。
 - 审计 hook 不允许生吞异常；失败策略必须由框架统一处理。
 
-## 14. focused tests 候选
+## 14. focused tests 已实现
 
-后续若用户确认进入最小实现，优先补以下 focused tests：
+当前切片已覆盖：
+
+| 测试 | 验收点 |
+| --- | --- |
+| `authorizesRbacIpApprovalAndDualReview` | RBAC、permission、CIDR、审批和双人复核通过 |
+| `rejectsWithStableCodeAndSafeAudit` | 权限拒绝绑定稳定 ErrorCode，操作者/目标只进入脱敏引用 |
+| `rejectsSourceBeforeApprovalAndExecution` | 来源 IP 拒绝早于审批 verifier |
+| `supportsApplicationApprovalVerifierAndRejectsSameReviewer` | 上游审批 verifier 可替换，同一操作者不能二次复核 |
+| `rejectsMalformedCidrAtPolicyConstruction` | 错误 CIDR 在策略构造阶段 fail-fast |
+
+这些测试证明的是本地策略契约，不证明生产身份、网关、审批系统或审计存储。
+
 
 | 测试 | 验收点 |
 | --- | --- |

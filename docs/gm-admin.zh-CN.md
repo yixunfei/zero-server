@@ -1,6 +1,6 @@
 # GM 与后台 API 设计
 
-生产级 GM 安全运营的独立确认输入见 [GM 操作上下文与审计契约草案](gm-operation-context-contract.zh-CN.md)。该草案只用于讨论 GM 操作上下文、dry-run / execute、权限拒绝、审批阻断、审计事件和安全日志，不代表已经实现 RBAC、IP 白名单、审批流、REST/RPC GM 入口或正式日志 schema。
+标准入口与持久化安全运营最小契约见 [GM 标准入口与持久化安全运营契约](gm-standard-entry-persistence-contract.zh-CN.md)。`GmOperationEndpoint` 可由 REST、Kafka RPC、CLI 或内部适配器复用，`PersistentGmAuditHook` 只接收脱敏审计事件；具体认证、持久化策略、传输适配器和保留治理仍由应用提供。
 
 ## 1. 目标
 

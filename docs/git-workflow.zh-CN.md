@@ -106,3 +106,5 @@ Pull Request 必须写明未运行项、原因和剩余风险。外部测试记�
 - 维护者根据变更规模选择 squash、rebase 或 merge；Pull Request 内提交应保持可理解。
 - 禁止 force-push 到受保护的 `main`。
 - 发现凭据进入历史时，立即撤销/轮换凭据并按 `SECURITY.md` 私下报告；仅删除最新文件不足以消除历史泄漏。
+
+<!-- zero-git-verification=required -->

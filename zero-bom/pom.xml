@@ -46,7 +46,27 @@
             </dependency>
             <dependency>
                 <groupId>group.zn.zero</groupId>
+                <artifactId>zero-world</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-npc</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
                 <artifactId>zero-actor</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-ranking</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-room</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -62,6 +82,21 @@
             <dependency>
                 <groupId>group.zn.zero</groupId>
                 <artifactId>zero-scene</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-aoi</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-state-sync</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-frame-sync</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

@@ -21,7 +21,7 @@
 ## 2. 非目标与剩余边界
 
 - 不实现生产文件/Kafka sink、批量、背压、落地重试或降级。
-- 不实现 Prometheus HTTP endpoint、完整 Grafana 部署或远程告警闭环。
+- 当前不实现 Prometheus 认证/TLS、完整 Grafana 部署或远程告警闭环。
 - 不承诺 TraceId 自动贯穿 RPC、DB、MQ、Actor、异步回调或虚拟线程。
 - 不实现 OpenTelemetry。
 - 不实现 GM REST/RPC、RBAC、IP 白名单、完整审批流或后台鉴权。

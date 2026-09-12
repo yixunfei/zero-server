@@ -21,7 +21,7 @@ java scripts/ZeroArchitectureGuard.java --help
 正常摘要类似：
 
 ```text
-zero-architecture-guard=ok|modules=47|rules=18|violations=0|warnings=0
+zero-architecture-guard=ok|modules=54|rules=20|violations=0|warnings=0
 ```
 
 其中：
@@ -38,7 +38,7 @@ zero-architecture-guard=ok|modules=47|rules=18|violations=0|warnings=0
 脚本会检查：
 
 - 当前目录是否包含 `pom.xml`、`CONTRIBUTING.md` 和 `docs/module-map.md`。
-- 根 `pom.xml` 是否声明当前 47 个预期模块。
+- 根 `pom.xml` 是否声明当前 54 个预期模块。
 - 每个预期模块是否存在 `pom.xml`。
 
 当前守卫关注的模块包括 `zero-core`、`zero-runtime`、`zero-event`、`zero-protocol`、`zero-actor`、`zero-game`、`zero-player`、`zero-scene`、`zero-net`、`zero-rpc`、`zero-data`、`zero-cache`、`zero-log`、`zero-monitor`、`zero-gm`、`zero-hot-update`、`zero-server-starter` 和 `zero-server-starter-production` 等。

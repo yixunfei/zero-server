@@ -1,12 +1,12 @@
 # 房间组件最小契约草案
 
-状态：`draft`
+状态：`implemented-local-minimum-slice`
 
-确认要求：`requiresConfirmation=true`
+确认要求：`requiresConfirmation=true`；本地已实现，生产未证明
 
 关联切片：`room-component-minimum-contract`
 
-本文是 `room-matchmaking` 从 local/prototype 模板走向正式组件前的最小契约输入。它只描述候选语义、风险边界和 focused tests，不创建 `zero-room` / `zero-matchmaking` 模块，不冻结公共 API，不改变 Actor 线程模型、协议、RPC、存储、缓存、日志字段或 ErrorCode 结构。
+本文是 `room-matchmaking` 从 local/prototype 模板走向正式组件前的最小契约输入。当前阶段已交付 `zero-room` 本地内存最小切片；仅冻结本地不可变 API 与 room lane 状态写入语义，不宣称生产能力。
 
 ## 1. 定位
 

@@ -254,7 +254,55 @@ repository-drivers=ok|backends=4|resilience=True|containersRemoved=true
 
 证据目录为 `target/repository-driver-verify/3de4b70d9f6e456b8a1770fdf2687ddf/`，包含 `images.json.log`、`resilience.log`、各后端及 resilience 的独立报告目录、四份 `*-summary.xml`、`postgresql-sessions.log` 和 `cleanup.log`。脚本显式设置 Failsafe 总摘要位置并检查执行数，避免摘要被下一轮覆盖或无用例执行仍被判为成功。Compose 清理成功，随后查询确认本轮容器、网络和带项目标签卷均为 0；前几次排错运行的专用资源也已清理。
 
-## 12. 下一阶段顺序
+## 12. Kafka/Nacos 真实外部验证（2026-09-12）
+
+新增专用隔离入口：
+
+```powershell
+pwsh scripts/VerifyKafkaNacosExternal.ps1 -Plan
+pwsh scripts/VerifyKafkaNacosExternal.ps1
+pwsh scripts/VerifyKafkaNacosExternal.ps1 -Resilience
+```
+
+验证 Compose 使用 `apache/kafka:3.9.1` 与 `nacos/nacos-server:v3.2.2`，每轮随机绑定 loopback 端口、唯一 Compose project，并在 `finally` 中清理容器、网络和卷。正常路径实际执行 Kafka RPC、Nacos 注册/订阅/注销以及 Kafka+Nacos 相关外部测试；恢复路径对 Kafka 和 Nacos 进行受控 restart，等待健康后重复外部测试。
+
+最新成功摘要：
+
+```text
+kafka-nacos-external=ok|crossProcessJvm=true|multiNode=false|resilience=True|containersRemoved=true|networksRemoved=true|outputDir=L:\zero-server\target\kafka-nacos-external\df4a1e9fa4944a31888f59c81b0e14b0
+```
+
+机器可读证据包括 `images.json.log`、`containers.log`、`kafka.log`、`nacos.log`、`kafka-restart.log`、`nacos-restart.log`、恢复日志、容器日志和 `cleanup.log`。本轮证实单节点 Kafka/Nacos 基础设施承载多 JVM（provider JVM + caller/test JVM）跨进程 Actor RPC，并可在受控停止/启动后重新执行外部契约；`multiNode=false` 明确表示仍未执行多 broker/多 Nacos server 集群。
+
+第 12 节记录 Kafka/Nacos 外部验证。
+
+### 13. 多 broker / 多 Nacos 集群验证（2026-09-12，已通过基础故障矩阵）
+
+新增入口：
+
+```powershell
+pwsh scripts/VerifyKafkaNacosCluster.ps1 -Plan
+pwsh scripts/VerifyKafkaNacosCluster.ps1
+pwsh scripts/VerifyKafkaNacosCluster.ps1 -Partition
+```
+
+本轮修复了 Nacos 3.2.2 集群的实际启动前提：从目标镜像导出并固定 `mysql-schema.sql`，由 MySQL 空数据卷首次初始化；两个 Nacos 节点均使用 `MODE=cluster`、相同 `NACOS_SERVERS` 和共享 MySQL。机器日志已确认两个节点分别输出 `Nacos started successfully in cluster mode with external storage`，Kafka 三 broker 也完成 KRaft 启动。
+
+证据目录：
+
+- 正常路径、broker 重启、Nacos 节点重启：`target/kafka-nacos-cluster/a9e4f1bf89014957a1ee7a48810aecc3`
+- 网络断开/重连及恢复：`target/kafka-nacos-cluster/37c31033178c4ac481c1f3f958a26b5c`
+
+两轮均生成机器可读 marker：
+
+```text
+kafka-nacos-cluster=ok|crossProcessJvm=true|multiNode=true|partition=False|containersRemoved=true|networksRemoved=true
+kafka-nacos-cluster=ok|crossProcessJvm=true|multiNode=true|partition=True|containersRemoved=true|networksRemoved=true
+```
+
+验证实际覆盖三 broker Kafka、两个 Nacos 集群节点、共享 MySQL schema、跨 JVM Kafka/Nacos 外部测试、broker-1 重启、nacos-1 重启，以及 broker 网络断开/恢复。日志中可见 Kafka consumer restart/pending 状态变化和 Nacos gRPC 连接关闭/恢复事件。该证据证明了本地明文测试拓扑下的基础故障矩阵，但不等同于生产 SLA 或安全认证证明。
+
+以下能力仍为 `not-proven`，并继续保持 `productionReady=false`、`goalAchieved=false`：TLS/真实鉴权、生产容量与 p99、长稳和灾备/RPO/RTO。
 
 以下为本轮完成后的建议工作，尚未执行；继续以可组合、可替换和可重复接入为目标。
 

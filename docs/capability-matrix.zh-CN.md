@@ -2,6 +2,8 @@
 
 本文给出 `0.1.0-SNAPSHOT` 的实现状态和明确边界。状态只描述当前仓库代码与测试，不等同于生产容量或稳定性承诺。
 
+<!-- ZeroFrameworkGapLedger evidence: ZeroSimpleArchitectureAcceptance.java -->
+
 ## 状态定义
 
 | 状态 | 定义 |
@@ -41,11 +43,11 @@
 | 游戏执行域 | implemented | 请求上下文、Actor 投递网关 | 正式多项目业务模块规范仍需实践验证 |
 | Player | prototype | 登录、会话、加载、查询、Repository/Cache 接入 | 真实鉴权、断线恢复、跨服迁移、在线数据长稳 |
 | Scene | prototype | 进入、移动、离开、实体状态和快照 | AOI、广播、tick、跨场景/跨服迁移 |
-| Room | prototype | 脚手架和最小契约 | 正式模块、匹配、断线、结算和容量 |
-| AOI/状态同步 | prototype | 场景模板和最小契约 | AOI 算法、广播扇出、差量快照和带宽压测 |
-| 帧同步 | prototype | 模板和最小契约 | 正式帧服务、回滚/回放、确定性和长稳 |
-| NPC tick | prototype | Scheduler/Actor 模板和最小契约 | 调度分片、AI 预算、降级与容量 |
-| 排行榜/赛季 | prototype | Redis/Cache 模板和最小契约 | 正式排行实现、赛季结算、分片和一致性 |
+| Room | minimum-slice | `zero-room` 本地内存房间、容量、幂等、重连窗口、快照与统计；状态写入绑定 room lane | 生产持久化、跨服、匹配、容量与长稳未证明 |
+| AOI/状态同步 | minimum-slice | `zero-aoi` 单 owner 内存 AOI、可见性事件、`zero-state-sync` snapshot/delta baseline 校验、focused tests、local example 与 capacity marker；生产就绪为 false | 广播扇出、跨服迁移、带宽/容量压测、协议冻结与长稳未证明 |
+| 帧同步 | minimum-slice | `zero-frame-sync` 固定帧 runtime、输入幂等与迟到策略、focused tests、`examples/frame-sync` 本地示例、广播顺序和容量边界；生产就绪为 false | rollback/回放、确定性跨端验证、真实传输、生产容量与长稳 |
+| NPC tick | minimum-slice | `zero-npc` Actor-owned zone 生命周期、bounded tick budget、行为失败隔离、focused tests、local example 与容量边界；生产就绪为 false | 完整行为树/寻路/战斗 AI、持久化、跨服、生产容量与长稳 |
+| 排行榜/赛季 | minimum-slice | `zero-ranking` Actor-lane-owned 本地榜单、显式 `SET/MAX/ADD` 合并、稳定排序、有界 Top、赛季状态机、快照与幂等结算；生产就绪为 false | Redis sorted set、跨服榜、奖励资产发放、持久化归档、补偿、生产容量与长稳 |
 | 开放世界分片 | prototype | RPC/Discovery 模板和迁移契约 | 所有权协议、双写、恢复、再平衡和容量 |
 
 ## 数据与缓存
@@ -63,7 +65,7 @@
 | 能力 | 状态 | 已有 | 主要缺口 |
 | --- | --- | --- | --- |
 | 结构化日志 | minimum-slice | 固定字段、Appender/Sink 隔离、双安全门、脱敏、ErrorCode | 生产 file/Kafka Sink、批量、背压、重试和归档 |
-| 指标/告警 | minimum-slice | 内存注册表、低基数约束、Prometheus 文本、Grafana JSON、规则 | HTTP Endpoint、远程写、真实告警通道和容量 |
+| 指标/告警 | minimum-slice | 内存注册表、低基数约束、Prometheus 文本、JDK 嵌入式 HTTP Endpoint（显式 bind/stop、`/metrics`、`/health`）和规则 | 认证/TLS、远程写、真实告警通道和容量 |
 | GM DSL/审计 | minimum-slice | 命令、dry-run、执行、提交状态、安全归因、日志 hook | REST/RPC 入口、RBAC、IP 白名单、审批和双人复核 |
 | CSV 配置热更 | minimum-slice | 解析、校验、不可变快照、原子替换、失败保旧、WatchService | 多文件事务、远程发布、审批、集群同步 |
 | CGLIB/ClassLoader 热更 | design-boundary | 风险边界和接口方向 | 实际代理、签名、备份、集群同步和回滚实现 |
@@ -76,7 +78,8 @@
 | 本地 Starter | implemented | 无 Docker 默认装配、Builder 覆盖、执行域、诊断、生命周期 | 不是生产线程池/容量策略 |
 | Production Starter | minimum-slice | 严格 selector、必填配置、启动健康/预算、逆序资源事务、安全异常 | 周期健康、自动恢复、完整熔断、硬 wall-clock 取消 |
 | 模块化运行时装配 | minimum-slice | 中立 `zero-runtime`、显式 catalog/preset/profile、typed config、最小依赖图、事务回滚、独立 assembly/startup deadline、启动健康、single-use、安全诊断、共享能力模型、Local Starter 与生成器迁移；Kafka RPC、MongoDB data、Redis shared resource/data/cache、PostgreSQL data、Nacos discovery/RPC resolver 和 network lifecycle provider 已正式接入；Production 门面直接实现 `GameRuntime` | 周期健康、自动恢复、每组件独立预算、完整 production policy 和真实中间件故障验证仍待后续阶段 |
-| Docker/编排 | design-boundary | 外部测试可接真实组件 | 不提供正式 Compose/Kubernetes/云部署发行物 |
+| Docker/编排 | minimum-slice | `deploy/docker-compose.yml` 提供可运行的 Compose 基线：环境变量、非 root、只读根文件系统、healthcheck、内部网络、资源上限、可选 Redis/PostgreSQL 和 secret 路径占位 | app 镜像必须由项目提供；不含 TLS/WAF/DDoS、滚动发布、自动恢复、跨主机灾备、容量或生产就绪证明 |
+| 备份与恢复流程 | design-boundary | 提供中文部署基线和备份恢复 Runbook 模板，覆盖 PostgreSQL/Redis 边界、外部依赖、校验与恢复演练清单 | 各项目仍需实现并演练实际备份、PITR、RPO/RTO、加密保留、权限和灾备方案 |
 
 ## 性能证据
 

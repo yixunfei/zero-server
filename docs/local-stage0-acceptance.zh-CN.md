@@ -20,8 +20,8 @@
 
 | 层级 | 用途 | 检查内容 |
 | --- | --- | --- |
-| `quick` | 克隆后首次上手、日常关键路径 smoke | Doctor、架构守卫、默认测试、安装当前 SNAPSHOT、需求驱动本地原型 |
-| `full` | 提交前、阶段验收和 CI | 共 17 项：`quick` 全部内容，加质量门禁、本地集成测试、四种精简消费者、本地 Starter、六类独立示例、七类业务脚手架和十九种按需生成工程 |
+| `quick` | 克隆后首次上手、日常关键路径 smoke | Doctor、架构守卫、框架边界守卫、默认测试、安装当前 SNAPSHOT、需求驱动本地原型 |
+| `full` | 提交前、阶段验收和 CI | `quick` 全部内容，加质量门禁、本地集成测试、四种精简消费者、本地 Starter、六类独立示例、七类业务脚手架和十九种按需生成工程 |
 
 默认层级是 `quick`。快速验收：
 
@@ -48,6 +48,7 @@ java scripts/ZeroStage0Acceptance.java --level full --plan
 ```text
 ZeroLocalDoctor
   -> ZeroArchitectureGuard
+  -> ZeroFrameworkBoundaryGuard
   -> Maven test
   -> quality verify
   -> integration-tests verify
@@ -98,27 +99,9 @@ zero-stage0-acceptance=ok|level=quick|checks=5|passed=5|failed=0|skipped=0|durat
 
 CI 应匹配最终 `zero-stage0-acceptance=ok` 和进程退出码，不应只搜索某个示例的 `=ok`。
 
-仓库 CI 直接运行同一个 `full` 入口，不维护第二套拆分命令。GitHub Actions 的任务日志保留最终机器摘要；无论验收成功或失败，`target/stage0-acceptance/logs` 都会作为 `stage0-acceptance-logs` 制品上传并保留 7 天，便于按稳定检查 ID 定位问题。
+CI 可选择直接运行同一个 `full` 入口；默认 CI 也可以拆分执行同等的 unit、quality、integration 和 architecture 门禁，但文档与 workflow 必须保持一致。若运行 Stage 0，GitHub Actions 应保留最终机器摘要；无论验收成功或失败，都应将 `target/stage0-acceptance/logs` 作为 `stage0-acceptance-logs` 制品上传并保留 7 天，便于按稳定检查 ID 定位问题。
 
-2026-09-06 按需装配三批完成后的最终验收摘要为：
-
-```text
-zero-stage0-acceptance=ok|level=full|checks=17|passed=17|failed=0|skipped=0|durationMs=420935|externalMiddleware=false|productionReady=false|outputDir=target/stage0-acceptance
-```
-
-该数字是一次完整串行验收记录，不是单项耗时承诺；CI 机器、Maven 缓存和硬件不同会改变 `durationMs`。
-
-该次 full 的 Surefire 为 516 tests，本地 Failsafe 为 1 test，失败、错误和跳过均为 0。复核修正 discovery/RPC resolver 的生成清单后增加 1 项回归，当时 Reactor 共 517 tests；相关模块 quality、全部本地可选组件组合及五种生成消费者复验通过。四种独立消费者和五种生成工程同时验证依赖闭包与实际 classpath。该批次未执行真实数据库读写。
-
-2026-09-07 审核修复与能力巩固后的完整复验：
-
-```text
-zero-stage0-acceptance=ok|level=full|checks=17|passed=17|failed=0|skipped=0|durationMs=503608|externalMiddleware=false|productionReady=false|outputDir=target/stage0-acceptance
-```
-
-当前 Reactor Surefire 为 527 tests，本地 Failsafe 为 1 test，失败、错误和跳过均为 0。生成验收扩展为十九个消费者，覆盖组件目录的全部十二个选择、五条代表路径和两种混合组装，并实际执行 runtime 配置诊断。架构守卫保持 47 modules / 18 rules。
-
-另通过 `scripts/VerifyRepositoryDrivers.ps1` 在本轮专用 Docker 容器完成 local/MongoDB/PostgreSQL/Redis 的同一业务契约，三个真实驱动的外部 Failsafe 各 1/1、无跳过；测试容器、卷和网络已清理。该外部验证没有并入默认 full，不包含服务端故障恢复或压测。完整变更与证据见[审核与实施记录](reports/composition-review-2026-09-07.zh-CN.md)。
+当前 Reactor 与检查数量会随模块、测试和工作树版本变化；历史摘要仅作为历史记录，不是当前 checkout 的验收证据。提交或发布时必须在 JDK 21 环境重新执行并保存本轮输出。真实驱动验证不并入本地 full，不包含服务端故障恢复或压测。
 
 ## 5. 源码长度质量门禁
 

@@ -1,6 +1,6 @@
 # NPC tick 最小契约草案
 
-状态：`draft`
+状态：`implemented-local-minimum-slice`
 
 确认要求：`requiresConfirmation=true`
 
