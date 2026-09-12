@@ -115,7 +115,10 @@ public final class ZeroUnifiedEntryVerifier {
         Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
         byte[] output = process.getInputStream().readAllBytes();
         Files.write(log, output);
-        require(process.waitFor() == 0, "command succeeded: " + String.join(" ", command));
+        if (process.waitFor() != 0) {
+            System.out.write(output);
+            throw new IllegalStateException("command failed: " + String.join(" ", command));
+        }
     }
 
     private static String platformName() {
