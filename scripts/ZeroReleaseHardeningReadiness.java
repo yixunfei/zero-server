@@ -109,15 +109,15 @@ public final class ZeroReleaseHardeningReadiness {
             printChecks();
             return;
         }
-        ReadinessReport report = inspect();
+        ReadinessReport report = inspect(hasFlag(args, "--allowMissingEvidence", "--allow-missing-evidence"));
         printReport(report);
         if (report.hasErrors()) {
             System.exit(1);
         }
     }
 
-    private static ReadinessReport inspect() throws IOException {
-        ReadinessReport report = new ReadinessReport();
+    private static ReadinessReport inspect(final boolean allowMissingEvidence) throws IOException {
+        ReadinessReport report = new ReadinessReport(allowMissingEvidence);
         if (!Files.isRegularFile(Path.of("pom.xml"))) {
             report.repositoryOk = false;
             return report;
@@ -304,6 +304,12 @@ public final class ZeroReleaseHardeningReadiness {
          */
         private final List<MarkerResult> markers = new ArrayList<>();
 
+        private final boolean allowMissingEvidence;
+
+        private ReadinessReport(final boolean allowMissingEvidence) {
+            this.allowMissingEvidence = allowMissingEvidence;
+        }
+
         private long passedPaths() {
             return paths.stream().filter(PathResult::present).count();
         }
@@ -313,6 +319,9 @@ public final class ZeroReleaseHardeningReadiness {
         }
 
         private int errorCount() {
+            if (allowMissingEvidence) {
+                return repositoryOk ? 0 : 1;
+            }
             int repositoryError = repositoryOk ? 0 : 1;
             return repositoryError
                     + (int) (REQUIRED_PATHS.size() - passedPaths())

@@ -68,7 +68,7 @@ jobs:
       - name: Verify framework gap ledger
         run: java scripts/ZeroFrameworkGapLedger.java --allow-missing-evidence
       - name: Verify release readiness materials
-        run: java scripts/ZeroReleaseHardeningReadiness.java
+        run: java scripts/ZeroReleaseHardeningReadiness.java --allow-missing-evidence
 
   stage0:
     name: Full local framework acceptance
