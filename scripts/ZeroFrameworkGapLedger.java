@@ -399,15 +399,16 @@ public final class ZeroFrameworkGapLedger {
             printCapabilityDescription(resolveGap(capabilityId));
             return;
         }
-        LedgerReport report = inspect();
+        boolean allowMissingEvidence = hasFlag(args, "--allowMissingEvidence", "--allow-missing-evidence");
+        LedgerReport report = inspect(allowMissingEvidence);
         printReport(report);
         if (report.hasErrors()) {
             System.exit(1);
         }
     }
 
-    private static LedgerReport inspect() throws IOException {
-        LedgerReport report = new LedgerReport();
+    private static LedgerReport inspect(final boolean allowMissingEvidence) throws IOException {
+        LedgerReport report = new LedgerReport(allowMissingEvidence);
         boolean rootEvidence = Files.isRegularFile(Path.of("pom.xml"))
                 && Files.isRegularFile(Path.of("CONTRIBUTING.md"))
                 && Files.isRegularFile(Path.of("docs", "module-map.md"))
@@ -785,6 +786,11 @@ public final class ZeroFrameworkGapLedger {
          * 缺口检查结果。
          */
         private final List<GapLine> gaps = new ArrayList<>();
+        private final boolean allowMissingEvidence;
+
+        private LedgerReport(final boolean allowMissingEvidence) {
+            this.allowMissingEvidence = allowMissingEvidence;
+        }
 
         private void pass(final String name, final String message) {
             checks.add(new CheckLine(CheckStatus.PASS, name, message));
@@ -808,7 +814,7 @@ public final class ZeroFrameworkGapLedger {
 
         private boolean hasErrors() {
             return checks.stream().anyMatch(line -> line.status() == CheckStatus.FAIL)
-                    || gaps.stream().anyMatch(GapLine::hasMissingEvidence);
+                    || (!allowMissingEvidence && gaps.stream().anyMatch(GapLine::hasMissingEvidence));
         }
 
         private long errorCount() {

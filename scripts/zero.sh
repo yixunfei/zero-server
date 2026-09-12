@@ -79,7 +79,8 @@ test_cmd() {
     fi
   done
   if [[ -n "$project_dir" ]]; then
-    (cd "$ROOT_DIR" && "$(mvn_cmd)" -B -ntp -f "$project_dir/pom.xml" test "${args[@]}")
+    local project_pom; project_pom="$(cd "$project_dir" && pwd)/pom.xml"
+    (cd "$ROOT_DIR" && "$(mvn_cmd)" -B -ntp -f "$project_pom" test "${args[@]}")
   else
     (cd "$ROOT_DIR" && "$(mvn_cmd)" -B -ntp test "${args[@]}")
   fi
