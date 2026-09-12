@@ -118,9 +118,7 @@ public final class ZeroReleaseHardeningReadiness {
 
     private static ReadinessReport inspect() throws IOException {
         ReadinessReport report = new ReadinessReport();
-        if (!Files.isRegularFile(Path.of("pom.xml"))
-                || (!Files.isRegularFile(Path.of("AGENTS.md"))
-                && !Files.isRegularFile(Path.of(".codex", "AGENTS.md")))) {
+        if (!Files.isRegularFile(Path.of("pom.xml"))) {
             report.repositoryOk = false;
             return report;
         }

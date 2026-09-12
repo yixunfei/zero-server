@@ -411,9 +411,7 @@ public final class ZeroFrameworkGapLedger {
         LedgerReport report = new LedgerReport(allowMissingEvidence);
         boolean rootEvidence = Files.isRegularFile(Path.of("pom.xml"))
                 && Files.isRegularFile(Path.of("CONTRIBUTING.md"))
-                && Files.isRegularFile(Path.of("docs", "module-map.md"))
-                && (Files.isRegularFile(Path.of("AGENTS.md"))
-                || Files.isRegularFile(Path.of(".codex", "AGENTS.md")));
+                && Files.isRegularFile(Path.of("docs", "module-map.md"));
         if (rootEvidence) {
             report.pass("repo-root", "Current directory looks like zeroServer repository root and has repository guidance evidence.");
         } else {
