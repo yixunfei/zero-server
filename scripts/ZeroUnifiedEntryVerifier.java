@@ -116,7 +116,14 @@ public final class ZeroUnifiedEntryVerifier {
         byte[] output = process.getInputStream().readAllBytes();
         Files.write(log, output);
         if (process.waitFor() != 0) {
-            System.out.write(output);
+            String failureOutput = new String(output, StandardCharsets.UTF_8);
+            System.out.print(failureOutput);
+            String[] lines = failureOutput.split("\\R");
+            int start = Math.max(0, lines.length - 40);
+            for (int index = start; index < lines.length; index++) {
+                String detail = lines[index].replace("%", "%25").replace("\\r", "%0D").replace("\\n", "%0A");
+                System.out.println("::error title=unified-entry-subprocess::" + detail);
+            }
             throw new IllegalStateException("command failed: " + String.join(" ", command));
         }
     }
