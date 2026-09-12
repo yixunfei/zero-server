@@ -42,7 +42,7 @@ run_java_tool() {
   if is_windows_host; then
     (cd "$ROOT_DIR" && ZERO_MAVEN_CMD="mvn.cmd" "$(java_cmd)" "$@")
   else
-    (cd "$ROOT_DIR" && ZERO_MAVEN_CMD="$(mvn_cmd)" "$(java_cmd)" "$@")
+    (cd "$ROOT_DIR" && ZERO_MAVEN_CMD="mvn" "$(java_cmd)" "$@")
   fi
 }
 
@@ -53,7 +53,7 @@ require_root() {
   }
 }
 
-  doctor() { require_root; run_java_tool scripts/ZeroLocalDoctor.java; }
+doctor() { require_root; run_java_tool scripts/ZeroLocalDoctor.java; }
 
 init_cmd() {
   require_root
