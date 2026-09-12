@@ -8,7 +8,7 @@ $RootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $StateDir = if ($env:ZERO_STATE_DIR) { $env:ZERO_STATE_DIR } else { Join-Path $RootDir 'target/zero-entry' }
 $PidFile = Join-Path $StateDir 'server.pid'
 $MetaFile = Join-Path $StateDir 'server.meta'
-$MavenCommand = if ($env:MAVEN_CMD) { $env:MAVEN_CMD } else { $null }
+$MavenCommand = if ($env:MAVEN_CMD) { $env:MAVEN_CMD } elseif ($env:ZERO_MAVEN_CMD) { $env:ZERO_MAVEN_CMD } else { $null }
 
 function Show-Usage {
     @'

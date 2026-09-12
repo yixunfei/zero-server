@@ -3,7 +3,7 @@ set -euo pipefail
 
 # zeroServer cross-platform thin entrypoint. It delegates behavior to existing Java tools.
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-MAVEN_CMD="${MAVEN_CMD:-}"
+MAVEN_CMD="${MAVEN_CMD:-${ZERO_MAVEN_CMD:-}}"
 STATE_DIR="${ZERO_STATE_DIR:-${ROOT_DIR}/target/zero-entry}"
 PID_FILE="${STATE_DIR}/server.pid"
 META_FILE="${STATE_DIR}/server.meta"
