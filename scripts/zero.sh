@@ -131,7 +131,7 @@ stop_cmd() {
     local project_dir=""
     if [[ -s "$META_FILE" ]]; then project_dir="$(grep '^projectDir=' "$META_FILE" | cut -d= -f2-)"; fi
     local command_line; command_line="$(ps -p "$pid" -o args= 2>/dev/null || true)"
-    if [[ -z "$command_line" || ( "$command_line" != *mvn* && "$command_line" != *mvnw* ) || ( -n "$project_dir" && "$command_line" != *"$project_dir"* ) ]]; then
+    if [[ -z "$command_line" || ( "$command_line" != *mvn* && "$command_line" != *mvnw* && ( -z "$project_dir" || "$(readlink "/proc/$pid/cwd" 2>/dev/null || true)" != "$project_dir" ) ) ]]; then
       printf 'zero-stop=refused|reason=managed-pid-identity-mismatch|pid=%s\n' "$pid" >&2
       exit 1
     fi
