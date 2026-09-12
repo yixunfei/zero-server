@@ -65,6 +65,11 @@ public enum GmErrorCode implements ErrorCode {
             "ZERO-GM-HANDLER-FAILED",
             "gm command handler failed"),
 
+    OPERATION_AUTHORIZATION_DENIED(
+            ErrorCategory.CLIENT_REQUEST,
+            "ZERO-GM-OPERATION-AUTHORIZATION-DENIED",
+            "gm operation authorization denied"),
+
     /**
      * GM 审计 hook 执行失败。
      */

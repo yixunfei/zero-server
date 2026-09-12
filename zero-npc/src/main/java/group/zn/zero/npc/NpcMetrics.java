@@ -1,0 +1,1 @@
+package group.zn.zero.npc; public interface NpcMetrics{void recordTick(TickResult result);void recordBehaviorFailure(String zoneId,String behaviorType);default void recordSpawn(){} default void recordDespawn(){}}

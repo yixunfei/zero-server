@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>group.zn.zero</groupId><artifactId>zero-parent</artifactId><version>0.1.0-SNAPSHOT</version><relativePath>../zero-parent/pom.xml</relativePath>
+    </parent>
+    <artifactId>zero-world</artifactId>
+    <name>zeroServer World</name>
+    <description>Actor-owned local world and shard migration minimum slice.</description>
+    <dependencies>
+        <dependency><groupId>group.zn.zero</groupId><artifactId>zero-actor</artifactId></dependency>
+    </dependencies>
+</project>
