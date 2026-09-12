@@ -68,6 +68,9 @@ public final class ZeroUnifiedEntryVerifier {
         Path project = output.resolve("generated-scene-sync");
         String entry = isWindows() ? "scripts\\zero.ps1" : "scripts/zero.sh";
         String prefix = isWindows() ? "powershell.exe" : "bash";
+        if (!isWindows()) {
+            run(List.of("chmod", "+x", "mvnw", "scripts/zero.sh"));
+        }
         runCapture(output.resolve("doctor.log"), command(prefix, entry, "doctor"));
         runCapture(output.resolve("generate.log"), command(prefix, entry, "generate", "--template", "scene-sync",
                 "--projectName", "cross-platform-scene", "--packageName", "group.example.crossplatform",
