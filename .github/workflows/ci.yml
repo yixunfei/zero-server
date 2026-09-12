@@ -20,9 +20,9 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Validate Maven model
-        run: ./mvnw -B -ntp -DskipTests validate
+        run: mvn -B -ntp -DskipTests validate
       - name: Run unit tests
-        run: ./mvnw -B -ntp test
+        run: mvn -B -ntp test
 
   quality:
     name: Quality gate
@@ -36,7 +36,7 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Run quality profile
-        run: ./mvnw -B -ntp -Pquality verify
+        run: mvn -B -ntp -Pquality verify
 
   integration:
     name: Local integration tests
@@ -50,7 +50,7 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Run local integration profile
-        run: ./mvnw -B -ntp -Pintegration-tests verify
+        run: mvn -B -ntp -Pintegration-tests verify
 
   architecture:
     name: Architecture and repository evidence
@@ -147,7 +147,7 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Run opt-in benchmark profile
-        run: ./mvnw -B -ntp -Pbenchmarks verify
+        run: mvn -B -ntp -Pbenchmarks verify
 
   external:
     name: External middleware (opt-in, no implicit Docker)
@@ -162,7 +162,7 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Run explicitly provisioned external environment
-        run: ./mvnw -B -ntp -Pexternal-tests verify
+        run: mvn -B -ntp -Pexternal-tests verify
         env:
           EXTERNAL_MIDDLEWARE_ENDPOINTS: ${{ secrets.EXTERNAL_MIDDLEWARE_ENDPOINTS }}
 
