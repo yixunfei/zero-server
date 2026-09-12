@@ -131,7 +131,7 @@ jobs:
           java -version
           mvn -version
           mvn -B -ntp -DskipTests install
-          java scripts\ZeroUnifiedEntryVerifier.java --full-smoke
+          java scripts\ZeroUnifiedEntryVerifier.java --full-smoke *>&1 | Tee-Object -FilePath target\cross-platform\windows-verifier.log
       - name: Upload cross-platform evidence
         if: always()
         uses: actions/upload-artifact@v4
