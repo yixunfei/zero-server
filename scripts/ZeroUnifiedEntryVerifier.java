@@ -77,7 +77,8 @@ public final class ZeroUnifiedEntryVerifier {
                 "--projectName", "cross-platform-scene", "--packageName", "group.example.crossplatform",
                 "--outputDir", project.toString(), "--force"));
         runCapture(output.resolve("diagnose.log"), command(prefix, entry, "diagnose", "--projectDir", project.toString()));
-        runCapture(output.resolve("test.log"), command(prefix, entry, "test", "--projectDir", project.toString()));
+        Path projectPom = project.resolve("pom.xml").toAbsolutePath().normalize();
+        runCapture(output.resolve("test.log"), command(prefix, entry, "test", "--projectDir", projectPom.getParent().toString()));
         runCapture(output.resolve("run.log"), command(prefix, entry, "run", "--projectDir", project.toString()));
         Thread.sleep(3_000L);
         runCapture(output.resolve("stop.log"), command(prefix, entry, "stop"));
