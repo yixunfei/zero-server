@@ -167,6 +167,7 @@ jobs:
       - master
       - main
       - 'codex/**'
+      - 'feat/modular-runtime-composition'
   pull_request:
   workflow_dispatch:
     inputs:
