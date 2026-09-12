@@ -8,7 +8,9 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ### Added
 
-- 阶段 0 统一验收入口，分为 quick/full 两级，串联环境、架构、Maven 门禁、独立示例和七类脚手架，并输出可机器解析结果。
+- P0-1 统一跨平台开发入口：新增 `scripts/zero.sh` 与 `scripts/zero.ps1`，提供 doctor/init/generate/test/diagnose/run/stop 命令；run/stop 使用受控 PID 元数据并保持幂等，不连接外部中间件。
+- 新增 `ZeroUnifiedEntryVerifier`，验证两端命令契约、脚本安全状态管理和 POSIX stop 幂等语义。
+- 阶段 0 验收脚本的进程输出采集和超时进程树处理兼容 Java 17 进行预检编译；项目实际构建和运行仍明确要求 Java 21。
 - 阶段 1 模块化运行时装配设计与 `zero-runtime` 1B/1C 通用契约：显式 catalog/selection、typed config、确定性依赖图、双资源账本、启动健康、single-use 生命周期、稳定错误码、安全诊断和共享能力模型；Local Starter、生成器、示例及模板已迁移，真实 Adapter provider 留待 1D。
 - 1D-0 Production 迁移基础契约：`GameRuntime.optional(...)`、相互独立的 assembly/startup deadline，以及 `standalone`、`external-test`、`production` profile 和中立 data/discovery/resolver/network capability 词汇。
 - 1D-1 Kafka RPC 正式 runtime provider：稳定 provider ID、typed startup schema、显式日志依赖、双 RPC capability、mandatory startup health，以及保持不变的安全属性白名单和延迟连接边界。

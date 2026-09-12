@@ -27,7 +27,8 @@ java -version
 mvn -version
 ```
 
-## 2. 克隆并自检
+Maven Wrapper 已固定到 3.9.8：POSIX 使用 `./mvnw`，Windows 使用 `mvnw.cmd`。`.mvn/toolchains.xml` 声明项目需要 Java 21；请将 `JAVA_HOME` 指向 JDK 21。Wrapper 解决 Maven 版本一致性，但不会下载或切换 JDK。
+
 
 ```bash
 git clone https://github.com/yixunfei/zero-server.git
@@ -39,13 +40,51 @@ Doctor 只检查 Java、Maven、仓库根目录、核心模块、示例和公开
 
 ```text
 zero-local-doctor=ok|checks=23|passed=23|failed=0
+ZeroOnboardingVerifier
+
+<!-- ZeroFrameworkGapLedger evidence: ZeroLocalDoctor -->
 ```
 
 如果失败，先修正 Java/Maven PATH 或确认当前目录包含 `pom.xml`、`README.md`、`zero-parent/pom.xml` 和 `templates/`。
 
-## 3. 最短路径：生成并运行游戏原型
+## 2.5 统一入口（推荐）
 
-只需基础运行时或指定组件时，可先安装框架，再生成独立工程：
+仓库提供不复制框架逻辑的薄入口，统一环境检查、生成、诊断和本地进程生命周期：
+
+```bash
+scripts/zero.sh init --fromKeywords "rpg scene sync" --projectName my-game \\
+  --packageName group.example.mygame --force
+```
+
+Windows PowerShell：
+
+```powershell
+.\scripts\zero.ps1 init --fromKeywords "rpg scene sync" --projectName my-game `
+  --packageName group.example.mygame --force
+```
+
+常用命令：
+
+```text
+zero doctor                         环境与仓库入口检查
+zero generate --template runtime    生成独立工程
+zero diagnose --projectDir DIR      只检查生成工程结构
+zero test --projectDir DIR          测试生成工程
+zero run --projectDir DIR           启动并记录受控 PID
+zero stop                           只停止本入口记录的进程，可重复执行
+```
+
+POSIX 使用 `scripts/zero.sh`，PowerShell 使用 `scripts/zero.ps1`；参数会原样转发给现有 Java 工具。`run/stop` 的状态保存在 `target/zero-entry/`，不会按进程名误杀其他程序。若 Doctor 报 Java/Maven 版本不足，请先切换 `JAVA_HOME` 到 JDK 21、安装 Maven 3.9+，再重试；入口不会替用户安装系统软件。
+
+跨平台统一入口 smoke（CI）：
+
+```bash
+./mvnw -B -ntp -DskipTests install
+java scripts/ZeroUnifiedEntryVerifier.java --full-smoke
+```
+
+GitHub Actions 会在 `ubuntu-latest`、`macos-latest`、`windows-latest` 上分别执行这条真实链路并上传 `target/cross-platform` 证据；本地无法访问对应 runner 时，不应把矩阵配置误写为已通过。
+
 
 ```powershell
 mvn -B -ntp -q -DskipTests install

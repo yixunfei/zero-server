@@ -7,7 +7,161 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-on:
+jobs:
+  unit:
+    name: Unit and default tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Validate Maven model
+        run: ./mvnw -B -ntp -DskipTests validate
+      - name: Run unit tests
+        run: ./mvnw -B -ntp test
+
+  quality:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Run quality profile
+        run: ./mvnw -B -ntp -Pquality verify
+
+  integration:
+    name: Local integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Run local integration profile
+        run: ./mvnw -B -ntp -Pintegration-tests verify
+
+  architecture:
+    name: Architecture and repository evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Run architecture guard
+        run: java scripts/ZeroArchitectureGuard.java
+      - name: Verify framework gap ledger
+        run: java scripts/ZeroFrameworkGapLedger.java
+      - name: Verify release readiness materials
+        run: java scripts/ZeroReleaseHardeningReadiness.java
+
+  stage0:
+    name: Full local framework acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Run unified Stage 0 acceptance
+        run: java scripts/ZeroStage0Acceptance.java --level full
+      - name: Upload Stage 0 logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage0-acceptance-logs
+          path: target/stage0-acceptance/logs
+          if-no-files-found: ignore
+          retention-days: 7
+
+  cross-platform-entry:
+    name: Unified entry smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Prepare POSIX scripts
+        if: runner.os != 'Windows'
+        run: chmod +x mvnw scripts/zero.sh
+      - name: Run full unified entry smoke on POSIX
+        if: runner.os != 'Windows'
+        run: |
+          ./mvnw -B -ntp -DskipTests install
+          java scripts/ZeroUnifiedEntryVerifier.java --full-smoke
+      - name: Run full unified entry smoke on Windows
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          .\mvnw.cmd -B -ntp -DskipTests install
+          java scripts\ZeroUnifiedEntryVerifier.java --full-smoke
+      - name: Upload cross-platform evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unified-entry-${{ matrix.os }}
+          path: target/cross-platform
+          if-no-files-found: ignore
+
+  performance:
+    name: Performance evidence (opt-in)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_performance == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Run opt-in benchmark profile
+        run: ./mvnw -B -ntp -Pbenchmarks verify
+
+  external:
+    name: External middleware (opt-in, no implicit Docker)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_external == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Run explicitly provisioned external environment
+        run: ./mvnw -B -ntp -Pexternal-tests verify
+        env:
+          EXTERNAL_MIDDLEWARE_ENDPOINTS: ${{ secrets.EXTERNAL_MIDDLEWARE_ENDPOINTS }}
+
+'on':
   push:
     branches:
       - master
@@ -15,31 +169,14 @@ on:
       - 'codex/**'
   pull_request:
   workflow_dispatch:
-
-jobs:
-  stage0:
-    name: Stage 0 Local Acceptance
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Java 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-
-      - name: Run full local acceptance
-        run: java scripts/ZeroStage0Acceptance.java --level full --timeoutSeconds 900
-
-      - name: Upload acceptance logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stage0-acceptance-logs
-          path: target/stage0-acceptance/logs
-          if-no-files-found: warn
-          retention-days: 7
+    inputs:
+      run_external:
+        description: Run external middleware tests against a separately provisioned environment
+        required: true
+        default: false
+        type: boolean
+      run_performance:
+        description: Run opt-in benchmark evidence
+        required: true
+        default: false
+        type: boolean

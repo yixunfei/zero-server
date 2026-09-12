@@ -91,7 +91,24 @@ mvn -q -f target/my-runtime/pom.xml clean test exec:java
 
 省略 `--components` 得到最小运行时；选择 `redis` 或 `custom-actor` 可生成单 Redis 装配或实现替换示例。详见[按需装配](docs/modular-composition-guide.zh-CN.md)、[Repository 业务接入](docs/repository-composition-guide.zh-CN.md)与[脚手架组件选择](docs/scaffold-templates.zh-CN.md)。
 
-## 核心能力
+- **统一入口**：`mvnw`/`mvnw.cmd` 固定 Maven 3.9.8，`.mvn/toolchains.xml` 声明 Java 21；`scripts/zero.sh` 与 `scripts/zero.ps1` 提供一致的 doctor、init、generate、test、diagnose、run、stop 命令。
+
+如果希望用一套命令完成环境检查、生成、诊断和本地运行，可使用仓库内的跨平台薄入口：
+
+```bash
+scripts/zero.sh init --fromKeywords "rpg scene sync" --projectName my-game \\
+  --packageName group.example.mygame --force
+```
+
+Windows PowerShell：
+
+```powershell
+.\scripts\zero.ps1 init --fromKeywords "rpg scene sync" --projectName my-game `
+  --packageName group.example.mygame --force
+```
+
+两端都支持 `doctor`、`init`、`generate`、`test`、`diagnose`、`run`、`stop`。生成工程可用 `diagnose -> run -> stop` 操作；入口只停止自己写入 `target/zero-entry/server.pid` 的进程，重复 `stop` 是幂等的。它们只是对现有 Java 工具和 Maven 的薄封装，不会自动连接 Kafka、Nacos、Redis、MongoDB 或 PostgreSQL。
+
 
 | 领域 | 当前能力 |
 | --- | --- |
@@ -538,6 +555,9 @@ zero.adapter.startup-timeout-millis=10000
 
 ### 运行与运维
 
+- [后续优化路线图（接手指南）](docs/optimization-roadmap.zh-CN.md)
+- [Docker Compose 部署基线](docs/deployment-baseline.zh-CN.md)
+- [备份与恢复 Runbook](docs/backup-recovery-runbook.zh-CN.md)
 - [Production Adapter fail-fast](docs/production-adapter-failfast-contract.zh-CN.md)
 - [生产网络生命周期](docs/production-network-lifecycle-contract.zh-CN.md)
 - [日志与可观测性](docs/logging-observability.zh-CN.md)
