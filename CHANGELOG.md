@@ -8,7 +8,7 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ### Added
 
-- P0-1 统一跨平台开发入口：新增 `scripts/zero.sh` 与 `scripts/zero.ps1`，提供 doctor/init/generate/test/diagnose/run/stop 命令；run/stop 使用受控 PID 元数据并保持幂等，不连接外部中间件。
+- 新增上层 `zero-gm-rest` transport boundary 最小切片：固定 `/gm/operation` 路由、有界 body、应用注入 `GmIdentityProvider`、metadata 校验、稳定错误响应与 fail-closed 身份策略；不包含真实 HTTP server、账号系统、RBAC/审批持久化或审计留存。
 - 新增 `ZeroUnifiedEntryVerifier`，验证两端命令契约、脚本安全状态管理和 POSIX stop 幂等语义。
 - 阶段 0 验收脚本的进程输出采集和超时进程树处理兼容 Java 17 进行预检编译；项目实际构建和运行仍明确要求 Java 21。
 - 阶段 1 模块化运行时装配设计与 `zero-runtime` 1B/1C 通用契约：显式 catalog/selection、typed config、确定性依赖图、双资源账本、启动健康、single-use 生命周期、稳定错误码、安全诊断和共享能力模型；Local Starter、生成器、示例及模板已迁移，真实 Adapter provider 留待 1D。

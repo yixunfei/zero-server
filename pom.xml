@@ -49,9 +49,16 @@
         <module>zero-protocol</module>
         <module>zero-codegen</module>
         <module>zero-actor</module>
+        <module>zero-world</module>
+        <module>zero-npc</module>
+        <module>zero-ranking</module>
+        <module>zero-room</module>
         <module>zero-game</module>
         <module>zero-player</module>
         <module>zero-scene</module>
+        <module>zero-aoi</module>
+        <module>zero-state-sync</module>
+        <module>zero-frame-sync</module>
         <module>zero-logic</module>
         <module>zero-net</module>
         <module>zero-rpc-common</module>
@@ -66,6 +73,7 @@
         <module>zero-log</module>
         <module>zero-monitor</module>
         <module>zero-gm</module>
+        <module>zero-gm-rest</module>
         <module>zero-hot-update</module>
         <module>zero-server-starter</module>
         <module>zero-server-starter-production</module>
@@ -96,6 +104,9 @@
             <modules>
                 <module>zero-benchmarks</module>
             </modules>
+        </profile>
+        <profile>
+            <id>performance-gate</id>
         </profile>
     </profiles>
 </project>

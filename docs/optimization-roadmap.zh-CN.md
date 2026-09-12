@@ -119,6 +119,8 @@ degraded、恢复、熔断、故障转移、Kafka 重平衡、Nacos 节点切换
 
 ### P0-4 GM 生产安全运营
 
+进展（2026-09-12）：`partial`。已完成 P0-4 GM REST transport boundary 最小切片：新增上层 `zero-gm-rest` 模块、`GmIdentityProvider`、有界请求解析、固定 `/gm/operation` 路由、稳定错误响应和 fail-closed 身份边界；focused tests 已通过。该切片不提供真实身份、RBAC 持久化、审批服务、HTTP server 或审计留存，因此 P0-4 仍不可标记完成。
+
 现状：已有授权窄切片、标准入口、审计记录/存储/传输边界契约（见
 `docs/gm-standard-entry-persistence-contract.zh-CN.md`）；缺真实身份、持久 RBAC/IP/审批、
 生产 REST/RPC 适配器、审计查询留存。
