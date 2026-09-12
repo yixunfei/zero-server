@@ -68,6 +68,7 @@ public final class ZeroUnifiedEntryVerifier {
         Path project = output.resolve("generated-scene-sync");
         String entry = isWindows() ? "scripts\\zero.ps1" : "scripts/zero.sh";
         String prefix = isWindows() ? "powershell.exe" : "bash";
+        Path state = output.resolve("entry-state");
         if (!isWindows()) {
             run(List.of("chmod", "+x", "mvnw", "scripts/zero.sh"));
         }
@@ -100,6 +101,15 @@ public final class ZeroUnifiedEntryVerifier {
         return command;
     }
 
+    private static List<String> withState(final List<String> command, final Path state) {
+        List<String> result = new java.util.ArrayList<>();
+        if (isWindows()) {
+            result.addAll(List.of("-Command", "$env:ZERO_STATE_DIR='" + state + "'; & " + String.join(" ", command.subList(1, command.size()))));
+        } else {
+            result.addAll(List.of("-c", "ZERO_STATE_DIR=\"" + state + "\" " + String.join(" ", command)));
+        }
+        return isWindows() ? List.of("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", result.get(1)) : List.of("bash", result.get(0), result.get(1));
+    }
     private static void runCapture(final Path log, final List<String> command)
             throws IOException, InterruptedException {
         Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
