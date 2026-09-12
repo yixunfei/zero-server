@@ -110,6 +110,9 @@ jobs:
       - name: Prepare POSIX scripts
         if: runner.os != 'Windows'
         run: chmod +x mvnw scripts/zero.sh
+      - name: Verify Maven Wrapper on POSIX
+        if: runner.os != 'Windows'
+        run: ./mvnw -N -B -ntp validate
       - name: Run full unified entry smoke on POSIX
         if: runner.os != 'Windows'
         run: |
