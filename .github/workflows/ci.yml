@@ -121,7 +121,8 @@ jobs:
           java -version
           mvn -version
           mvn -B -ntp -DskipTests install
-          ZERO_MAVEN_CMD=mvn java scripts/ZeroUnifiedEntryVerifier.java --full-smoke
+          mkdir -p target/cross-platform
+          ZERO_MAVEN_CMD=mvn java scripts/ZeroUnifiedEntryVerifier.java --full-smoke > target/cross-platform/posix-verifier.log
       - name: Run full unified entry smoke on Windows
         if: runner.os == 'Windows'
         shell: powershell
