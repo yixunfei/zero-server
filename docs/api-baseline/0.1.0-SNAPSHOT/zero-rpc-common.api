@@ -1,0 +1,35 @@
+public T orThrow();
+public T result();
+public abstract boolean idempotent();
+public abstract group.zn.zero.rpc.common.RpcCallMode mode();
+public abstract int id();
+public abstract int version();
+public abstract java.lang.String description();
+public abstract java.lang.String description();
+public abstract java.lang.String group();
+public abstract java.lang.String name();
+public abstract java.lang.String name();
+public abstract java.lang.String partitionKey();
+public abstract java.lang.String topic();
+public abstract long timeoutMillis();
+public boolean success();
+public final class group.zn.zero.rpc.common.RpcCallMode extends java.lang.Enum<group.zn.zero.rpc.common.RpcCallMode> {
+public final class group.zn.zero.rpc.common.RpcResult<T> {
+public group.zn.zero.core.error.ErrorCode errorCode();
+public group.zn.zero.rpc.common.RpcResult<T> withExceptionClass(java.lang.String);
+public group.zn.zero.rpc.common.RpcResult<T> withRemoteContext(java.lang.String, java.lang.String, java.lang.String, java.lang.String);
+public interface group.zn.zero.rpc.common.RpcMethod extends java.lang.annotation.Annotation {
+public interface group.zn.zero.rpc.common.RpcService extends java.lang.annotation.Annotation {
+public java.lang.String correlationId();
+public java.lang.String errorMsg();
+public java.lang.String exceptionClass();
+public java.lang.String remoteMethod();
+public java.lang.String remoteService();
+public java.lang.String traceId();
+public java.util.Optional<T> optional();
+public static <T> group.zn.zero.rpc.common.RpcResult<T> failure(group.zn.zero.core.error.ErrorCode, java.lang.String);
+public static <T> group.zn.zero.rpc.common.RpcResult<T> success(T);
+public static final group.zn.zero.rpc.common.RpcCallMode ONEWAY;
+public static final group.zn.zero.rpc.common.RpcCallMode REQUEST_RESPONSE;
+public static group.zn.zero.rpc.common.RpcCallMode valueOf(java.lang.String);
+public static group.zn.zero.rpc.common.RpcCallMode[] values();

@@ -1,6 +1,7 @@
 package group.zn.zero.net.lifecycle;
 
 import group.zn.zero.net.ConnectionAttributeKey;
+import group.zn.zero.security.SecurityContext;
 
 /**
  * 生产网络生命周期标准连接属性。
@@ -28,6 +29,15 @@ public final class ProductionNetworkConnectionAttributes {
      */
     public static final ConnectionAttributeKey<String> SUBJECT_ID =
             ConnectionAttributeKey.of("zero.net.lifecycle.subjectId", String.class);
+
+    /**
+     * TLS 握手已经由传输适配器完成。
+     */
+    public static final ConnectionAttributeKey<Boolean> TLS_ESTABLISHED =
+            ConnectionAttributeKey.of("zero.net.security.tlsEstablished", Boolean.class);
+
+    public static final ConnectionAttributeKey<SecurityContext> SECURITY_CONTEXT =
+            ConnectionAttributeKey.of("zero.net.security.context", SecurityContext.class);
 
     private ProductionNetworkConnectionAttributes() {
     }

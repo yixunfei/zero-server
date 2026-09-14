@@ -77,7 +77,7 @@ class NacosDiscoveryAdapterExternalIT {
                 "",
                 ServiceDiscoveryConstants.DEFAULT_GROUP_NAME,
                 ServiceDiscoveryConstants.DEFAULT_CLUSTER_NAME,
-                5_000,
+                30_000,
                 false,
                 NacosHealthUpdateMode.REREGISTER,
                 Map.of()));

@@ -15,6 +15,7 @@ import group.zn.zero.runtime.production.ProductionAssembly;
 import group.zn.zero.runtime.production.ProductionModuleFactory;
 import group.zn.zero.runtime.production.ZeroProductionAssemblyReport;
 import group.zn.zero.runtime.production.ZeroProductionRuntime;
+import group.zn.zero.security.SecurityChain;
 import group.zn.zero.runtime.redis.RedisRuntime;
 import group.zn.zero.starter.LocalRuntime;
 import java.util.function.Function;
@@ -31,6 +32,7 @@ public final class ZeroProductionRuntimeBuilder {
     private CacheValueCodec<Object> redisCacheValueCodec;
     private ProductionModuleFactory kafkaModule = KafkaRuntime.module();
     private ProductionNetworkPolicy networkPolicy;
+    private SecurityChain securityChain = SecurityChain.failClosed();
     private NetworkRateLimiter networkRateLimiter;
     private Function<String, String> systemPropertyLookup = System::getProperty;
     private Function<String, String> environmentLookup = System::getenv;
@@ -89,6 +91,12 @@ public final class ZeroProductionRuntimeBuilder {
         networkRateLimiter = Objects.requireNonNull(limiter, "limiter");
         return this;
     }
+    public ZeroProductionRuntimeBuilder securityChain(final SecurityChain value) {
+        mutable();
+        securityChain = Objects.requireNonNull(value, "securityChain");
+        return this;
+    }
+
 
     public ZeroProductionAssemblyReport diagnose() {
         mutable();
@@ -110,7 +118,7 @@ public final class ZeroProductionRuntimeBuilder {
                 .install(PostgresqlRuntime.module())
                 .install(RedisRuntime.module(redisCacheValueCodec))
                 .install(NacosRuntime.module())
-                .install(NetworkRuntime.module(networkPolicy, networkRateLimiter));
+                .install(NetworkRuntime.module(networkPolicy, networkRateLimiter, securityChain));
     }
 
     private void mutable() {

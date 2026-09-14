@@ -17,6 +17,7 @@ import java.util.regex.Pattern;
  * @param allowedMissedHeartbeats 允许连续丢失心跳次数。
  * @param reconnectWindow 玩家 Actor 重连协调窗口。
  * @param maxInboundFrames 单连接鉴权等待队列与业务 in-flight 总预算上限。
+ * @param tlsRequired 是否要求底层连接已完成 TLS 握手。
  * @author zn
  */
 public record ProductionNetworkConfig(
@@ -26,7 +27,8 @@ public record ProductionNetworkConfig(
         Duration heartbeatInterval,
         int allowedMissedHeartbeats,
         Duration reconnectWindow,
-        int maxInboundFrames) {
+        int maxInboundFrames,
+        boolean tlsRequired) {
 
     /**
      * 默认握手超时。
@@ -103,7 +105,8 @@ public record ProductionNetworkConfig(
                 DEFAULT_HEARTBEAT_INTERVAL,
                 DEFAULT_ALLOWED_MISSED_HEARTBEATS,
                 DEFAULT_RECONNECT_WINDOW,
-                DEFAULT_MAX_INBOUND_FRAMES);
+                DEFAULT_MAX_INBOUND_FRAMES,
+                false);
     }
 
     /**
@@ -132,7 +135,8 @@ public record ProductionNetworkConfig(
                 heartbeatInterval,
                 allowedMissedHeartbeats,
                 reconnectWindow,
-                maxInboundFrames);
+                maxInboundFrames,
+                tlsRequired);
     }
 
     /**
@@ -150,7 +154,8 @@ public record ProductionNetworkConfig(
                 interval,
                 missed,
                 reconnectWindow,
-                maxInboundFrames);
+                maxInboundFrames,
+                tlsRequired);
     }
 
     /**
@@ -167,9 +172,27 @@ public record ProductionNetworkConfig(
                 heartbeatInterval,
                 allowedMissedHeartbeats,
                 reconnectWindow,
-                limit);
+                limit,
+                tlsRequired);
     }
 
+    /**
+     * Returns a copy with the TLS requirement changed.
+     *
+     * @param required whether the transport must already be TLS protected
+     * @return copied configuration
+     */
+    public ProductionNetworkConfig withTlsRequired(final boolean required) {
+        return new ProductionNetworkConfig(
+                listener,
+                handshakeTimeout,
+                authenticationTimeout,
+                heartbeatInterval,
+                allowedMissedHeartbeats,
+                reconnectWindow,
+                maxInboundFrames,
+                required);
+    }
     private static void requirePositive(final Duration value, final String name) {
         Duration current = Objects.requireNonNull(value, name);
         if (current.isZero() || current.isNegative()) {

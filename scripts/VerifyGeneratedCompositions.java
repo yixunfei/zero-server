@@ -29,9 +29,14 @@ public final class VerifyGeneratedCompositions {
             new Consumer("custom-actor", "local", "custom-actor", localArtifacts()));
     private static final List<String> ABSENT_CLASSES = List.of(
             "group.zn.zero.starter.LocalRuntime", "group.zn.zero.codegen.ProtocolCodegenCli",
-            "freemarker.template.Configuration", "org.apache.kafka.clients.producer.KafkaProducer",
-            "com.mongodb.client.MongoClient", "org.postgresql.Driver", "com.zaxxer.hikari.HikariDataSource",
-            "com.alibaba.nacos.api.NacosFactory");
+            "freemarker.template.Configuration");
+    /** Adapter 选择与实际 SDK 类型的对应关系，用于检查未选驱动确实不在 classpath。 */
+    private static final Map<String, String> DRIVER_CLASSES = Map.of(
+            "redis", "redis.clients.jedis.RedisClient",
+            "kafka", "org.apache.kafka.clients.producer.KafkaProducer",
+            "mongo", "com.mongodb.client.MongoClient",
+            "postgresql", "org.postgresql.Driver",
+            "nacos", "com.alibaba.nacos.api.NacosFactory");
 
     private VerifyGeneratedCompositions() { }
 
@@ -48,9 +53,11 @@ public final class VerifyGeneratedCompositions {
             verify(new Consumer("component-" + component, "runtime", component, Set.of()));
         }
         verify(new Consumer("all-local", "runtime", String.join(",", components.stream()
-                .filter(id -> !id.equals("redis")).toList()), Set.of()));
+                .filter(id -> !DRIVER_CLASSES.containsKey(id)).toList()), Set.of()));
         verify(new Consumer("mixed", "runtime", "data,redis,cache,custom-actor,discovery", Set.of()));
-        System.out.println("generated-compositions=ok|consumers=" + (CONSUMERS.size() + components.size() + 2));
+        verify(new Consumer("center-logic", "runtime", "rpc,kafka", Set.of()));
+        verify(new Consumer("distributed", "runtime", "rpc,discovery,kafka,nacos,mongo,redis,postgresql", Set.of()));
+        System.out.println("generated-compositions=ok|consumers=" + (CONSUMERS.size() + components.size() + 4));
     }
 
     private static List<String> supportedComponents() throws Exception {
@@ -91,12 +98,13 @@ public final class VerifyGeneratedCompositions {
             Path diagnosis = OUTPUT.resolve(consumer.id() + "-diagnose.log");
             run(List.of(mavenCommand(), "-B", "-ntp", "-q", "-f", directory.resolve("pom.xml").toString(),
                     "exec:java", "-Dexec.args=--diagnose"), diagnosis);
-            require(readOutput(diagnosis).contains("runtime-diagnosis=ok"), "missing diagnosis marker");
+            String expected = external(consumer) ? "incomplete" : "ok";
+            require(readOutput(diagnosis).contains("runtime-diagnosis=" + expected), "unexpected diagnosis marker");
         }
         require(result.contains(consumer.template().equals("local") ? "local-game=ok" : "runtime-composition=ok"),
                 "missing smoke marker: " + consumer.id());
-        if (usesRedis(consumer)) {
-            require(result.contains("started=false"), "Redis smoke must not start a service");
+        if (external(consumer)) {
+            require(result.contains("started=false"), "external smoke must only diagnose");
         }
         List<Path> dependencies = Arrays.stream(Files.readString(directory.resolve("target/runtime-classpath.txt"))
                 .trim().split(java.util.regex.Pattern.quote(File.pathSeparator))).map(Path::of).toList();
@@ -109,7 +117,7 @@ public final class VerifyGeneratedCompositions {
         }
         try (var loader = new URLClassLoader(urls.toArray(URL[]::new), ClassLoader.getPlatformClassLoader())) {
             checkClasses(loader, consumer);
-            checkAssembly(loader, packageName, consumer);
+            checkAssembly(loader, packageName, consumer, directory);
         }
         System.out.println("generated-consumer=ok|profile=" + consumer.id() + "|frameworkArtifacts=" + frameworkArtifacts(dependencies).size());
     }
@@ -133,8 +141,16 @@ public final class VerifyGeneratedCompositions {
 
     private static void checkClasses(final ClassLoader loader, final Consumer consumer) throws ClassNotFoundException {
         var absent = new ArrayList<>(ABSENT_CLASSES);
-        if (!usesRedis(consumer)) {
-            absent.add("redis.clients.jedis.RedisClient");
+        Set<String> selected = Set.copyOf(Arrays.asList(consumer.components().split(",")));
+        for (var driver : DRIVER_CLASSES.entrySet()) {
+            if (selected.contains(driver.getKey())) {
+                Class.forName(driver.getValue(), false, loader);
+            } else {
+                absent.add(driver.getValue());
+            }
+        }
+        if (!selected.contains("postgresql")) {
+            absent.add("com.zaxxer.hikari.HikariDataSource");
         }
         if (consumer.id().equals("minimal")) {
             absent.addAll(List.of("group.zn.zero.actor.scheduler.ActorScheduler", "group.zn.zero.event.bus.EventBus",
@@ -148,16 +164,33 @@ public final class VerifyGeneratedCompositions {
                 // Verify against the isolated application's runtime classpath.
             }
         }
-        if (usesRedis(consumer)) {
-            Class.forName("redis.clients.jedis.RedisClient", false, loader);
-        }
     }
 
-    private static void checkAssembly(final ClassLoader loader, final String packageName, final Consumer consumer) throws Exception {
+    private static void checkAssembly(final ClassLoader loader, final String packageName,
+                                      final Consumer consumer, final Path directory) throws Exception {
         Class<?> configType = loader.loadClass("group.zn.zero.core.config.ZeroConfig");
-        Object config = loader.loadClass("group.zn.zero.core.config.MapZeroConfig").getConstructor(Map.class).newInstance(Map.of(
-                "zero.name", consumer.id(), "zero.adapter.data.redis.enabled", "true", "zero.redis.uri", "redis://127.0.0.1:1"));
+        Properties properties = new Properties();
+        try (var reader = Files.newBufferedReader(directory.resolve("config/application.properties.example"))) {
+            properties.load(reader);
+        }
+        // 只用于无资源规划的测试配置；绝不交给真实 build/start。
+        if (Arrays.asList(consumer.components().split(",")).contains("postgresql")) {
+            properties.setProperty("zero.postgresql.username", "offline-test");
+            properties.setProperty("zero.postgresql.password", "offline-test");
+        }
+        Object config = loader.loadClass("group.zn.zero.core.config.ZeroConfigLoader")
+                .getMethod("fromProperties", Properties.class).invoke(null, properties);
         Class<?> assemblyType = loader.loadClass(packageName + ".RuntimeAssembly");
+        if (external(consumer)) {
+            for (String profile : List.of("external-test", "standalone", "production")) {
+                properties.setProperty("zero.mode", profile);
+                Object profileConfig = loader.loadClass("group.zn.zero.core.config.ZeroConfigLoader")
+                        .getMethod("fromProperties", Properties.class).invoke(null, properties);
+                Object plan = assemblyType.getMethod("plan", configType).invoke(null, profileConfig);
+                verifyPlan(plan, directory);
+            }
+            return;
+        }
         Object runtime;
         if (consumer.template().equals("local")) {
             Object sink = loader.loadClass("group.zn.zero.log.InMemoryLogSink").getConstructor().newInstance();
@@ -176,8 +209,37 @@ public final class VerifyGeneratedCompositions {
         }
     }
 
-    private static boolean usesRedis(final Consumer consumer) {
-        return Arrays.asList(consumer.components().split(",")).contains("redis");
+    /** 比较生成清单与实际规划结果，检查 provider、能力和默认替换均一致。 */
+    private static void verifyPlan(final Object plan, final Path directory) throws Exception {
+        List<?> components = (List<?>) plan.getClass().getMethod("components").invoke(plan);
+        Set<String> providers = new HashSet<>();
+        Set<String> capabilities = new HashSet<>();
+        for (Object component : components) {
+            Object id = component.getClass().getMethod("componentId").invoke(component);
+            providers.add((String) id.getClass().getMethod("value").invoke(id));
+            for (Object key : (List<?>) component.getClass().getMethod("provides").invoke(component)) {
+                capabilities.add((String) key.getClass().getMethod("id").invoke(key));
+            }
+        }
+        String manifest = Files.readString(directory.resolve("zero-scaffold.json"));
+        require(providers.equals(manifestValues(manifest, "selectedProviders")), "actual providers differ from manifest");
+        require(capabilities.equals(manifestValues(manifest, "runtimeCapabilities")), "actual capabilities differ from manifest");
+    }
+
+    /** 清单中的这两个数组仅含生成器控制的稳定 ID，不接受通用 JSON 或转义字符串。 */
+    private static Set<String> manifestValues(final String manifest, final String name) {
+        var array = java.util.regex.Pattern.compile("\"" + name + "\"\\s*:\\s*\\[([^]]*)]").matcher(manifest);
+        require(array.find(), "missing manifest array: " + name);
+        var entries = java.util.regex.Pattern.compile("\"([a-z0-9.-]+)\"").matcher(array.group(1));
+        Set<String> values = new HashSet<>();
+        while (entries.find()) {
+            require(values.add(entries.group(1)), "duplicate manifest ID");
+        }
+        return values;
+    }
+
+    private static boolean external(final Consumer consumer) {
+        return Arrays.stream(consumer.components().split(",")).anyMatch(DRIVER_CLASSES::containsKey);
     }
 
     private static void run(final List<String> command, final Path log) throws Exception {

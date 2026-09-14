@@ -40,7 +40,7 @@ class ScaffoldComponentsTest {
         assertFalse(result.providers().contains("zero.local.repositories"));
         assertTrue(result.providers().contains("zero.data.repository-catalog"));
         assertTrue(result.capabilities().contains(StandardRuntimeCapabilityModel.REPOSITORIES));
-        assertThrows(IllegalArgumentException.class, () -> components.resolve(List.of(), List.of("mongo")));
+        assertThrows(IllegalArgumentException.class, () -> components.resolve(List.of(), List.of("unknown")));
         assertThrows(IllegalArgumentException.class, () -> components.resolve(List.of(), List.of("")));
     }
 
@@ -51,5 +51,24 @@ class ScaffoldComponentsTest {
         assertTrue(result.providers().containsAll(List.of("zero.discovery.local", "zero.discovery.rpc-resolver")));
         assertTrue(result.capabilities().containsAll(List.of(StandardRuntimeCapabilityModel.SERVICE_DISCOVERY,
                 StandardRuntimeCapabilityModel.RPC_SERVICE_RESOLVER)));
+    }
+
+    @Test
+    void centerLogicSelectionUsesKafkaWithoutDatabaseOrDiscovery() {
+        var result = components.resolve(List.of(), List.of("rpc", "kafka"));
+        assertEquals(List.of("bootstrap", "log", "kafka"), result.components());
+        assertTrue(result.external());
+        assertFalse(result.providers().contains("zero.local.rpc"));
+        assertFalse(result.artifacts().contains(MavenCoordinate.zero("zero-runtime-nacos")));
+        assertFalse(result.capabilities().contains(StandardRuntimeCapabilityModel.REPOSITORIES));
+    }
+
+    @Test
+    void distributedSelectionReplacesLocalDiscoveryAndKeepsAllNamedDataSources() {
+        var result = components.resolve(List.of(), List.of("discovery", "nacos", "mongo", "postgresql", "redis"));
+        assertFalse(result.components().contains("discovery"));
+        assertTrue(result.providers().contains("zero.production.nacos-rpc-resolver"));
+        assertEquals(List.of("redis", "mongo", "postgresql"), ScaffoldComponents.repositorySources(result.components()));
+        assertEquals(1, result.providers().stream().filter("zero.data.repository-catalog"::equals).count());
     }
 }

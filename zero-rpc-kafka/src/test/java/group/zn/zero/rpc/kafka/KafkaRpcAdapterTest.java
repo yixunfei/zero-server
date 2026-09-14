@@ -29,6 +29,10 @@ import group.zn.zero.rpc.observer.RpcTransportEvent;
 import group.zn.zero.rpc.observer.RpcTransportEventType;
 import group.zn.zero.rpc.observer.RpcTransportSnapshot;
 import group.zn.zero.rpc.server.RpcServiceBinder;
+import group.zn.zero.security.SecurityContext;
+import group.zn.zero.security.SecurityMetadataAssertion;
+import group.zn.zero.security.SecurityMetadataSnapshot;
+import group.zn.zero.security.SecurityMetadataVerifier;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -50,9 +54,88 @@ import org.junit.jupiter.api.Test;
  */
 class KafkaRpcAdapterTest {
 
-    /**
-     * 验证 common 接口 RPC 可以通过 Kafka transport adapter 完成 request/response。
-     */
+    /** Verifies tampered metadata and replayed assertions are rejected before handler execution. */
+    @Test
+    void tamperedAndReplayedMetadataAreRejected() {
+        InMemoryKafkaRpcMessageGateway gateway = new InMemoryKafkaRpcMessageGateway();
+        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway);
+        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway);
+        SecurityMetadataAssertion assertion = SecurityMetadataAssertion.digest("test-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        java.util.Set<String> consumed = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        provider.securityMetadataVerifier((snapshot, receivedAt) -> {
+            if (snapshot == null || !assertion.verify(snapshot) || !consumed.add(snapshot.assertionReference())) {
+                return CompletableFuture.completedFuture(null);
+            }
+            return SecurityMetadataAssertion.verifier(assertion).verify(snapshot, receivedAt);
+        });
+        AtomicInteger handled = new AtomicInteger();
+        provider.register("svc", "method", current -> {
+            handled.incrementAndGet();
+            return CompletableFuture.completedFuture(new RpcResponse(current.correlationId(), current.traceId(),
+                    SystemErrorCode.OK, "ok", new byte[0]));
+        });
+        SecurityMetadataSnapshot signed = SecurityMetadataAssertion.signed(context(), "assertion-replay", assertion);
+        KafkaRpcEnvelopeCodec codec = new KafkaRpcEnvelopeCodec();
+        gateway.emitRequest(codec.encodeRequest(requestWith(signed, "corr-1")));
+        assertEquals(1, handled.get());
+
+        gateway.emitRequest(codec.encodeRequest(requestWith(signed, "corr-2")));
+        assertEquals(1, handled.get(), "replayed assertion must not reach handler");
+
+        SecurityMetadataSnapshot tampered = new SecurityMetadataSnapshot(signed.subject(), signed.transport(),
+                signed.peerAddress(), signed.trustedSourceAddress(), signed.traceId(), signed.correlationId(),
+                java.util.Set.of("rpc.invoke", "admin"), signed.assertionReference(), signed.issuedAt(),
+                signed.expiresAt(), signed.signature());
+        gateway.emitRequest(codec.encodeRequest(requestWith(tampered, "corr-3")));
+        assertEquals(1, handled.get(), "tampered signature must not reach handler");
+        caller.close(); provider.close();
+    }
+
+    private static SecurityContext context() {
+        Instant issued = Instant.now();
+        return new SecurityContext("subject", issued, issued.plusSeconds(30), "kafka", "peer", "trusted",
+                "trace-security", "corr-security", java.util.Set.of("rpc.invoke"), Map.of());
+    }
+
+    private static RpcRequest requestWith(final SecurityMetadataSnapshot metadata, final String correlationId) {
+        return new RpcRequest(correlationId, "reply-caller", "svc", "method", "trace-security",
+                Instant.now().plusSeconds(30), RpcMode.REQUEST_RESPONSE, "", "", "", metadata, new byte[0]);
+    }
+
+
+    @Test
+    void securityMetadataIsRevalidatedBeforeHandler() {
+        InMemoryKafkaRpcMessageGateway gateway = new InMemoryKafkaRpcMessageGateway();
+        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway);
+        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway);
+        AtomicInteger verified = new AtomicInteger();
+        provider.securityMetadataVerifier(SecurityMetadataVerifier.synchronous(snapshot -> {
+            verified.incrementAndGet();
+            return new SecurityContext(snapshot.subject(), snapshot.issuedAt(), snapshot.expiresAt(), "kafka",
+                    snapshot.peerAddress(), snapshot.trustedSourceAddress(), snapshot.traceId(), snapshot.correlationId(),
+                    snapshot.permissions(), Map.of());
+        }));
+        RpcRequest request = new RpcRequest("corr-security", "reply-caller", "svc", "method", "trace-security",
+                Instant.now().plusSeconds(30), RpcMode.REQUEST_RESPONSE, "", "", "", metadata(), new byte[0]);
+        AtomicInteger handled = new AtomicInteger();
+        provider.register("svc", "method", current -> {
+            assertTrue(group.zn.zero.security.SecurityContextBridge.current().isPresent());
+            handled.incrementAndGet();
+            return CompletableFuture.completedFuture(new RpcResponse(current.correlationId(), current.traceId(),
+                    SystemErrorCode.OK, "ok", new byte[0]));
+        });
+        gateway.emitRequest(new KafkaRpcEnvelopeCodec().encodeRequest(request));
+        assertEquals(1, verified.get());
+        assertEquals(1, handled.get());
+        caller.close(); provider.close();
+    }
+
+    private static SecurityMetadataSnapshot metadata() {
+        Instant issued = Instant.now();
+        return new SecurityMetadataSnapshot("subject", "tcp", "peer", "trusted", "trace-security",
+                "corr-security", java.util.Set.of("network.request"), "assertion-ref", issued, issued.plusSeconds(30), "test-signature");
+    }
+
     @Test
     void commonInterfaceShouldInvokeThroughKafkaAdapter() {
         InMemoryKafkaRpcMessageGateway gateway = new InMemoryKafkaRpcMessageGateway();
@@ -797,9 +880,12 @@ class KafkaRpcAdapterTest {
             listeners.clear();
         }
 
+        void emitRequest(final byte[] encoded) {
+            listeners.values().stream().flatMap(java.util.Collection::stream)
+                    .forEach(listener -> listener.onMessage(new KafkaRpcMessage("request-topic", "security", encoded)));
+        }
+
         /**
-         * 返回第一次发送 key。
-         *
          * @return key；不可为空；线程安全。
          */
         String firstKey() {

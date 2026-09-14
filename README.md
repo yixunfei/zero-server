@@ -12,7 +12,8 @@ zeroServer 是一个面向实时在线游戏的通用 Java 21 服务端框架。
 > [!IMPORTANT]
 > 当前版本是 `0.1.0-SNAPSHOT` 开发预览，不是生产就绪发行版。仓库已经具备可运行的本地闭环、真实 Adapter、显式生产装配最小实现和可复现微基准，但尚未提供完整 TLS/WAF/DDoS 网关、GM RBAC/审批、生产日志落地、Prometheus HTTP Endpoint、容量、长稳、p99 或 SLA 证明。请先阅读[当前能力边界](#当前能力与限制)和[生产使用注意事项](#生产使用注意事项)。
 
-## 为什么是 zeroServer
+> 生产入口安全从 `zero-security` 的显式 `SecurityChain` 开始：应用自行注入认证、重放和 TLS 材料 provider。未配置时保持 fail-closed；这不是内置账号系统、JWT、完整 TLS 网关或分布式限流实现。
+
 
 游戏服务器的难点不只是“收一个包、改一行数据”：连接生命周期、协议兼容、线程归属、玩家/场景状态一致性、跨服调用、缓存与落库、运营审计和故障降级会在项目扩大后彼此耦合。zeroServer 尝试把这些承重结构变成可组合且可验证的框架能力。
 
@@ -25,6 +26,8 @@ zeroServer 是一个面向实时在线游戏的通用 Java 21 服务端框架。
 - **运营可追踪**：TraceId、统一 ErrorCode、结构化日志、敏感字段安全门、低基数指标、GM dry-run 和审计归因贯穿运行时。
 
 ## 三分钟快速开始
+
+先按使用场景选择入口：[单体原型、中心—逻辑服与分布式组合](docs/scenario-onboarding.zh-CN.md)。最小 runtime 只有 3 个框架制品；Kafka、Nacos、MongoDB、Redis、PostgreSQL 均可独立选择。完整治理能力的当前差距见[审查与优化方案](docs/scenario-audit.zh-CN.md)。
 
 ### 环境
 

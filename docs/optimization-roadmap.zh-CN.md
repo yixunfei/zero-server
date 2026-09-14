@@ -4,6 +4,8 @@
 
 更新日期：2026-09-12
 
+场景审查增量（2026-09-14）：已修复装配超时回滚、健康超预算误报成功、诊断冻结 Builder，补齐 standalone 装配与按需 Kafka/Nacos/MongoDB/PostgreSQL 脚手架；本地中心接口与 TCP 消费者已验证。面向下一步实施的顺序和验收标准见 [场景审查与优化方案](scenario-audit.zh-CN.md)。这些进展不改变本文后续生产能力的未完成状态。
+
 本文是面向后续接手者（人或 AI Agent）的差距分析与推进指南。它把当前系统的能力盘点为
 “已具备 / 待补充 / 待完善 / 待优化”，并给出优先级、验收标准和标准工作流程。
 
@@ -82,8 +84,7 @@
 
 ### P0-2 生产入口安全链
 
-现状：TCP 生命周期只有最小切片；无真实鉴权、TLS、防重放、网关边界；KCP/WebSocket/
-JSON/Protobuf 仍是 fail-fast 或未实现。
+进展（2026-09-13）：`in-progress / partial`。已落地 `zero-security` 的显式认证、重放、TLS 材料、不可变 `SecurityContext`、可信代理和安全上下文 bridge 契约；生产 TCP 已接入显式认证、TLS 必需性、权限和请求阶段重放决策门控，并保留 fail-closed 默认。仍未证明真实 Netty 证书加载/轮换、分布式限流、完整 HTTP/RPC 适配和公网容量，因此本条不可标记完成。
 
 待办（按序）：
 
@@ -100,8 +101,10 @@ JSON/Protobuf 仍是 fail-fast 或未实现。
 
 ### P0-3 Adapter 周期健康与故障恢复
 
-现状：PAF1 只覆盖启动期（create -> start -> startup health -> running）。缺周期健康、
-degraded、恢复、熔断、故障转移、Kafka 重平衡、Nacos 节点切换、数据库连接恢复。
+### P0-3 Adapter 周期健康与故障恢复
+
+进展（2026-09-13）：`partial / contract-and-injection-evidence`。已新增统一 `RuntimeAdapterHealth`、`RuntimeAdapterRecovery`、`RuntimeAdapterBudget`、状态机和 deterministic resilience 编排器，并覆盖健康、恢复、退避、并发预算、未知写入结果 fail-closed 和 drain/close 的 focused tests。现有 Kafka/Nacos/数据库/Redis 仍未全部接入周期恢复实现；Compose resilience 也不能替代真实网络分区、rebalance、连接池重建和一致性证据，因此本条仍不可标记完成。
+
 
 待办：
 
@@ -119,7 +122,7 @@ degraded、恢复、熔断、故障转移、Kafka 重平衡、Nacos 节点切换
 
 ### P0-4 GM 生产安全运营
 
-进展（2026-09-12）：`partial`。已完成 P0-4 GM REST transport boundary 最小切片：新增上层 `zero-gm-rest` 模块、`GmIdentityProvider`、有界请求解析、固定 `/gm/operation` 路由、稳定错误响应和 fail-closed 身份边界；focused tests 已通过。该切片不提供真实身份、RBAC 持久化、审批服务、HTTP server 或审计留存，因此 P0-4 仍不可标记完成。
+进展（2026-09-13）：`partial / security-operations-boundary`。已补充 transport-neutral 审计查询分页、留存/归档策略端口、业务幂等 claim/conflict/TTL 参考实现、break-glass grant 一次性消费边界、解析无关安全失败载体和 GM RPC transport boundary，并为幂等与 break-glass 增加 focused tests。仍未提供真实 HTTP server、Kafka GM adapter、持久 RBAC/IP/审批、数据库审计 durability、解析失败全链路接入和生产运营流程，因此不可标记完成。
 
 现状：已有授权窄切片、标准入口、审计记录/存储/传输边界契约（见
 `docs/gm-standard-entry-persistence-contract.zh-CN.md`）；缺真实身份、持久 RBAC/IP/审批、
@@ -141,7 +144,7 @@ degraded、恢复、熔断、故障转移、Kafka 重平衡、Nacos 节点切换
 
 ### P0-5 API/SPI 兼容门禁
 
-现状：无 japicmp/Revapi/Clirr/baseline；quality 只有 Checkstyle/PMD/SpotBugs/JaCoCo 报告。
+进展（2026-09-13）：`partial / bootstrap-gate`。已建立受保护核心模块（`zero-core`、`zero-runtime`、`zero-protocol`、`zero-rpc-common`、`zero-data`）的跟踪 API surface baseline、删除/签名变化检查器、Java 21 独立 consumer compile 和 CI compatibility job。当前 baseline 是 `0.1.0-SNAPSHOT` bootstrap，不是完整历史 ABI 保证；配置 key、协议 ID、provider ID 和 japicmp/Revapi 级二进制差异仍待后续加强。
 
 待办：
 

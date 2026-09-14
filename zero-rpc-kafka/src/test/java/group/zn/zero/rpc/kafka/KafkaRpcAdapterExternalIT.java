@@ -11,6 +11,13 @@ import group.zn.zero.protocol.buffer.ZeroWriter;
 import group.zn.zero.protocol.codec.GeneratedProtocolCodec;
 import group.zn.zero.protocol.codec.ZeroPayloadCodec;
 import group.zn.zero.rpc.RpcCallOptions;
+import group.zn.zero.rpc.RpcRequest;
+import group.zn.zero.rpc.RpcMode;
+import group.zn.zero.rpc.RpcResponse;
+import group.zn.zero.security.SecurityContext;
+import group.zn.zero.security.SecurityMetadataAssertion;
+import group.zn.zero.security.SecurityMetadataSnapshot;
+import group.zn.zero.security.SecurityContextBridge;
 import group.zn.zero.rpc.client.RpcClientFactory;
 import group.zn.zero.rpc.codec.RpcCodecRegistry;
 import group.zn.zero.rpc.common.RpcCallMode;
@@ -19,6 +26,8 @@ import group.zn.zero.rpc.common.RpcResult;
 import group.zn.zero.rpc.common.RpcService;
 import group.zn.zero.rpc.server.RpcServiceBinder;
 import java.time.Duration;
+import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -82,17 +91,31 @@ class KafkaRpcAdapterExternalIT {
                     "caller-group-" + suffix,
                     "zero.rpc.external." + suffix,
                     "reply-caller-" + suffix));
+            byte[] secret = "external-test-secret".getBytes(StandardCharsets.UTF_8);
+            SecurityMetadataAssertion assertion = SecurityMetadataAssertion.digest(secret);
+            provider.securityMetadataVerifier(SecurityMetadataAssertion.verifier(assertion));
+            RpcCallOptions secureOptions = RpcCallOptions.defaults()
+                    .withReplyTopic("reply-caller-" + suffix)
+                    .withTraceId("trace-kafka-external");
+            SecurityContext context = new SecurityContext("external-subject", Instant.now(), Instant.now().plusSeconds(60),
+                    "kafka", "peer", "trusted", "trace-kafka-external", "external-correlation",
+                    java.util.Set.of("rpc.invoke"), Map.of());
+            SecurityMetadataSnapshot signedMetadata = SecurityMetadataAssertion.signed(context, "external-assertion", assertion);
+            assertTrue(assertion.verify(signedMetadata));
             new RpcServiceBinder(provider, codecRegistry).bind(ExternalPlayerRpc.class, new ExternalPlayerRpcImpl(touched));
-            ExternalPlayerRpc client = new RpcClientFactory(
-                    caller,
-                    codecRegistry,
-                    RpcCallOptions.defaults()
-                            .withReplyTopic("reply-caller-" + suffix)
-                            .withTraceId("trace-kafka-external"))
+            KafkaRpcAdapter callerAdapter = caller;
+            ExternalPlayerRpc client = new RpcClientFactory(callerAdapter, codecRegistry, secureOptions, assertion)
                     .create(ExternalPlayerRpc.class);
+            SecurityContextBridge.with(context, () -> {
+                client.login(new LoginRequestDTO(10086L, "zone-a"));
+                return null;
+            });
 
-            LoginResponseDTO response = client.login(new LoginRequestDTO(10086L, "zone-a")).orThrow();
-            RpcResult<Void> touchResult = client.touch(new TouchRequestDTO(10086L));
+
+            LoginResponseDTO response = SecurityContextBridge.with(context,
+                    () -> client.login(new LoginRequestDTO(10086L, "zone-a"))).orThrow();
+            RpcResult<Void> touchResult = SecurityContextBridge.with(context,
+                    () -> client.touch(new TouchRequestDTO(10086L)));
             await(() -> touched.get() == 10086);
 
             assertEquals(10086L, response.uid);

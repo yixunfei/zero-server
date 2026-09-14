@@ -16,6 +16,7 @@ public final class ProductionProfiles {
     public static ZeroConfig merge(final String profile, final ZeroConfig config) {
         Objects.requireNonNull(profile, "profile");
         if (!ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION.equals(profile)
+                && !ZeroProductionRuntimeConfigKeys.MODE_STANDALONE.equals(profile)
                 && !ZeroProductionRuntimeConfigKeys.MODE_EXTERNAL_TEST.equals(profile)) {
             throw ZeroException.of(SystemErrorCode.INVALID_ARGUMENT, "unsupported production runtime profile", null);
         }

@@ -26,6 +26,10 @@
             <artifactId>zero-rpc</artifactId>
         </dependency>
         <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-security</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.apache.kafka</groupId>
             <artifactId>kafka-clients</artifactId>
             <version>${kafka.clients.version}</version>

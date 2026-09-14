@@ -74,6 +74,7 @@ public final class ZeroArchitectureGuard {
             "zero-state-sync",
             "zero-frame-sync",
             "zero-logic",
+            "zero-security",
             "zero-net",
             "zero-rpc-common",
             "zero-rpc",

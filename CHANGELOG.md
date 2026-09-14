@@ -8,7 +8,10 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ### Added
 
-- 新增上层 `zero-gm-rest` transport boundary 最小切片：固定 `/gm/operation` 路由、有界 body、应用注入 `GmIdentityProvider`、metadata 校验、稳定错误响应与 fail-closed 身份策略；不包含真实 HTTP server、账号系统、RBAC/审批持久化或审计留存。
+- 场景接入指南、可运行的最小中心—逻辑接口示例；runtime 脚手架新增 Kafka、Nacos、MongoDB、PostgreSQL 组件选择，自动补齐所需依赖并替换相应本地实现。
+- `ProductionAssembly.plan()` 提供无资源的实际组件图；新增显式档位 builder overload，补齐 standalone 装配，生成工程可通过配置切换档位。
+
+- P0-4 GM 生产运营边界扩展：新增有界审计查询/留存/归档契约、业务幂等 claim/conflict/TTL、break-glass 一次性授权边界、解析无关安全失败载体和 GM RPC transport-neutral boundary；内存实现仅用于 local/test，不声称真实 HTTP/Kafka/数据库运营闭环。
 - 新增 `ZeroUnifiedEntryVerifier`，验证两端命令契约、脚本安全状态管理和 POSIX stop 幂等语义。
 - 阶段 0 验收脚本的进程输出采集和超时进程树处理兼容 Java 17 进行预检编译；项目实际构建和运行仍明确要求 Java 21。
 - 阶段 1 模块化运行时装配设计与 `zero-runtime` 1B/1C 通用契约：显式 catalog/selection、typed config、确定性依赖图、双资源账本、启动健康、single-use 生命周期、稳定错误码、安全诊断和共享能力模型；Local Starter、生成器、示例及模板已迁移，真实 Adapter provider 留待 1D。
@@ -24,6 +27,15 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 - 独立 `zero-benchmarks` JMH 模块以及 Zero Binary Protocol、Protobuf、FlatBuffers 的可复现横向基准。
 
 ### Changed
+
+- runtime 外部 smoke 改为仅诊断，连接地址不写死进业务源码；缺失配置明确输出 incomplete，多来源 Repository 按来源名绑定。详见 [0.x 迁移说明](docs/migrations/20260914-scenario-composition.md)。
+- 修复组件间装配超时跳过回滚、健康探针超出累计预算仍进入 RUNNING、诊断冻结集合选择 Builder 三项运行时 bug；均有修复前失败的确定性回归测试。
+- 真实 TCP 示例使用框架统一管理的执行器，协议 codegen 移入构建插件依赖；场景消费者验证所选 SDK 与实际 provider 图，完整治理状态保持未完成。
+
+- 修复 GitHub Actions 工作流的 `jobs` 顶层结构，恢复 compatibility、unit、quality、integration、Stage 0 和跨平台入口任务的正常解析。
+- 修正 production network provider 对 `SecurityChain.tlsRequired()` 的配置传播，避免安全链要求 TLS 时被网络配置覆盖。
+- 将 GM 幂等操作指纹改为带明确分隔符的 SHA-256 摘要，降低短整数 hash 碰撞导致错误复用的风险。
+- 同步架构守卫与缺口台账文档中的当前模块数和能力状态；这些同步不改变 `productionReady=false` 边界。
 
 - `zero-runtime` 在 1B 复审中收紧 callback 异常归一化、确定性 catalog/selection 冻结和 startup health 超时取消；公开异常与报告不携带 raw cause 或配置值。
 - Local/Production Starter 统一复用 `GameRuntime` 生命周期与双 ledger 契约；Production Adapter 配置、健康预算和回滚已由正式 provider 接入同一组件图。

@@ -124,7 +124,8 @@ record ProductionNetworkSettings(List<ConfigSource> configSources) {
                     Duration.ofMillis(heartbeatMillis),
                     allowedMissedHeartbeats,
                     Duration.ofMillis(reconnectMillis),
-                    maxInboundFrames);
+                    maxInboundFrames,
+                    false);
         } catch (IllegalArgumentException | ArithmeticException failure) {
             throw new InvalidSettingException(
                     ZeroProductionRuntimeConfigKeys.NETWORK_LISTENER, failure);

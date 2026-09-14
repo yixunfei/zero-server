@@ -35,6 +35,13 @@ public final class ScaffoldComponents {
             }
             selected.add(id);
         });
+        // 真实实现替换同一能力的本地组合，避免生成冗余默认 provider 和依赖。
+        if (selected.contains("kafka")) {
+            selected.remove("rpc");
+        }
+        if (selected.contains("nacos")) {
+            selected.remove("discovery");
+        }
         if (selected.contains("custom-actor")) {
             selected.add("actor");
         }
@@ -71,12 +78,23 @@ public final class ScaffoldComponents {
             providerIds.add("zero.discovery.rpc-resolver");
         }
         Set<String> capabilities = provided(selected);
-        if (ids.contains("data") || ids.contains("redis")) {
+        if (!repositorySources(ids).isEmpty()) {
             providerIds.add("zero.data.repository-catalog");
             capabilities.add(StandardRuntimeCapabilityModel.REPOSITORIES);
         }
         return new Selection(ids, artifacts, capabilities.stream().sorted().toList(),
-                List.copyOf(providerIds), ids.contains("redis"));
+                List.copyOf(providerIds), ids.stream().anyMatch(this::external));
+    }
+
+    /** 返回按选择顺序排列的 Repository 来源；不可变、可为空、线程安全。 */
+    static List<String> repositorySources(final List<String> ids) {
+        return ids.stream().filter(id -> List.of("data", "redis", "mongo", "postgresql").contains(id))
+                .map(id -> id.equals("data") ? "local" : id).toList();
+    }
+
+    /** 判断组件是否只支持外部运行档位；只读，不创建资源。 */
+    private boolean external(final String id) {
+        return providers(id).stream().anyMatch(provider -> !provider.profiles().contains("local"));
     }
 
     private Set<String> provided(final Set<String> selected) {
@@ -91,7 +109,7 @@ public final class ScaffoldComponents {
 
     private String defaultComponent(final String capability) {
         for (String id : CATALOG.keySet()) {
-            if (!id.equals("redis") && providers(id).stream().anyMatch(provider -> provider.provides().contains(capability))) {
+            if (!external(id) && providers(id).stream().anyMatch(provider -> provider.provides().contains(capability))) {
                 return id;
             }
         }
@@ -123,6 +141,11 @@ public final class ScaffoldComponents {
         add(specs, "monitor", "monitor.MonitorRuntimeComponent", StandardRuntimeCapabilityModel.LOCAL_MONITOR);
         add(specs, "discovery", "discovery.DiscoveryRuntime");
         add(specs, "redis", "redis.RedisRuntime", StandardRuntimeCapabilityModel.PRODUCTION_REDIS_RESOURCE, StandardRuntimeCapabilityModel.PRODUCTION_REDIS_DATA);
+        add(specs, "kafka", "kafka.KafkaRuntime", StandardRuntimeCapabilityModel.PRODUCTION_KAFKA_RPC);
+        add(specs, "nacos", "nacos.NacosRuntime", StandardRuntimeCapabilityModel.PRODUCTION_NACOS_DISCOVERY,
+                StandardRuntimeCapabilityModel.PRODUCTION_NACOS_RPC_RESOLVER);
+        add(specs, "mongo", "mongo.MongoRuntime", StandardRuntimeCapabilityModel.PRODUCTION_MONGO_DATA);
+        add(specs, "postgresql", "postgresql.PostgresqlRuntime", StandardRuntimeCapabilityModel.PRODUCTION_POSTGRESQL_DATA);
         add(specs, "custom-actor", "");
         return java.util.Collections.unmodifiableMap(specs);
     }

@@ -2,6 +2,8 @@
 
 本文从一个干净环境开始，跑通 zeroServer 本地原型、仓库示例、协议代码生成和脚手架。默认不需要 Docker 或外部中间件。
 
+如果先要决定依赖和部署形态，请从[三种场景的接入指南](scenario-onboarding.zh-CN.md)开始；该指南区分本地业务闭环、真实 TCP、进程间 RPC 和分布式 Adapter 组合。
+
 ## 1. 准备环境
 
 最低要求：
@@ -144,7 +146,12 @@ zero-local-prototype=ok|project=my-game|template=scene-sync|externalMiddleware=f
 | `zero-scaffold.json` | 模板、协议文件、摘要和组件 manifest |
 | `src/main/proto/*.si` | 推荐修改的协议 DSL |
 
-## 4. 选择模板
+## 3. 生产入口安全组合
+
+生产网络不自动发现身份 provider。应用必须在 production builder 中显式组合 `SecurityChain.production(authentication, replayProtection, tlsMaterials)`；缺少 provider 时采用 fail-closed 语义。`SecurityContext` 只保存认证摘要、权限和可信来源元数据，不保存 token、密码或私钥。
+
+当前安全切片提供认证、请求重放决策、TLS 材料快照边界和显式上下文传播契约，但不包含账号系统、JWT、证书供应商、WAF/DDoS、分布式限流或完整 HTTP/RPC 网关。迁移细节见 [`docs/migrations/0.1.0-p0-2-entry-security.zh-CN.md`](migrations/0.1.0-p0-2-entry-security.zh-CN.md)。
+
 
 查看全部模板：
 

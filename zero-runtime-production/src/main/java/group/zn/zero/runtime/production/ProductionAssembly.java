@@ -9,6 +9,7 @@ import group.zn.zero.runtime.assembly.RuntimeModule;
 import group.zn.zero.runtime.assembly.RuntimeProfile;
 import group.zn.zero.runtime.bootstrap.RuntimeBasics;
 import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
+import group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.function.Consumer;
@@ -39,6 +40,18 @@ public final class ProductionAssembly {
 
     public static ProductionAssembly builder(final ZeroConfig config) {
         return builder(ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION, config, ZeroRuntimeExecutors.direct());
+    }
+
+    /**
+     * 为单进程、外部测试或生产档位创建按需组合器；默认不创建线程。
+     * @param profile standalone、external-test 或 production；必须与配置中的 zero.mode 一致。
+     * @param config 配置输入；不可为空，不修改输入。
+     * @return 非线程安全、尚未创建任何 Adapter 的组合器。
+     * @throws group.zn.zero.core.error.ZeroException 档位无效或配置冲突时抛出。
+     * @throws NullPointerException 档位或配置为空时抛出。
+     */
+    public static ProductionAssembly builder(final String profile, final ZeroConfig config) {
+        return builder(profile, config, ZeroRuntimeExecutors.direct());
     }
 
     public static ProductionAssembly builder(
@@ -82,13 +95,7 @@ public final class ProductionAssembly {
         Resolved resolved = resolve();
         ZeroProductionAssemblyReport report = report(resolved);
         if (report.missingConfigKeys().isEmpty()) {
-            try {
-                composition(resolved).diagnose();
-            } catch (RuntimeException | Error failure) {
-                throw ProductionAdapterFailures.sanitize("production-runtime",
-                        ProductionAdapterFailurePhase.CONFIG_VALIDATION, ProductionAdapterErrorCode.CONFIG_INVALID,
-                        ProductionAdapterErrorCode.CONFIG_INVALID.message(), failure);
-            }
+            plan(resolved);
         }
         return report;
     }
@@ -106,6 +113,34 @@ public final class ProductionAssembly {
             return new ZeroProductionRuntime(profile, runtime, resolved.diagnostics());
         } catch (RuntimeException | Error failure) {
             throw creationFailure(resolved, failure);
+        }
+    }
+
+    /**
+     * 校验完整配置并返回实际选中的组件图；不创建客户端、执行器或连接外部服务。
+     *
+     * @return 不可变、拓扑有序、可能为空的组件计划；内容可跨线程读取。
+     * @throws ProductionAdapterException 配置缺失、无效或组件图无法规划时抛出，异常已脱敏。
+     * @throws IllegalStateException 组合器已被 build 消耗时抛出。
+     * @implNote 此方法不消耗组合器，但组合器本身非线程安全；可在添加组件后再次规划。
+     */
+    public RuntimeAssemblyPlan plan() {
+        mutable();
+        Resolved resolved = resolve();
+        List<String> missing = report(resolved).missingConfigKeys();
+        if (!missing.isEmpty()) {
+            throw ProductionAdapterFailures.missingConfig(missing);
+        }
+        return plan(resolved);
+    }
+
+    private RuntimeAssemblyPlan plan(final Resolved resolved) {
+        try {
+            return composition(resolved).diagnose();
+        } catch (RuntimeException | Error failure) {
+            throw ProductionAdapterFailures.sanitize("production-runtime",
+                    ProductionAdapterFailurePhase.CONFIG_VALIDATION, ProductionAdapterErrorCode.CONFIG_INVALID,
+                    ProductionAdapterErrorCode.CONFIG_INVALID.message(), failure);
         }
     }
 
@@ -148,6 +183,7 @@ public final class ProductionAssembly {
 
     private RuntimeComposition composition(final Resolved resolved) {
         RuntimeProfile policy = switch (profile) {
+            case ZeroProductionRuntimeConfigKeys.MODE_STANDALONE -> RuntimeProfile.standalone();
             case ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION -> RuntimeProfile.production(Set.of());
             case ZeroProductionRuntimeConfigKeys.MODE_EXTERNAL_TEST -> RuntimeProfile.externalTest();
             default -> throw new IllegalArgumentException("unsupported production runtime profile");

@@ -21,7 +21,7 @@ java scripts/ZeroArchitectureGuard.java --help
 正常摘要类似：
 
 ```text
-zero-architecture-guard=ok|modules=54|rules=20|violations=0|warnings=0
+zero-architecture-guard=ok|modules=56|rules=20|violations=0|warnings=0
 ```
 
 其中：

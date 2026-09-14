@@ -53,6 +53,8 @@ examples/rpg-tcp-generated/src/main/java/group/zn/zero/examples/rpgtcp/RpgTcpGen
 - 使用 JDK `Socket` 作为真实 TCP 客户端发送请求。
 - 使用 `LogicSessionManager` 记录连接对应的业务 session 和请求计数。
 - 使用生成的 `GeneratedProtocolDispatcher` 调用手写 BO。
+- 通过 `ZeroRuntimeExecutors.singleThreaded(...)` 取得受管逻辑执行器，关闭服务器后统一释放线程；业务不自行创建线程池。
+- `zero-codegen` 只作为 Maven exec 插件依赖，不传递进业务编译/运行依赖。
 
 ## 3. 当前边界
 

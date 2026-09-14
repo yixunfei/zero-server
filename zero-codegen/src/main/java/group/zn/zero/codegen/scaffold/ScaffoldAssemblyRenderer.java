@@ -18,12 +18,19 @@ final class ScaffoldAssemblyRenderer {
                 .append("import group.zn.zero.runtime.assembly.RuntimeProfile;\n")
                 .append("import group.zn.zero.runtime.bootstrap.RuntimeBasics;\n")
                 .append("import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;\n\n")
+                .append("/** 应用唯一的组件装配入口；业务服务通过构造器接收能力。 */\n")
                 .append("public final class RuntimeAssembly {\n")
                 .append("    private RuntimeAssembly() { }\n\n")
+                .append("    /** 创建独立运行时，调用者负责关闭；配置和装配失败直接传播。 */\n")
                 .append("    public static GameRuntime create(").append(parameters).append(") {\n")
                 .append("        return composition(").append(arguments).append(").build();\n    }\n\n")
+                .append("    /** 只读诊断所给配置；不创建资源，结果为不可变快照。 */\n")
                 .append("    public static ").append(reportType).append(" diagnose(").append(parameters).append(") {\n")
                 .append("        return composition(").append(arguments).append(").diagnose();\n    }\n\n")
+                .append("    /** 校验完整配置并返回有序、不可变组件图；缺配置时抛装配异常，无资源副作用。 */\n")
+                .append("    public static group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan plan(")
+                .append(parameters).append(") {\n        return composition(").append(arguments).append(')')
+                .append(selection.external() ? ".plan();\n    }\n\n" : ".diagnose();\n    }\n\n")
                 .append("    private static ").append(builderType).append(" composition(").append(parameters).append(") {\n");
         appendBuilder(source, business, selection.external());
         for (String component : selection.components()) {
@@ -35,10 +42,13 @@ final class ScaffoldAssemblyRenderer {
                 source.append("        assembly.install(").append(expression).append(");\n");
             }
         }
-        if (selection.components().contains("data") || selection.components().contains("redis")) {
-            String backend = selection.external() ? "redis" : "local";
+        var repositories = ScaffoldComponents.repositorySources(selection.components());
+        if (!repositories.isEmpty()) {
+            String bindings = repositories.stream().map(name -> "\""
+                    + (repositories.size() == 1 ? "main" : name) + "\", \"" + name + "\"")
+                    .collect(java.util.stream.Collectors.joining(", "));
             source.append("        assembly.install(group.zn.zero.runtime.data.DataRuntime.repositories(\n")
-                    .append("                java.util.Map.of(\"main\", \"").append(backend).append("\")));\n");
+                    .append("                java.util.Map.of(").append(bindings).append(")));\n");
         }
         if (selection.components().contains("custom-actor")) {
             source.append(selection.external()
@@ -55,7 +65,7 @@ final class ScaffoldAssemblyRenderer {
     private void appendBuilder(final StringBuilder source, final boolean business, final boolean external) {
         if (external) {
             source.append("        var assembly = group.zn.zero.runtime.production.ProductionAssembly.builder(\n")
-                    .append("                \"external-test\", config, ZeroRuntimeExecutors.direct());\n");
+                    .append("                config.getOrDefault(\"zero.mode\", \"external-test\"), config);\n");
             if (business) {
                 source.append("        assembly.base(RuntimeBasics.module(config, () ->\n")
                         .append("                ZeroRuntimeExecutors.localPrototype(config.getOrDefault(\"zero.name\", \"game\"), 2)));\n");
@@ -86,11 +96,6 @@ final class ScaffoldAssemblyRenderer {
     }
 
     String configExample(final ProjectScaffoldRequest request, final ScaffoldComponents.Selection selection) {
-        String properties = "zero.name=" + request.projectName() + "\nzero.mode="
-                + (selection.external() ? "external-test" : "local") + "\n";
-        if (selection.external()) {
-            properties += "zero.adapter.data.redis.enabled=true\nzero.redis.uri=redis://127.0.0.1:6379\n";
-        }
-        return properties;
+        return ScaffoldConfiguration.example(request, selection);
     }
 }

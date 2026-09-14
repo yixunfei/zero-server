@@ -45,8 +45,15 @@ final class HealthProbeRunner {
         } catch (Throwable failure) {
             throw healthFailure(componentId);
         }
+        // check() 和 future 转换也可能同步耗时，不能重复使用调用前的预算。
+        remaining = deadline.remaining();
+        if (remaining.isZero()) {
+            cancelBestEffort(future);
+            throw timeout(componentId);
+        }
+        HealthResult result;
         try {
-            return Objects.requireNonNull(
+            result = Objects.requireNonNull(
                     future.get(timeoutNanos(remaining), TimeUnit.NANOSECONDS),
                     "health result");
         } catch (TimeoutException failure) {
@@ -61,6 +68,11 @@ final class HealthProbeRunner {
         } catch (Throwable failure) {
             throw healthFailure(componentId);
         }
+        if (deadline.expired()) {
+            cancelBestEffort(future);
+            throw timeout(componentId);
+        }
+        return result;
     }
 
     private void cancelBestEffort(final CompletableFuture<?> future) {

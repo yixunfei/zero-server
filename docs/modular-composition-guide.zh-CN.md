@@ -128,6 +128,10 @@ network 的执行器实例约束在选中的 provider 创建后校验；`replace
 
 ## 5. 生命周期和配置
 
+`ProductionAssembly.builder("standalone", config)` 可用于单进程按需装配；同一 overload 支持 `external-test` 和 `production`。档位必须与配置中 `zero.mode` 一致，不会隐式启用 Adapter。`diagnose()` 汇总缺失配置；`plan()` 要求配置完整，返回不可变 provider 图，二者均不创建客户端或执行器。生成的外部 runtime 装配从配置读取档位。
+
+typed Provider 的业务配置使用 `context.config()`。`configSource(...)` 覆盖的是 schema 声明的键；`RuntimeBasics.CONFIG` 除 `zero.mode`/`zero.name` 外仍保留原 ZeroConfig 字符串，不自动合并所有 ConfigSource。
+
 - 组合器与 runtime 都是单次使用。`diagnose()` 可重复调用，`build()` 消耗组合器，即使构建失败也不能重试该实例。
 - 模块默认配置源排在显式 `configSource(...)` 之后。typed schema 在 provider 创建前完成校验。
 - 框架创建的资源立即登记 `context.resources()`，由账本负责失败回滚和逆序关闭。
@@ -170,6 +174,6 @@ mvn -q -f target/my-runtime/pom.xml clean test exec:java
 java scripts/VerifyGeneratedCompositions.java
 ```
 
-生成器同步输出 POM、`RuntimeAssembly.java`、配置样例和所选 provider 清单。七类业务模板的 codegen 只作为构建插件依赖；纯 runtime 模板不引入 codegen。生成验收覆盖五条代表路径、组件目录中的每个选择及两种混合组装。参数与消费路径见[脚手架目录](scaffold-templates.zh-CN.md)。
+生成器同步输出 POM、`RuntimeAssembly.java`、配置样例和所选 provider 清单。七类业务模板的 codegen 只作为构建插件依赖；纯 runtime 模板不引入 codegen。生成验收覆盖 25 个消费者，包括每个公开组件、混合组合、中心 RPC 和分布式基础设施组合。参数与消费路径见[脚手架目录](scaffold-templates.zh-CN.md)。
 
-生成的 `RuntimeAssembly.diagnose(...)` 与 `create(...)` 共享组装定义。runtime 模板可执行 `mvn -q exec:java '-Dexec.args=--diagnose'`，只规划与诊断配置，不创建执行器或客户端；Redis 选择需要检查报告中的 `missingConfigKeys`，再通过 `--start` 显式启动。
+生成的 `RuntimeAssembly.diagnose(...)`、`plan(...)` 与 `create(...)` 共享组装定义。runtime 模板可执行 `mvn -q exec:java '-Dexec.args=--diagnose'`，只规划与诊断配置，不创建执行器或客户端；外部组件需要检查报告中的 `missingConfigKeys`，再通过 `--start` 显式启动。默认外部 smoke 也只诊断，缺配置输出 incomplete，齐全输出 ok。迁移方式见[0.x 说明](migrations/20260914-scenario-composition.md)。

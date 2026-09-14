@@ -4,7 +4,10 @@ import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.net.ConnectionListener;
 import group.zn.zero.net.ServerFrameHandler;
 import group.zn.zero.net.error.NetErrorCode;
+import group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
+import group.zn.zero.security.SecurityContext;
+import group.zn.zero.security.SecurityContextBridge;
 import group.zn.zero.protocol.ProtocolFrame;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -97,6 +100,16 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
     @Override
     public void channelActive(final ChannelHandlerContext context) {
         connection = new NettyConnection(UUID.randomUUID().toString(), context.channel());
+        io.netty.handler.ssl.SslHandler sslHandler = context.pipeline().get(io.netty.handler.ssl.SslHandler.class);
+        if (sslHandler != null) {
+            sslHandler.handshakeFuture().addListener(future -> {
+                if (future.isSuccess()) {
+                    connection.attributes().put(ProductionNetworkConnectionAttributes.TLS_ESTABLISHED, Boolean.TRUE);
+                } else {
+                    context.close();
+                }
+            });
+        }
         if (productionLifecycle == null) {
             openListener();
         } else {
@@ -180,10 +193,14 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
     }
 
     private void invokeHandler(final ChannelHandlerContext context, final ProtocolFrame frame) {
+        SecurityContext securityContext = connection.attributes()
+                .get(group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes.SECURITY_CONTEXT)
+                .orElse(null);
         try {
-            CompletionStage<List<ProtocolFrame>> stage = Objects.requireNonNull(
-                    frameHandler.handle(connection, frame),
-                    "handlerStage");
+            CompletionStage<List<ProtocolFrame>> stage = securityContext == null
+                    ? Objects.requireNonNull(frameHandler.handle(connection, frame), "handlerStage")
+                    : SecurityContextBridge.with(securityContext,
+                            () -> Objects.requireNonNull(frameHandler.handle(connection, frame), "handlerStage"));
             stage.whenComplete((responses, cause) -> {
                 completeProductionFrame(context);
                 if (cause != null) {

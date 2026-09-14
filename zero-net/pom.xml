@@ -29,6 +29,10 @@
             <artifactId>zero-event</artifactId>
         </dependency>
         <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-security</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.netty</groupId>
             <artifactId>netty-transport</artifactId>
             <version>${netty.version}</version>
@@ -40,8 +44,25 @@
         </dependency>
         <dependency>
             <groupId>io.netty</groupId>
+            <artifactId>netty-handler</artifactId>
+            <version>${netty.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.netty</groupId>
             <artifactId>netty-codec-http</artifactId>
             <version>${netty.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

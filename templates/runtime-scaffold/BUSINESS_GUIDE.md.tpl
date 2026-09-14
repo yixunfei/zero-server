@@ -6,8 +6,9 @@
 
 ## Where To Write Business Logic
 
-Inject the selected interface into a business service. For `data` or `redis`, the generated
-assembly binds repository role `main` to `local` or `redis`; retrieve `DataRuntime.REPOSITORIES`
+Inject the selected interface into a business service. For a single data source, the generated
+assembly binds repository role `main` to that source. Multiple sources use their own names
+(`local`, `redis`, `mongo`, `postgresql`); edit the role map for your business. Retrieve `DataRuntime.REPOSITORIES`
 and create a typed repository using a `RepositoryRequest` and `RepositoryDefinition`.
 
 ## Where To Change Protocol
@@ -16,7 +17,7 @@ This template has no generated protocol. Add protocol generation only when the a
 
 ## Local Verification
 
-Run `mvn -q clean test exec:java`. Redis is not started by the default smoke test.
+Run `mvn -q clean test exec:java`. External adapters are only diagnosed by the default smoke test.
 
 ## First Business Change
 

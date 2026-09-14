@@ -22,7 +22,9 @@ class ScaffoldManifestContractTest {
             check(List.of(component), component);
         }
         check(List.of("data", "redis", "cache", "custom-actor", "discovery"), "mixed");
-        check(ScaffoldComponents.supported().stream().filter(id -> !id.equals("redis")).toList(), "all-local");
+        check(ScaffoldComponents.supported().stream()
+                .filter(id -> !Set.of("redis", "kafka", "nacos", "mongo", "postgresql").contains(id)).toList(), "all-local");
+        check(List.of("rpc", "discovery", "kafka", "nacos", "mongo", "redis", "postgresql"), "distributed");
     }
 
     private void check(final List<String> requested, final String name) throws Exception {

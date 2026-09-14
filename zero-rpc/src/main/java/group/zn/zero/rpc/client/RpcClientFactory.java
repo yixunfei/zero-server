@@ -6,8 +6,12 @@ import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.rpc.DefaultRpcCorrelationIdGenerator;
 import group.zn.zero.rpc.RpcCallContext;
 import group.zn.zero.rpc.RpcCallOptions;
-import group.zn.zero.rpc.RpcCorrelationIdGenerator;
 import group.zn.zero.rpc.RpcRequest;
+import group.zn.zero.rpc.RpcCorrelationIdGenerator;
+import group.zn.zero.security.SecurityContext;
+import group.zn.zero.security.SecurityContextBridge;
+import group.zn.zero.security.SecurityMetadataAssertion;
+import group.zn.zero.security.SecurityMetadataSnapshot;
 import group.zn.zero.rpc.RpcResponse;
 import group.zn.zero.rpc.codec.RpcCodecRegistry;
 import group.zn.zero.rpc.codec.RpcPayloadCodec;
@@ -62,10 +66,10 @@ public final class RpcClientFactory {
      * correlationId 生成器。
      */
     private final RpcCorrelationIdGenerator correlationIdGenerator;
+    /** Optional application-owned metadata assertion signer. */
+    private final SecurityMetadataAssertion securityMetadataAssertion;
 
-    /**
-     * 接口类型到服务描述符的实例级缓存。
-     */
+    /** 接口类型到服务描述符的实例级缓存。 */
     private final ConcurrentMap<Class<?>, RpcServiceDescriptor> descriptors = new ConcurrentHashMap<>();
 
     /**
@@ -114,6 +118,12 @@ public final class RpcClientFactory {
         this(transport, codecRegistry, defaultOptions, defaultGenerator(transport));
     }
 
+    /** Creates a client factory with an explicit metadata assertion signer. */
+    public RpcClientFactory(final RpcTransport transport, final RpcCodecRegistry codecRegistry,
+                            final RpcCallOptions defaultOptions, final SecurityMetadataAssertion assertion) {
+        this(transport, codecRegistry, defaultOptions, defaultGenerator(transport), assertion);
+    }
+
     /**
      * 创建 RPC common 接口客户端代理工厂。
      *
@@ -128,10 +138,21 @@ public final class RpcClientFactory {
             final RpcCodecRegistry codecRegistry,
             final RpcCallOptions defaultOptions,
             final RpcCorrelationIdGenerator correlationIdGenerator) {
+        this(transport, codecRegistry, defaultOptions, correlationIdGenerator, null);
+    }
+
+    /** Creates a client factory with an explicit metadata assertion signer. */
+    public RpcClientFactory(
+            final RpcTransport transport,
+            final RpcCodecRegistry codecRegistry,
+            final RpcCallOptions defaultOptions,
+            final RpcCorrelationIdGenerator correlationIdGenerator,
+            final SecurityMetadataAssertion assertion) {
         this.transport = Objects.requireNonNull(transport, "transport");
         this.codecRegistry = Objects.requireNonNull(codecRegistry, "codecRegistry");
         this.defaultOptions = Objects.requireNonNull(defaultOptions, "defaultOptions");
         this.correlationIdGenerator = Objects.requireNonNull(correlationIdGenerator, "correlationIdGenerator");
+        this.securityMetadataAssertion = assertion;
     }
 
     /**
@@ -170,7 +191,8 @@ public final class RpcClientFactory {
                 transport,
                 descriptor,
                 options,
-                correlationIdGenerator);
+                correlationIdGenerator,
+                securityMetadataAssertion);
         Object proxy = Proxy.newProxyInstance(
                 serviceInterface.getClassLoader(),
                 new Class<?>[]{serviceInterface},
@@ -228,21 +250,20 @@ public final class RpcClientFactory {
          * correlationId 生成器。
          */
         private final RpcCorrelationIdGenerator correlationIdGenerator;
-
-        /**
-         * Java 方法到分区键解析器的映射。
-         */
+        private final SecurityMetadataAssertion securityMetadataAssertion;
         private final Map<Method, MethodBinding> bindings;
 
         private CommonInterfaceInvocationHandler(
                 final RpcTransport transport,
                 final RpcServiceDescriptor service,
                 final RpcCallOptions options,
-                final RpcCorrelationIdGenerator correlationIdGenerator) {
+                final RpcCorrelationIdGenerator correlationIdGenerator,
+                final SecurityMetadataAssertion securityMetadataAssertion) {
             this.transport = transport;
             this.service = service;
             this.options = options;
             this.correlationIdGenerator = correlationIdGenerator;
+            this.securityMetadataAssertion = securityMetadataAssertion;
             this.bindings = compileBindings(service);
         }
 
@@ -293,6 +314,7 @@ public final class RpcClientFactory {
                     descriptor.topic(),
                     descriptor.group(),
                     binding.resolvePartitionKey(args),
+                    securityMetadata(),
                     RpcPayloadCodec.encodeArguments(descriptor, args));
             try {
                 if (descriptor.callMode() == RpcCallMode.ONEWAY) {
@@ -307,6 +329,11 @@ public final class RpcClientFactory {
             }
         }
 
+        private SecurityMetadataSnapshot securityMetadata() {
+            SecurityContext securityContext = SecurityContextBridge.current().orElse(null);
+            return securityContext == null || securityMetadataAssertion == null ? null
+                    : SecurityMetadataAssertion.signed(securityContext, "rpc-client", securityMetadataAssertion);
+        }
         private Object waitResult(
                 final RpcMethodDescriptor descriptor,
                 final CompletionStage<RpcResult<Object>> stage) {

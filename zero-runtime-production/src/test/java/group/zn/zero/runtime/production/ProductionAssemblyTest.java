@@ -34,6 +34,7 @@ class ProductionAssemblyTest {
                 .configSourceLookups(key -> null, key -> null)
                 .install(context -> new ProductionModule(List.of(provider), List.of(), List.of()));
         assembly.diagnose();
+        assertEquals(3, assembly.plan().components().size());
         assertEquals(0, closed.get());
         ProductionAdapterException failure = assertThrows(ProductionAdapterException.class, assembly::build);
         assertEquals(1, closed.get());
@@ -48,6 +49,15 @@ class ProductionAssemblyTest {
         }
         assertThrows(ZeroException.class,
                 () -> ProductionAssembly.builder(new MapZeroConfig(Map.of("zero.mode", "local"))));
+        for (String profile : List.of("standalone", "external-test", "production")) {
+            var assembly = ProductionAssembly.builder(profile, new MapZeroConfig(Map.of()));
+            assertEquals(profile, assembly.diagnose().profile());
+            assertEquals(2, assembly.plan().components().size());
+            try (var runtime = assembly.build()) {
+                runtime.start();
+                assertEquals(profile, runtime.require(RuntimeBasics.CONFIG).getOrDefault("zero.mode", "missing"));
+            }
+        }
     }
 
     @Test
@@ -57,6 +67,7 @@ class ProductionAssemblyTest {
         var failure = assertThrows(ProductionAdapterException.class, assembly::diagnose);
         assertEquals(ProductionAdapterFailurePhase.CONFIG_VALIDATION, failure.failurePhase());
         assertFalse(failure.toString().contains("private-setting"));
+        assertThrows(ProductionAdapterException.class, assembly::plan);
     }
 
     @Test

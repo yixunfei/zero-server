@@ -22,7 +22,7 @@
         </dependency>
         <dependency>
             <groupId>group.zn.zero</groupId>
-            <artifactId>zero-core</artifactId>
+            <artifactId>zero-security</artifactId>
         </dependency>
         <dependency>
             <groupId>group.zn.zero</groupId>

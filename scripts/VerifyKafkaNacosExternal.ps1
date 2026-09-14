@@ -81,6 +81,9 @@ try {
     $env:ZERO_KAFKA_PORT = New-IsolatedPort
     $env:ZERO_NACOS_HTTP_PORT = New-IsolatedPort
     $env:ZERO_NACOS_GRPC_PORT = [int]$env:ZERO_NACOS_HTTP_PORT + 1000
+    if ([int]$env:ZERO_NACOS_GRPC_PORT -gt 65535) {
+        throw "isolated Nacos gRPC port exceeds TCP port range: $($env:ZERO_NACOS_GRPC_PORT)"
+    }
 
     Invoke-Native 'docker' ($compose + @('up', '-d', '--wait', '--wait-timeout', '240')) 'containers.log' | Out-Null
     Invoke-Native 'docker' ($compose + @('images', '--format', 'json')) 'images.json.log' | Out-Null

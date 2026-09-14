@@ -9,6 +9,11 @@ import group.zn.zero.net.error.NetErrorCode;
 import group.zn.zero.net.http.HttpRequest;
 import group.zn.zero.net.http.HttpRequestHandler;
 import group.zn.zero.net.http.HttpResponse;
+import group.zn.zero.security.SecurityContext;
+import group.zn.zero.security.SecurityContextBridge;
+import group.zn.zero.security.SecurityMetadataHttpCodec;
+import group.zn.zero.security.SecurityMetadataSnapshot;
+import group.zn.zero.security.SecurityMetadataVerifier;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
@@ -226,6 +231,19 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
         protected void channelRead0(final ChannelHandlerContext context, final FullHttpRequest request) {
             HttpRequest zeroRequest = toZeroRequest(request);
             try {
+                String encoded = zeroRequest.headers().get(SecurityMetadataHttpCodec.HEADER);
+                if (encoded != null) {
+                    SecurityMetadataSnapshot snapshot = SecurityMetadataHttpCodec.decode(encoded);
+                    context.channel().attr(NettySecurityAttributes.CONTEXT).set(
+                            new SecurityContext(snapshot.subject(), snapshot.issuedAt(), snapshot.expiresAt(),
+                                    snapshot.transport(), snapshot.peerAddress(), snapshot.trustedSourceAddress(),
+                                    snapshot.traceId(), snapshot.correlationId(), snapshot.permissions(), Map.of()));
+                }
+            } catch (RuntimeException invalidMetadata) {
+                context.close();
+                return;
+            }
+            try {
                 handlerExecutor.execute(() -> invokeHandler(context, zeroRequest));
             } catch (RuntimeException ex) {
                 writeFailure(context, ZeroException.of(
@@ -245,10 +263,12 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
         }
 
         private void invokeHandler(final ChannelHandlerContext context, final HttpRequest request) {
+            SecurityContext securityContext = context.channel().attr(NettySecurityAttributes.CONTEXT).get();
             try {
-                CompletionStage<HttpResponse> stage = Objects.requireNonNull(
-                        handler.handle(request),
-                        "handlerStage");
+                CompletionStage<HttpResponse> stage = securityContext == null
+                        ? Objects.requireNonNull(handler.handle(request), "handlerStage")
+                        : SecurityContextBridge.with(securityContext,
+                                () -> Objects.requireNonNull(handler.handle(request), "handlerStage"));
                 stage.whenComplete((response, cause) -> {
                     if (cause != null) {
                         writeFailure(context, cause);

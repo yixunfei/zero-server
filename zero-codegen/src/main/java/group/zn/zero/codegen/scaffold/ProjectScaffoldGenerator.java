@@ -96,10 +96,10 @@ public final class ProjectScaffoldGenerator {
         values.put("__RUNTIME_PROFILE__", selection.external() ? "external-test" : "local");
         values.put("__EXTERNAL_COMPONENTS__", Boolean.toString(selection.external()));
         values.put("__DEFAULT_START__", Boolean.toString(!selection.external()));
-        values.put("__CONFIG_DEFAULTS__", selection.external()
-                ? "\"zero.mode\", \"external-test\", \"zero.adapter.data.redis.enabled\", \"true\",\n"
-                    + "                \"zero.redis.uri\", \"redis://127.0.0.1:6379\""
-                : "\"zero.mode\", \"local\"");
+        values.put("__CONFIG_DEFAULTS__", ScaffoldConfiguration.defaults(selection));
+        values.put("__DIAGNOSIS_STATUS__", selection.external()
+                ? "report.missingConfigKeys().isEmpty() ? \"ok\" : \"incomplete\"" : "\"ok\"");
+        values.put("__DIAGNOSIS_KEYS__", selection.external() ? "report.missingConfigKeys()" : "java.util.List.of()");
         return values;
     }
 

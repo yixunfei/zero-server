@@ -1,12 +1,13 @@
 # Independent Modular Consumers
 
-Four standalone Maven consumers verify that runtime selection also works with a reduced dependency graph:
+Five standalone Maven consumers verify that runtime selection also works with a reduced dependency graph:
 
 | Consumer | Declared integration | Verified behavior |
 | --- | --- | --- |
 | `minimal` | Bootstrap | Start and close without component or middleware classes |
 | `event-actor` | Bootstrap, event, actor | Dispatch an event into an Actor lane |
 | `discovery` | Bootstrap, discovery | Register, query and unregister without Nacos |
+| `center-logic` | Bootstrap, RPC | Invoke a shared center interface from logic without middleware |
 | `redis` | Redis | Validate configuration, build and close without other middleware SDKs |
 
 From the repository root, using Java 21 and Maven 3.9+:

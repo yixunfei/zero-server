@@ -15,6 +15,9 @@ import group.zn.zero.rpc.spi.RpcHandler;
 import group.zn.zero.rpc.spi.RpcHandlerRegistry;
 import group.zn.zero.rpc.spi.RpcRoute;
 import group.zn.zero.rpc.spi.RpcTransport;
+import group.zn.zero.security.SecurityContext;
+import group.zn.zero.security.SecurityMetadataSnapshot;
+import group.zn.zero.security.SecurityMetadataVerifier;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -54,6 +57,10 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
      * RPC 传输观测器。
      */
     private final RpcTransportObserver observer;
+    /** Receiver-side security metadata verifier; defaults to fail-closed when explicitly enabled. */
+    private volatile SecurityMetadataVerifier securityMetadataVerifier = SecurityMetadataVerifier.failClosed();
+    /** Whether received RPCs must carry verifiable security metadata. */
+    private volatile boolean securityVerificationEnabled;
 
     /**
      * topic 解析器。
@@ -216,9 +223,13 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
         }
     }
 
+    /** Configures the application-owned receiver verifier. */
+    public void securityMetadataVerifier(final SecurityMetadataVerifier verifier) {
+        this.securityMetadataVerifier = Objects.requireNonNull(verifier, "verifier");
+        this.securityVerificationEnabled = true;
+    }
+
     /**
-     * 返回提供者名称。
-     *
      * @return 提供者名称；不可为空；线程安全。
      */
     @Override
@@ -442,7 +453,32 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
                     "rpc handler not found: " + request.serviceName() + "#" + request.methodName());
             return;
         }
-        handle(request, handler);
+        if (!securityVerificationEnabled) {
+            handle(request, handler);
+            return;
+        }
+        if (request.securityMetadata() == null) {
+            reject(request, RpcErrorCode.INVALID_REQUEST, "rpc security metadata is required");
+            return;
+        }
+        CompletionStage<SecurityContext> verified;
+        try {
+            verified = securityMetadataVerifier.verify(request.securityMetadata(), Instant.now());
+        } catch (RuntimeException exception) {
+            reject(request, RpcErrorCode.INVALID_REQUEST, "rpc security metadata rejected");
+            return;
+        }
+        if (verified == null) {
+            reject(request, RpcErrorCode.INVALID_REQUEST, "rpc security metadata rejected");
+            return;
+        }
+        verified.whenComplete((securityContext, failure) -> {
+            if (failure != null || securityContext == null || securityContext.expired(Instant.now())) {
+                reject(request, RpcErrorCode.INVALID_REQUEST, "rpc security metadata rejected");
+                return;
+            }
+            group.zn.zero.security.SecurityContextBridge.with(securityContext, () -> handle(request, handler));
+        });
     }
 
     private void handle(final RpcRequest request, final RpcHandler handler) {

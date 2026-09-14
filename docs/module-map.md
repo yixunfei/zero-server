@@ -47,7 +47,7 @@ flowchart TB
 
 | 模块 | 职责 | 核心入口 | 常见修改位置 | 禁止依赖与主要风险 |
 | --- | --- | --- | --- | --- |
-| `zero-core` | 生命周期、配置、错误码、通用基础契约 | `Lifecycle`、`AbstractLifecycle`、`ZeroConfig`、`MapZeroConfig`、`ErrorCode` | `zero-core/src/main/java/group/zn/zero/core` | 禁止任何具体中间件和上层业务依赖；公共契约变化会产生全仓影响 |
+| `zero-security` | 传输中立的认证、重放、TLS 材料与安全上下文契约 | `AuthenticationProvider`、`SecurityContext`、`ReplayProtection`、`TlsMaterialProvider`、`SecurityChain` | `zero-security/src/main/java/group/zn/zero/security` | 仅依赖 `zero-core`；不内置账号/JWT/证书供应商；安全 provider 必须显式注入，敏感字段禁止进入上下文 |
 | `zero-runtime` | 显式组件选择、typed config、依赖图、事务式生命周期、健康、安全诊断与共享能力模型 | `RuntimeAssembler`、`GameRuntime`、`ComponentCatalog`、`RuntimeProfile`、`RuntimeCapabilityModel` | `zero-runtime/src/main/java/group/zn/zero/runtime` | 只依赖 `zero-core`；禁止 classpath 自动装配和具体端口/Adapter 依赖；公共契约已用于 1C Local 装配 |
 | `zero-event` | 事件总线、优先级、拦截、重试与死信抽象 | `EventBus`、`InMemoryEventBus`、`EventHandler`、`EventInterceptor` | `zero-event/src/main/java/group/zn/zero/event` | 不绑定网络或消息队列；派发顺序、重试和异常语义属于高风险行为 |
 | `zero-protocol` | 协议模型、注册表、frame 与 codec SPI | `ProtocolCodec`、`ProtocolFrameCodec`、`ProtocolRegistry`、`ProtocolDefinition` | `zero-protocol/src/main/java/group/zn/zero/protocol` | 协议 ID、wire format、兼容策略与编解码变化会影响客户端和跨服通信 |
@@ -110,7 +110,7 @@ flowchart TB
 
 ### 7.1 可独立消费的装配模块
 
-当前根 Reactor 共 47 个模块（benchmark 仅由显式 profile 启用）。新增集成层放置端口能力键和 provider；端口与纯 Adapter 不反向依赖 runtime。
+当前根 Reactor 共 56 个模块（benchmark 仅由显式 profile 启用）。新增集成层放置端口能力键和 provider；端口与纯 Adapter 不反向依赖 runtime。
 
 | 模块 | 职责 / 入口 |
 | --- | --- |
@@ -118,11 +118,13 @@ flowchart TB
 | `zero-runtime-event`、`zero-runtime-actor`、`zero-runtime-protocol` | 事件、Actor、协议的本地集成 |
 | `zero-runtime-rpc`、`zero-runtime-data`、`zero-runtime-cache` | RPC、持久化/命名 Repository 来源及角色目录、缓存集成 |
 | `zero-runtime-log`、`zero-runtime-monitor`、`zero-runtime-discovery` | 日志、监控、本地发现集成 |
-| `zero-runtime-production` | 无驱动依赖的 `ProductionAssembly`、配置、预算、诊断与 Runtime |
+| `zero-runtime-production` | 无驱动依赖的 `ProductionAssembly`、配置、启动预算、诊断与周期 resilience 契约 | `ProductionAssembly`、`ProductionAdapterLifecycle`、`ProductionStartupBudget`、`RuntimeAdapterHealth`、`RuntimeAdapterRecovery`、`RuntimeAdapterBudget`、`RuntimeAdapterResilience` |
 | `zero-runtime-kafka`、`zero-runtime-mongo`、`zero-runtime-redis` | 各自 Adapter provider、健康与资源管理 |
 | `zero-runtime-postgresql`、`zero-runtime-nacos`、`zero-runtime-net` | 各自 Adapter provider、健康与资源管理 |
 
 这些集成模块不能依赖 Starter 或无关的真实 Adapter。完整选择示例见[按需装配指南](modular-composition-guide.zh-CN.md)。
+
+`ProductionAssembly.builder(profile, config)` 接受 standalone/external-test/production，`plan()` 在不创建资源的前提下返回实际 provider 图。脚手架在 `ScaffoldComponents` 选择现有集成，在 `ScaffoldConfiguration` 生成所选 Adapter 的开关及外部配置样例。示例 `examples/modular-composition/center-logic` 只依赖 bootstrap/RPC；TCP 示例的执行器由 bootstrap 管理、codegen 只存在于构建插件。网络监听与生产安全策略仍由应用显式接入，脚手架尚无 net 组件。入口和限制见[场景指南](scenario-onboarding.zh-CN.md)。
 
 `zero-data/repository` 的 `RepositoryDefinition`、`RepositoryFactory`、`RepositorySource`、`RepositoryCatalog` 形成中立业务入口；工厂按需创建既有 envelope Repository。`examples/repository-composition` 演示同一余额业务切换四种来源，生命周期和执行域要求见 [Repository 指南](repository-composition-guide.zh-CN.md)。`VerifyGeneratedCompositions.java` 检查生成消费者的 Maven 依赖、SDK 缺席与自定义实现选择。
 

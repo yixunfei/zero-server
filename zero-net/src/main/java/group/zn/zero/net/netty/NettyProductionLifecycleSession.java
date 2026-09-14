@@ -13,6 +13,9 @@ import group.zn.zero.net.lifecycle.NetworkRateLimitScope;
 import group.zn.zero.net.lifecycle.ProductionNetworkConfig;
 import group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
+import group.zn.zero.net.lifecycle.SecurityNetworkPolicy;
+import group.zn.zero.security.ReplayProtection;
+import group.zn.zero.security.SecurityContext;
 import group.zn.zero.protocol.ProtocolFrame;
 import io.netty.channel.ChannelHandlerContext;
 import java.net.Inet6Address;
@@ -60,6 +63,8 @@ final class NettyProductionLifecycleSession {
 
     /** 当前生命周期状态。 */
     private ConnectionLifecycleState state = ConnectionLifecycleState.ACCEPTED;
+    /** 待完成的异步安全检查数量。 */
+    private int pendingSecurityChecks;
     /** 当前业务 in-flight 数量。 */
     private int inboundInFlight;
     /** 握手开始时间。 */
@@ -441,6 +446,71 @@ final class NettyProductionLifecycleSession {
                     0L);
             return false;
         }
+        SecurityContext securityContext = null;
+        if (lifecycle.policy() instanceof SecurityNetworkPolicy securityPolicy) {
+            securityContext = connection.attributes()
+                    .get(ProductionNetworkConnectionAttributes.SECURITY_CONTEXT)
+                    .orElse(null);
+            if (securityContext == null || securityContext.expired(Instant.now())) {
+                reject(
+                        ConnectionLifecycleEventType.CONNECTION_REJECTED,
+                        NetErrorCode.UNAUTHENTICATED,
+                        ConnectionRejectionReason.UNAUTHENTICATED,
+                        NetworkRateLimitScope.FRAME,
+                        null);
+                return false;
+            }
+            if (!securityContext.allows("network.request")) {
+                reject(
+                        ConnectionLifecycleEventType.CONNECTION_REJECTED,
+                        NetErrorCode.AUTHORIZATION_DENIED,
+                        ConnectionRejectionReason.AUTHORIZATION_DENIED,
+                        NetworkRateLimitScope.FRAME,
+                        null);
+                return false;
+            }
+            CompletionStage<ReplayProtection.ReplayDecision> replayStage =
+                    securityPolicy.checkReplayAsync(frame, securityContext);
+            pendingSecurityChecks++;
+            replayStage.toCompletableFuture()
+                    .orTimeout(30L, TimeUnit.SECONDS)
+                    .whenComplete((replay, cause) -> executeOnEventLoop(
+                            () -> replayCompleted(frame, replay, cause)));
+            return false;
+        }
+        return admitEstablishedFrame(frame);
+    }
+
+    private void replayCompleted(
+            final ProtocolFrame frame,
+            final ReplayProtection.ReplayDecision replay,
+            final Throwable cause) {
+        if (pendingSecurityChecks > 0) {
+            pendingSecurityChecks--;
+        }
+        if (state != ConnectionLifecycleState.ESTABLISHED) {
+            return;
+        }
+        if (cause != null || replay == null || replay != ReplayProtection.ReplayDecision.ACCEPTED) {
+            ReplayProtection.ReplayDecision decision = replay == null
+                    ? ReplayProtection.ReplayDecision.INVALID : replay;
+            reject(
+                    ConnectionLifecycleEventType.CONNECTION_REJECTED,
+                    decision == ReplayProtection.ReplayDecision.EXPIRED
+                            ? NetErrorCode.AUTHENTICATION_EXPIRED : NetErrorCode.REPLAY_DETECTED,
+                    decision == ReplayProtection.ReplayDecision.EXPIRED
+                            ? ConnectionRejectionReason.AUTHENTICATION_EXPIRED
+                            : ConnectionRejectionReason.REPLAY_DETECTED,
+                    NetworkRateLimitScope.FRAME,
+                    cause);
+            return;
+        }
+        if (admitEstablishedFrame(frame)) {
+            readyFrameConsumer.accept(frame);
+        }
+    }
+
+    private boolean admitEstablishedFrame(final ProtocolFrame frame) {
         boolean allowed;
         try {
             allowed = lifecycle.rateLimiter().allowFrame(connection, frame);
@@ -527,6 +597,7 @@ final class NettyProductionLifecycleSession {
         }
         cancelTimers();
         pendingFrames.clear();
+        pendingSecurityChecks = 0;
         transition(ConnectionLifecycleState.REJECTED);
         emit(event, ConnectionLifecycleResult.REJECTED, reason, scope, errorCode, 0L);
         if (event != ConnectionLifecycleEventType.CONNECTION_REJECTED) {

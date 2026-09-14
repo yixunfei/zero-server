@@ -60,6 +60,7 @@
         <module>zero-state-sync</module>
         <module>zero-frame-sync</module>
         <module>zero-logic</module>
+        <module>zero-security</module>
         <module>zero-net</module>
         <module>zero-rpc-common</module>
         <module>zero-rpc</module>

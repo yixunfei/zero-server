@@ -9,6 +9,7 @@ import group.zn.zero.net.error.NetErrorCode;
 import group.zn.zero.protocol.ProtocolFrame;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
+import io.netty.util.AttributeKey;
 import java.net.SocketAddress;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;

@@ -106,14 +106,16 @@ java scripts/RunLocalPrototype.java `
 
 先运行 `mvn -B -ntp -q -DskipTests install` 安装本次框架与生成工具。`--components` 接收逗号分隔的组件 ID，附加到模板必须能力上。未知 ID 会在写入工程前失败。
 
-支持：`bootstrap`、`actor`、`event`、`protocol`、`rpc`、`data`、`cache`、`log`、`monitor`、`discovery`、`redis`、`custom-actor`。基础配置/执行器始终存在，组件依赖自动补齐。`redis` 选择 Redis 数据工厂；`custom-actor` 用应用 provider 替换 Actor 调度器。
+支持：`bootstrap`、`actor`、`event`、`protocol`、`rpc`、`data`、`cache`、`log`、`monitor`、`discovery`、`redis`、`kafka`、`nacos`、`mongo`、`postgresql`、`custom-actor`。基础配置/执行器始终存在，组件依赖自动补齐。`redis` 选择 Redis 数据工厂；`custom-actor` 用应用 provider 替换 Actor 调度器。`kafka`/`nacos` 替换同次选择的本地 `rpc`/`discovery`。网络监听仍需应用显式接入，不提供 `net` 生成选项。
 
 | 路径 | 生成参数 | 默认验收行为 |
 | --- | --- | --- |
 | 最小运行时 | `--template runtime` | 仅 3 个框架依赖，启动后关闭 |
 | 事件 / Actor | `--template runtime --components event,actor` | 7 个框架依赖，启动后关闭 |
 | 本地 RPG | `--template local` | 原有登录、场景进入与移动流程 |
-| 单 Redis | `--template runtime --components redis` | 装配和关闭，输出 `started=false` |
+| 单 Redis | `--template runtime --components redis` | 仅诊断，不创建客户端，输出 `started=false` |
+| 中心—逻辑 RPC | `--template runtime --components kafka` | 自动补齐日志，未选数据库/发现 SDK 缺席 |
+| 分布式基础设施组合 | `--template runtime --components kafka,nacos,mongo,redis,postgresql` | 仅诊断所选配置，不连接真实服务 |
 | 自定义实现 | `--template local --components custom-actor` | 同一业务源码使用 `LocalActorScheduler` |
 
 ```powershell
@@ -124,11 +126,11 @@ java scripts/VerifyGeneratedCompositions.java
 
 POM 由所选 provider 的 Maven 坐标及模板源码需要组成。RPG 的 player/scene 仍传递需要 game、data、cache 抽象；这些类存在不代表安装了对应运行时 provider。其他六类业务模板不会固定引入 player/scene。codegen 是 exec 插件依赖，不进入应用运行类路径。最小 `runtime` 模板没有协议文件或协议构建插件。
 
-每个工程还生成 `config/application.properties.example` 和 `RuntimeAssembly.java`，清单增加 `selectedComponents`、`selectedProviders`、`runtimeCapabilities`。`data` 和 `redis` 自动将 Repository 角色 `main` 绑定到对应来源，业务接入见 [Repository 指南](repository-composition-guide.zh-CN.md)。
+每个工程还生成 `config/application.properties.example` 和 `RuntimeAssembly.java`，清单增加 `selectedComponents`、`selectedProviders`、`runtimeCapabilities`。一个数据来源绑定角色 `main`；多个来源按来源名绑定，应用可改为业务角色。业务接入见 [Repository 指南](repository-composition-guide.zh-CN.md)。
 
-配置文件通过 `ZERO_CONFIG_FILE` 或 `-Dzero.config.file` 交给 `ZeroConfigLoader`。Redis runtime 模板默认不连接服务；使用样例配置后执行 `mvn -q exec:java '-Dexec.args=--start'` 才进行真实启动健康检查。给业务模板额外添加 Redis 后，业务启动路径需要该外部服务，不属于七类默认本地 smoke。
+配置文件通过 `ZERO_CONFIG_FILE` 或 `-Dzero.config.file` 交给 `ZeroConfigLoader`。外部 runtime 模板默认只诊断，不创建客户端；缺配置输出 `runtime-diagnosis=incomplete`，齐全则为 `ok`。使用样例配置后执行 `mvn -q exec:java '-Dexec.args=--start'` 才进行真实启动健康检查；`zero.mode` 可为 standalone/external-test/production。给业务模板额外添加 Adapter 后，业务启动及测试需要真实配置和服务，不属于七类默认本地 smoke。
 
-`VerifyGeneratedCompositions` 为五条路径独立构建、运行测试，检查 Maven 解析后的完整框架依赖集合，并在隔离 classloader 中验证未选 SDK 与 codegen 类缺席。七类业务回归仍使用 `VerifyLocalScaffolds`；两者均纳入阶段 0 full。
+`VerifyGeneratedCompositions` 覆盖 25 个消费者，独立编译、测试和运行，检查代表场景的完整框架依赖集合、每个组件及混合组合的 SDK 缺席/存在，并在三种外部档位下比较实际 provider 图与清单。外部图验证不创建客户端。七类默认业务回归仍使用 `VerifyLocalScaffolds`；两者均纳入阶段 0 full。
 
 `RunLocalScaffold` 会先调用 `InspectLocalScaffold` 快速检查项目结构、manifest、协议入口和 local/prototype 边界，再执行 Maven `clean test` 和 `exec:java`，并校验输出摘要。它不替代 external-tests、压测或生产验收。
 

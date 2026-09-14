@@ -8,6 +8,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  compatibility-gate:
+    name: API compatibility gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build protected API modules
+        run: ./mvnw -B -ntp -DskipTests -pl zero-core,zero-runtime,zero-protocol,zero-rpc-common,zero-data -am install
+      - name: Verify API surface and consumer
+        run: |
+          mkdir -p target/api-compatibility
+          java scripts/VerifyPublicApiCompatibility.java --check | tee target/api-compatibility/api-gate.log
+          java scripts/VerifyApiCompatibilityConsumer.java | tee target/api-compatibility/consumer.log
+      - name: Upload API compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-compatibility
+          path: target/api-compatibility
+
   unit:
     name: Unit and default tests
     runs-on: ubuntu-latest

@@ -68,6 +68,22 @@ class ProjectScaffoldGeneratorTest {
     }
 
     @Test
+    void externalGameplaySelectionKeepsBusinessTemplateAndExplicitAdapterConfiguration() throws IOException {
+        var catalog = ScaffoldCatalog.standard();
+        Path output = temporaryDirectory.resolve("external-game");
+        var request = new ProjectScaffoldRequest("sample-game", "group.zn.sample.game", output,
+                "0.1.0-SNAPSHOT", catalog.require("local"), Path.of("../templates"), "", List.of("redis"), false);
+
+        new ProjectScaffoldGenerator(catalog.capabilityModel()).generate(request);
+        String assembly = Files.readString(output.resolve("src/main/java/group/zn/sample/game/RuntimeAssembly.java"));
+        String config = Files.readString(output.resolve("config/application.properties.example"));
+        assertTrue(assembly.contains("RedisRuntime.module()"));
+        assertTrue(assembly.contains("ZeroRuntimeExecutors.localPrototype"));
+        assertTrue(config.contains("zero.mode=external-test"));
+        assertTrue(config.contains("zero.adapter.data.redis.enabled=true"));
+    }
+
+    @Test
     void realTemplatesSeparateBuildToolsAndGenerateOnlySelectedDependencies() throws Exception {
         ScaffoldCatalog catalog = ScaffoldCatalog.standard();
         Path root = Path.of("../templates").toAbsolutePath().normalize();

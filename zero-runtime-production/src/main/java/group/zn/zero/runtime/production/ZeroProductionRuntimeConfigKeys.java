@@ -10,6 +10,9 @@ package group.zn.zero.runtime.production;
  */
 public final class ZeroProductionRuntimeConfigKeys {
 
+    /** 单进程按需装配档位；外部 Adapter 仍须显式启用。 */
+    public static final String MODE_STANDALONE = "standalone";
+
     /**
      * 外部测试 profile。
      */

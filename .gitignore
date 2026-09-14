@@ -18,6 +18,7 @@ replay_pid*
 
 # Codex local state
 .codex/
+.zcode/
 
 # Local collaboration records (never publish)
 AGENTS.md
@@ -25,12 +26,17 @@ tasks/
 logs/
 *.plan.md
 *.local.md
+/ledger.txt
+/nul
 
 # Local development secrets
 config/local-dev/*.env
 config/local-dev/*.local.*
 config/local-dev/*secret*
 config/local-dev/*credential*
+deploy/.env
+deploy/secrets/*
+!deploy/secrets/README.txt
 
 # Benchmark and profiler output
 *.jfr

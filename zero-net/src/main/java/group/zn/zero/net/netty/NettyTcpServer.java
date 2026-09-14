@@ -8,6 +8,7 @@ import group.zn.zero.net.ServerFrameHandler;
 import group.zn.zero.net.ServerOptions;
 import group.zn.zero.net.ServerType;
 import group.zn.zero.net.error.NetErrorCode;
+import group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
 import group.zn.zero.protocol.codec.ProtocolFrameCodec;
 import group.zn.zero.protocol.codec.ZeroBinaryFrameCodec;
@@ -21,6 +22,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
+import io.netty.handler.ssl.SslContext;
 import java.net.InetSocketAddress;
 import java.util.Objects;
 import java.util.Optional;
@@ -57,14 +59,13 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
      */
     private final ConnectionListener connectionListener;
 
-    /**
-     * 业务执行器。
-     */
+    /** 业务执行器。 */
     private final Executor handlerExecutor;
 
-    /**
-     * 可选 production lifecycle。
-     */
+    /** 显式注入的 TLS 上下文；为空表示不由该服务器装配 TLS。 */
+    private final SslContext tlsContext;
+
+    /** 可选 production lifecycle。 */
     private final ProductionNetworkLifecycle productionLifecycle;
 
     /**
@@ -144,7 +145,32 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
         this.frameHandler = Objects.requireNonNull(frameHandler, "frameHandler");
         this.connectionListener = Objects.requireNonNull(connectionListener, "connectionListener");
         this.handlerExecutor = Objects.requireNonNull(handlerExecutor, "handlerExecutor");
+        this.tlsContext = null;
         this.productionLifecycle = productionLifecycle;
+    }
+
+    /**
+     * Creates a TCP server with an explicitly supplied Netty TLS context.
+     * The application owns certificate loading and rotation.
+     */
+    public NettyTcpServer(
+            final ServerOptions options,
+            final ProtocolFrameCodec frameCodec,
+            final ServerFrameHandler frameHandler,
+            final ConnectionListener connectionListener,
+            final Executor handlerExecutor,
+            final ProductionNetworkLifecycle productionLifecycle,
+            final SslContext tlsContext) {
+        this.options = Objects.requireNonNull(options, "options");
+        if (options.serverType() != ServerType.TCP) {
+            throw new IllegalArgumentException("NettyTcpServer only supports TCP options");
+        }
+        this.frameCodec = Objects.requireNonNull(frameCodec, "frameCodec");
+        this.frameHandler = Objects.requireNonNull(frameHandler, "frameHandler");
+        this.connectionListener = Objects.requireNonNull(connectionListener, "connectionListener");
+        this.handlerExecutor = Objects.requireNonNull(handlerExecutor, "handlerExecutor");
+        this.productionLifecycle = productionLifecycle;
+        this.tlsContext = Objects.requireNonNull(tlsContext, "tlsContext");
     }
 
     /**
@@ -218,6 +244,9 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
                     .childHandler(new ChannelInitializer<SocketChannel>() {
                         @Override
                         protected void initChannel(final SocketChannel channel) {
+                            if (tlsContext != null) {
+                                channel.pipeline().addLast("ssl", tlsContext.newHandler(channel.alloc()));
+                            }
                             channel.pipeline()
                                     .addLast("lengthDecoder", new LengthFieldBasedFrameDecoder(
                                             options.maxFrameLength(),

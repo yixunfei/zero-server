@@ -4,6 +4,8 @@ import group.zn.zero.net.lifecycle.NetworkRateLimiter;
 import group.zn.zero.net.lifecycle.ProductionNetworkConfig;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
 import group.zn.zero.net.lifecycle.ProductionNetworkPolicy;
+import group.zn.zero.net.lifecycle.SecurityNetworkPolicy;
+import group.zn.zero.security.SecurityChain;
 import group.zn.zero.runtime.api.ComponentId;
 import group.zn.zero.runtime.bootstrap.RuntimeBasics;
 import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
@@ -98,6 +100,7 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
             .kind(ComponentKind.FOUNDATION)
             .build();
     private final ProductionNetworkPolicy policy;
+    private final SecurityChain securityChain;
     private final NetworkRateLimiter customRateLimiter;
     private final List<ConfigSource> configSources;
     private final ProductionAdapterDiagnostic diagnostic = new ProductionAdapterDiagnostic(
@@ -106,9 +109,16 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
 
     private ProductionNetworkProvider(
             final ProductionNetworkPolicy policy,
+            final SecurityChain securityChain,
             final NetworkRateLimiter customRateLimiter,
             final List<ConfigSource> configSources) {
-        this.policy = Objects.requireNonNull(policy, "policy");
+        ProductionNetworkPolicy checkedPolicy = Objects.requireNonNull(policy, "policy");
+        this.securityChain = securityChain == null
+                ? SecurityChain.failClosed()
+                : securityChain;
+        this.policy = securityChain == null
+                ? checkedPolicy
+                : new SecurityNetworkPolicy(checkedPolicy, securityChain);
         this.customRateLimiter = customRateLimiter;
         this.configSources = List.copyOf(Objects.requireNonNull(configSources, "configSources"));
     }
@@ -116,7 +126,8 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
     static Resolution resolve(
             final ProductionConfigResolver resolver,
             final ProductionNetworkPolicy policy,
-            final NetworkRateLimiter customRateLimiter) {
+            final NetworkRateLimiter customRateLimiter,
+            final SecurityChain securityChain) {
         ProductionConfigResolver checkedResolver = Objects.requireNonNull(resolver, "resolver");
         if (!checkedResolver.enabled(ZeroProductionRuntimeConfigKeys.NETWORK_LIFECYCLE_ENABLED)) {
             return Resolution.disabled();
@@ -127,8 +138,11 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
         try {
             ProductionNetworkSettings settings = ProductionNetworkSettings.resolve(
                     checkedResolver, customRateLimiter == null);
+            SecurityChain effectiveSecurity = securityChain == null
+                    ? SecurityChain.failClosed()
+                    : securityChain;
             return Resolution.enabled(new ProductionNetworkProvider(
-                    policy, customRateLimiter, settings.configSources()));
+                    policy, effectiveSecurity, customRateLimiter, settings.configSources()));
         } catch (ProductionNetworkSettings.InvalidSettingException failure) {
             throw ProductionAdapterFailures.invalidConfig(
                     ProductionAdapterNames.ADAPTER_NETWORK_LIFECYCLE,
@@ -159,6 +173,7 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
         ProductionNetworkLifecycle lifecycle = new ProductionNetworkLifecycle(
                 networkConfig(config),
                 policy,
+                securityChain,
                 rateLimiter,
                 new ProductionNetworkTelemetryObserver(
                         checked.require(LogRuntime.LOG_APPENDER),
@@ -186,7 +201,8 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
                 Duration.ofMillis(config.require(HEARTBEAT_INTERVAL_MILLIS)),
                 config.require(ALLOWED_MISSED_HEARTBEATS),
                 Duration.ofMillis(config.require(RECONNECT_WINDOW_MILLIS)),
-                config.require(MAX_INBOUND_FRAMES));
+                config.require(MAX_INBOUND_FRAMES),
+                securityChain.tlsRequired());
     }
 
     private NetworkRateLimiter defaultRateLimiter(final ComponentConfig config) {
