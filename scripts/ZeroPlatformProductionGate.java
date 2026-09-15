@@ -25,7 +25,7 @@ public final class ZeroPlatformProductionGate {
         Files.createDirectories(output);
         List<Result> results = switch (mode) {
             case PLATFORM_TRANSACTION -> List.of(run(root, output, "platform-transaction", List.of(maven(), "-B", "-ntp", "-pl", "zero-codegen",
-                    "-Dtest=ScaffoldTransactionTest", "test"), "Tests run: 4, Failures: 0, Errors: 0"));
+                    "-Dtest=ProjectScaffoldGeneratorTest,ScaffoldManifestContractTest,ScaffoldCliValidationTest", "test"), "Tests run: 10, Failures: 0, Errors: 0"));
             case LOCAL_PRODUCTION_FOCUSED -> List.of(
                     run(root, output, "network-focused", List.of(maven(), "-B", "-ntp", "-pl", "zero-net,zero-runtime-net,zero-server-starter-production", "-am",
                             "-Dtest=ProductionNetworkLifecycleFocusedTest,ProductionNetworkTelemetryObserverTest,ProductionNetworkProviderTest",

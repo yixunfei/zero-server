@@ -30,3 +30,7 @@ Windows Java 21 fresh run：
 ## 可靠性修复
 
 恢复 CI 独立顶层 `performance` job，platform transaction job 在 POSIX 使用 Maven Wrapper、Windows 预创建证据目录；gate 可通过 `ZERO_MAVEN_CMD` 指定构建器，并要求四个事务测试的明确摘要，避免裸 `Tests run:` 或 0 tests 被误判。
+
+## GitHub Actions 首次真实矩阵运行
+
+Gate commit `7bb28757c2c622b50bf76b4c7c2dc09aa9f08f8c` 已推送，CI run `34981381210` 实际启动 Ubuntu/macOS/Windows platform transaction jobs。三项 job 均执行 checkout、Java 21、gate 和 evidence upload，但 gate step 均为 failure；当前凭据无法下载私有 job logs/artifacts（API 返回 403 admin required），因此没有把 artifact 解释为 passed。下一次修复应先取得 job log，定位 wrapper/测试摘要失败原因，再重跑矩阵。
