@@ -33,6 +33,28 @@ jobs:
           name: api-compatibility
           path: target/api-compatibility
 
+  acceptance-evidence:
+    name: Acceptance evidence bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Collect repository and local acceptance evidence
+        run: java scripts/ZeroAcceptanceEvidence.java --level quick --no-stage0
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-evidence
+          path: target/acceptance-evidence
+          if-no-files-found: error
+          retention-days: 14
+
   unit:
     name: Unit and default tests
     runs-on: ubuntu-latest
@@ -156,6 +178,7 @@ jobs:
           java -version
           mvn -version
           mvn -B -ntp -DskipTests install
+          mkdir target\cross-platform -Force
           java scripts\ZeroUnifiedEntryVerifier.java --full-smoke *>&1 | Tee-Object -FilePath target\cross-platform\windows-verifier.log
       - name: Upload cross-platform evidence
         if: always()
@@ -164,6 +187,36 @@ jobs:
           name: unified-entry-${{ matrix.os }}
           path: target/cross-platform
           if-no-files-found: ignore
+
+  platform-transaction:
+    name: Platform transaction gate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Run platform transaction gate
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" != "Windows" ]; then chmod +x mvnw; export ZERO_MAVEN_CMD=./mvnw; else export ZERO_MAVEN_CMD=mvnw.cmd; fi
+          mkdir -p target/production-gate
+          java scripts/ZeroPlatformProductionGate.java --platform-transaction
+      - name: Upload platform transaction evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-transaction-${{ matrix.os }}
+          path: target/production-gate
+          if-no-files-found: error
+          retention-days: 14
 
   performance:
     name: Performance evidence (opt-in)
@@ -178,7 +231,7 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Run opt-in benchmark profile
-        run: mvn -B -ntp -Pbenchmarks verify
+        run: ./mvnw -B -ntp -Pbenchmarks verify
 
   external:
     name: External middleware (opt-in, no implicit Docker)
@@ -197,6 +250,31 @@ jobs:
         env:
           EXTERNAL_MIDDLEWARE_ENDPOINTS: ${{ secrets.EXTERNAL_MIDDLEWARE_ENDPOINTS }}
 
+  release-artifact-evidence:
+    name: Local release artifact evidence (manual)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_release_evidence == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Generate local artifact, SBOM and rollback rehearsal
+        run: |
+          mkdir -p target/release-evidence
+          java scripts/ZeroReleaseArtifactEvidence.java | tee target/release-evidence/run.log
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifact-evidence
+          path: target/acceptance-evidence/release-artifact
+          if-no-files-found: error
+          retention-days: 14
+
 'on':
   push:
     branches:
@@ -214,6 +292,11 @@ jobs:
         type: boolean
       run_performance:
         description: Run opt-in benchmark evidence
+        required: true
+        default: false
+        type: boolean
+      run_release_evidence:
+        description: Generate local artifact, SBOM, signature fixture and rollback rehearsal
         required: true
         default: false
         type: boolean
