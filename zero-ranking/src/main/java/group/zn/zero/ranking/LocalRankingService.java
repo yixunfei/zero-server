@@ -27,7 +27,7 @@ public final class LocalRankingService implements RankingService {
         if (b.state != SeasonState.OPEN) throw RankingErrorCode.RANKING_SEASON_STATE_INVALID.failure("season is " + b.state);
         RankingEntry old = b.entries.get(uid); RankingEntry result;
         if (old != null && idempotencyKey.equals(b.idempotency.get(uid))) return old;
-        long merged = old == null ? score : switch (mode) { case SET -> score; case MAX -> Math.max(old.score(), score); case ADD -> Math.addExact(old.score(), score); };
+        long merged = old == null ? score : switch (mode) { case SET -> score; case MAX -> Math.max(old.score(), score); case ADD -> addScore(old.score(), score); };
         result = new RankingEntry(uid, merged, tieBreakValue, System.currentTimeMillis(), b.version + 1);
         b.entries.put(uid, result); b.idempotency.put(uid, idempotencyKey); b.version++;
         events.onEvent(new RankingEvent("SCORE_SUBMITTED", rankingId, seasonId, uid, merged)); metrics.increment("submit", "success"); return result;
@@ -44,7 +44,10 @@ public final class LocalRankingService implements RankingService {
         return Optional.empty();
     }
     public synchronized RankSnapshot snapshot(String rankingId, String seasonId) {
-        Board b=boards.get(key(rankingId,seasonId)); if (b==null) return new RankSnapshot(rankingId,seasonId,System.currentTimeMillis(),0,List.of());
+        Board b = boards.get(key(rankingId, seasonId));
+        if (b == null || b.state != SeasonState.FROZEN) {
+            throw RankingErrorCode.RANKING_SEASON_STATE_INVALID.failure("snapshot requires a frozen season");
+        }
         return new RankSnapshot(rankingId,seasonId,System.currentTimeMillis(),b.version,b.entries.values().stream().sorted(comparator()).toList());
     }
     public synchronized SeasonState seasonState(String rankingId,String seasonId) { Board b=boards.get(key(rankingId,seasonId)); return b==null?SeasonState.CREATED:b.state; }
@@ -59,6 +62,14 @@ public final class LocalRankingService implements RankingService {
         if (b != null && b.settlements.contains(settlementId)) return false;
         if(b==null||b.state!=SeasonState.SETTLING) throw RankingErrorCode.RANKING_SEASON_STATE_INVALID.failure("not settling");
         b.settlements.add(settlementId); b.state=SeasonState.SETTLED; events.onEvent(new RankingEvent("SETTLED",rankingId,seasonId,null,0)); return true;
+    }
+    /** 将分数溢出映射为业务拒绝，调用方尚未写入榜单。 */
+    private static long addScore(long previous, long score) {
+        try {
+            return Math.addExact(previous, score);
+        } catch (ArithmeticException failure) {
+            throw RankingErrorCode.RANKING_SCORE_REJECTED.failure("score addition overflow");
+        }
     }
     private static boolean allowed(SeasonState from,SeasonState to){ return (from==SeasonState.CREATED&&to==SeasonState.OPEN)||(from==SeasonState.OPEN&&to==SeasonState.FROZEN)||(from==SeasonState.FROZEN&&to==SeasonState.SETTLING)||(from==SeasonState.SETTLING&&to==SeasonState.SETTLED)||(from==SeasonState.SETTLED&&to==SeasonState.ARCHIVED)||(to==SeasonState.CANCELLED&&from!=SeasonState.SETTLED&&from!=SeasonState.ARCHIVED&&from!=SeasonState.CANCELLED); }
     private static Comparator<RankingEntry> comparator(){return Comparator.comparingLong(RankingEntry::score).reversed().thenComparingLong(RankingEntry::tieBreakValue).thenComparing(RankingEntry::uid);}

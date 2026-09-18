@@ -6,8 +6,24 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 2026-09-18 文档整理
+
+- 对照当前实现更新 TCP/脚手架入口、能力矩阵与路线图，补齐迁移和报告导航；修复公开文档对本机任务档案的引用。范围与验证口径见[整理说明](docs/migrations/20260918-documentation-audit.md)。
+
+### 2026-09-17 报告核实修复
+
+- 修复缓存单飞残留与旧值回填、停机脏对象未保存、帧输入拒绝/计数、房间资源回收、状态同步回退、排行榜溢出及 AOI 更新/离开标识问题。
+- 事件处理器失败后继续派发，最终汇总错误；内存死信、指标与房间事件历史增加容量和淘汰统计。
+- 协议声明长度分配前校验；Java 包名/DTO 后缀与输出路径校验；RPC 统一超时预算、时间轮选桶重验及 Kafka 尾随字节拒绝。
+- 新增相邻路径回归验证。0.x 行为/API 调整和验证证据见 [迁移说明](docs/migrations/20260917-bug-report-verification.md) 与 [逐项核实报告](docs/reports/bug-analysis-verification-20260917.zh-CN.md)。
+
 ### Added
 
+- local TCP scaffold 的业务流程模板现在只接收 `LogAppender`，并通过组合根传入已验证的日志适配端口；不再让生成的业务侧代码直接持有 terminal `LogSink`。架构守卫与 7 个本地模板的生成、测试和运行验证均通过。
+
+- P0-1 local scaffold now supports an explicit `net` component that generates a long-running TCP server/client pair, owns runtime/listener/service cleanup, and has a verified local loopback request/response smoke. The boundary remains prototype-only: authentication, TLS, heartbeat, rate limiting, capacity and long-stability evidence are not included.
+- 脚手架事务新增工程级独占升级锁、原子 state/LATEST 指针写入和新增受控文件 rollback 清理；Windows 本地 focused evidence 已覆盖锁竞争与恢复，Linux/macOS 强杀和文件系统差异仍需 runner 证据。
+- 脚手架新增安全升级操作 `--plan`/`--diff`/`--apply`/`--migrate`/`--rollback`/`--abort`：基于 ownership hash 做三路比较，用户修改的 generated 文件冲突即拒绝覆盖；apply 使用 `.zero/scaffold/transactions` 快照和原子替换，失败可恢复并回滚。旧 manifest 必须显式 migrate，`--force` 不再绕过冲突。详见 [脚手架 ownership 迁移说明](docs/migrations/20260914-scaffold-ownership-manifest.md)。
 - 场景接入指南、可运行的最小中心—逻辑接口示例；runtime 脚手架新增 Kafka、Nacos、MongoDB、PostgreSQL 组件选择，自动补齐所需依赖并替换相应本地实现。
 - `ProductionAssembly.plan()` 提供无资源的实际组件图；新增显式档位 builder overload，补齐 standalone 装配，生成工程可通过配置切换档位。
 
@@ -26,7 +42,9 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 - Java 21 GitHub Actions，覆盖默认测试、Checkstyle、PMD、SpotBugs、JaCoCo、示例和脚手架验证。
 - 独立 `zero-benchmarks` JMH 模块以及 Zero Binary Protocol、Protobuf、FlatBuffers 的可复现横向基准。
 
-### Changed
+- 新增显式 `ZeroServerTcpApplication` starter 生命周期门面，支持注入 listener 的 `start`/`probe`/`stop`、端口冲突补偿清理和重复停止幂等语义；脚手架可显式选择 `net` 组件并生成网络策略依赖。本地 TCP evidence 不代表 productionReady。
+
+- 整理文档导航和职责：合并重复接入/API/容量说明，按指南、参考、运维和历史报告归类；修正 GM、监控、世界分片和脚手架状态。目录调整与旧链接迁移见[文档路径说明](docs/migrations/20260914-documentation-layout.md)，不改变运行时 API 或配置。
 
 - runtime 外部 smoke 改为仅诊断，连接地址不写死进业务源码；缺失配置明确输出 incomplete，多来源 Repository 按来源名绑定。详见 [0.x 迁移说明](docs/migrations/20260914-scenario-composition.md)。
 - 修复组件间装配超时跳过回滚、健康探针超出累计预算仍进入 RUNNING、诊断冻结集合选择 Builder 三项运行时 bug；均有修复前失败的确定性回归测试。

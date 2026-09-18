@@ -13,7 +13,7 @@ class InMemoryAoiIndexTest {
         var events = index.observe("o", new Position(0, 0), 3);
         assertEquals(VisibilityEvent.Type.ENTER, events.getFirst().type());
         assertEquals(1, events.getFirst().syncSeq());
-        assertEquals(VisibilityEvent.Type.UPDATE, index.observe("o", new Position(0, 0), 3).getFirst().type());
+        assertEquals(0, index.observe("o", new Position(0, 0), 3).size());
     }
     @Test void leavingProducesLeaveAndExplicitResults() {
         InMemoryAoiIndex index = new InMemoryAoiIndex();

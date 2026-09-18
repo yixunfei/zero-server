@@ -724,7 +724,12 @@ public final class JavaCodegenRenderer {
     }
 
     private static Path packageDir(final Path outputDir, final String packageName) {
-        return outputDir.resolve(packageName.replace('.', '/'));
+        Path root = outputDir.toAbsolutePath().normalize();
+        Path target = root.resolve(packageName.replace('.', '/')).normalize();
+        if (!target.startsWith(root)) {
+            throw new IllegalArgumentException("package path escapes output directory");
+        }
+        return target;
     }
 
     private String codecLiteral(final ProtocolDefinition protocol) {

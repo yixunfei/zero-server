@@ -7,6 +7,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
@@ -25,6 +26,11 @@ public final class CacheLoadCoordinator<K, V> {
      * 最大并发加载数。
      */
     private final int maxConcurrentLoads;
+
+    /**
+     * 加载容量许可。
+     */
+    private final Semaphore loadPermits;
 
     /**
      * 正在加载的 key。
@@ -47,6 +53,7 @@ public final class CacheLoadCoordinator<K, V> {
             throw new IllegalArgumentException("maxConcurrentLoads must be positive");
         }
         this.maxConcurrentLoads = maxConcurrentLoads;
+        this.loadPermits = new Semaphore(maxConcurrentLoads);
     }
 
     /**
@@ -66,7 +73,7 @@ public final class CacheLoadCoordinator<K, V> {
         if (existing != null) {
             return existing;
         }
-        if (loading.size() >= maxConcurrentLoads) {
+        if (!loadPermits.tryAcquire()) {
             rejectedCount.incrementAndGet();
             throw ZeroException.of(
                     CacheErrorCode.BACKPRESSURE_REJECTED,
@@ -76,22 +83,23 @@ public final class CacheLoadCoordinator<K, V> {
         CompletableFuture<Optional<V>> created = new CompletableFuture<>();
         CompletableFuture<Optional<V>> previous = loading.putIfAbsent(currentKey, created);
         if (previous != null) {
+            loadPermits.release();
             return previous;
         }
         try {
             loader.get().whenComplete((value, throwable) -> {
-                try {
-                    if (throwable != null) {
-                        created.completeExceptionally(throwable);
-                    } else {
-                        created.complete(Objects.requireNonNull(value, "value"));
-                    }
-                } finally {
-                    loading.remove(currentKey, created);
+                Throwable failure = throwable;
+                if (failure == null && value == null) {
+                    failure = new NullPointerException("loader value must not be null");
                 }
+                loading.remove(currentKey, created);
+                loadPermits.release();
+                if (failure != null) created.completeExceptionally(failure);
+                else created.complete(value);
             });
         } catch (RuntimeException ex) {
             loading.remove(currentKey, created);
+            loadPermits.release();
             created.completeExceptionally(ex);
         }
         return created;

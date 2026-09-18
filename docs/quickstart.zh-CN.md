@@ -1,418 +1,170 @@
 # zeroServer 快速上手
 
-本文从一个干净环境开始，跑通 zeroServer 本地原型、仓库示例、协议代码生成和脚手架。默认不需要 Docker 或外部中间件。
-
-如果先要决定依赖和部署形态，请从[三种场景的接入指南](scenario-onboarding.zh-CN.md)开始；该指南区分本地业务闭环、真实 TCP、进程间 RPC 和分布式 Adapter 组合。
+适用版本：`0.1.0-SNAPSHOT`。先跑通业务，再选择基础设施。默认原型无外部中间件；当前能力和限制见[能力矩阵](capability-matrix.zh-CN.md)。
 
 ## 1. 准备环境
 
-最低要求：
-
-- JDK 21。
-- Maven 3.9+。
-- Git。
-
-确认版本：
-
-```bash
-java -version
-mvn -version
-git --version
-```
-
-Maven 输出的 Java home 必须指向 JDK 21。如果 Windows 已安装多个 JDK，可以只为当前 PowerShell 会话切换：
-
-```powershell
-$env:JAVA_HOME='D:\path\to\jdk21'
-$env:Path="$env:JAVA_HOME\bin;$env:Path"
-java -version
-mvn -version
-```
-
-Maven Wrapper 已固定到 3.9.8：POSIX 使用 `./mvnw`，Windows 使用 `mvnw.cmd`。`.mvn/toolchains.xml` 声明项目需要 Java 21；请将 `JAVA_HOME` 指向 JDK 21。Wrapper 解决 Maven 版本一致性，但不会下载或切换 JDK。
-
+需要 JDK 21、Maven 3.9+ 和 Git。以下命令均在仓库根目录执行，单行命令可用于 Bash 或 PowerShell。
 
 ```bash
 git clone https://github.com/yixunfei/zero-server.git
 cd zero-server
+java -version
+mvn -version
 java scripts/ZeroLocalDoctor.java
 ```
 
-Doctor 只检查 Java、Maven、仓库根目录、核心模块、示例和公开工具入口；它不会修改文件或连接外部组件。正常摘要类似：
+`java` 与 Maven 的 Java home 都应指向 JDK 21。Windows 多 JDK 环境可只切换当前 PowerShell 会话：
 
-```text
-zero-local-doctor=ok|checks=23|passed=23|failed=0
-ZeroOnboardingVerifier
+```powershell
+$env:JAVA_HOME='D:\path\to\jdk21'
+$env:Path="$env:JAVA_HOME\bin;$env:Path"
+```
+
+Doctor 检查环境、模块和公开入口，不修改文件、不连接中间件。成功摘要包含 `zero-local-doctor=ok`。Wrapper 固定 Maven 3.9.8：POSIX 使用 `./mvnw`，PowerShell 使用 `.\mvnw.cmd`；它不会安装或切换 JDK，Java Runner 仍需要 PATH 上可用的 Maven。
 
 <!-- ZeroFrameworkGapLedger evidence: ZeroLocalDoctor -->
-```
 
-如果失败，先修正 Java/Maven PATH 或确认当前目录包含 `pom.xml`、`README.md`、`zero-parent/pom.xml` 和 `templates/`。
+## 2. 选择场景
 
-## 2.5 统一入口（推荐）
+| 需求 | 选择 | 运行边界 |
+| --- | --- | --- |
+| 写玩家、场景业务原型 | `local` 或关键词 Runner | 生成协议、BO、登录和移动，本地执行后退出 |
+| 空白内核或只要事件/Actor | `runtime`，可选 `--components event,actor` | 最小 core/runtime/bootstrap 三个框架制品，无网络或数据库 |
+| 验证中心—逻辑接口 | `examples/modular-composition/center-logic` | 一个进程内完成 direct/in-memory RPC 调用；不作为分布式证据 |
+| 验证双进程 Kafka | `examples/modular-composition/center-logic-kafka` | 独立 common-contract、center JVM、logic JVM；需要隔离 Kafka broker 和外部验收证据 |
+| 拆分中心与逻辑进程 | `runtime --components kafka` | 只引入所需传输，需配置 Kafka 并接入业务 |
+| 组合分布式基础设施 | `runtime` 按需选择 Adapter | 先诊断，显式启动；完整治理仍需应用完善 |
 
-仓库提供不复制框架逻辑的薄入口，统一环境检查、生成、诊断和本地进程生命周期：
+`zero-server-starter` 和 Production Starter 是全量便利组合。精简应用可用独立集成模块；首次全仓安装是准备本地 Maven 工件，不会使生成应用依赖所有模块。
 
-```bash
-scripts/zero.sh init --fromKeywords "rpg scene sync" --projectName my-game \\
-  --packageName group.example.mygame --force
-```
+脚手架进程退出码固定为：`0` 成功，`1` 普通生成失败，`2` 参数解析失败，`3` plan/diff 或升级被阻塞。失败诊断写入 stderr，格式为 `ERROR_CODE|message`；stdout 不承载失败诊断。可用 `java scripts/ZeroAcceptanceEvidence.java --no-stage0` 执行独立子进程矩阵，并在 `target/acceptance-evidence/cli-exit-matrix/` 查看原始 stdout/stderr 与退出码证据。
 
-Windows PowerShell：
 
-```powershell
-.\scripts\zero.ps1 init --fromKeywords "rpg scene sync" --projectName my-game `
-  --packageName group.example.mygame --force
-```
+## 3. 生成并运行业务原型
 
-常用命令：
-
-```text
-zero doctor                         环境与仓库入口检查
-zero generate --template runtime    生成独立工程
-zero diagnose --projectDir DIR      只检查生成工程结构
-zero test --projectDir DIR          测试生成工程
-zero run --projectDir DIR           启动并记录受控 PID
-zero stop                           只停止本入口记录的进程，可重复执行
-```
-
-POSIX 使用 `scripts/zero.sh`，PowerShell 使用 `scripts/zero.ps1`；参数会原样转发给现有 Java 工具。`run/stop` 的状态保存在 `target/zero-entry/`，不会按进程名误杀其他程序。若 Doctor 报 Java/Maven 版本不足，请先切换 `JAVA_HOME` 到 JDK 21、安装 Maven 3.9+，再重试；入口不会替用户安装系统软件。
-
-跨平台统一入口 smoke（CI）：
+最快的完整流程：
 
 ```bash
-./mvnw -B -ntp -DskipTests install
-java scripts/ZeroUnifiedEntryVerifier.java --full-smoke
+java scripts/RunLocalPrototype.java --fromKeywords "rpg scene sync" --projectName my-game --packageName group.example.mygame
 ```
 
-GitHub Actions 会在 `ubuntu-latest`、`macos-latest`、`windows-latest` 上分别执行这条真实链路并上传 `target/cross-platform` 证据；本地无法访问对应 runner 时，不应把矩阵配置误写为已通过。
+Runner 检查环境、安装 SNAPSHOT、生成 `target/generated/my-game`、生成协议、执行测试和业务流程。成功摘要包含 `zero-local-prototype=ok`。默认是一次本地验证，结束后关闭资源。
 
+从生成工程开始写业务：
 
-```powershell
-mvn -B -ntp -q -DskipTests install
+| 文件 | 修改内容 |
+| --- | --- |
+| `BUSINESS_GUIDE.md` | 第一个业务修改示例和运行步骤 |
+| `src/main/protocol/*.si` | 请求、响应、事件方法；不要复用已有协议 ID |
+| 手写 `XXXEventBOImp` | 业务实现；玩家/场景状态修改投递到所属 Actor |
+| `COMPONENTS.md`、`zero-scaffold.json` | 已选组件和生成清单 |
+
+选择指定模板或空白内核时，先安装，再生成：
+
+```bash
+mvn -B -ntp -DskipTests install
 java scripts/NewLocalGame.java --template runtime --components event,actor --projectName my-runtime --outputDir target/my-runtime
 mvn -q -f target/my-runtime/pom.xml clean test exec:java
 ```
 
-省略 `--components` 只安装配置和执行器。组件选择、单 Redis 和自定义 provider 见[脚手架目录](scaffold-templates.zh-CN.md)；同一业务切换数据来源见[Repository 接入指南](repository-composition-guide.zh-CN.md)。下面的命令用于生成完整游戏原型。
+省略 `--components` 得到空白 runtime；使用 `--template local` 得到玩家/场景原型。七种业务模板、外部组件和参数详见[模板目录](scaffold-templates.zh-CN.md)，完整 Runner 选项见[原型 Runner](guides/local-prototype-runner.zh-CN.md)。
 
-PowerShell：
+需要验证客户端真实发包时，运行：
+
+```bash
+mvn -q -f examples/rpg-tcp-generated/pom.xml clean test exec:java
+```
+
+TCP 示例监听本机临时端口，执行 Socket → Netty → 生成 BO → 响应后退出。
+
+当前 `local + net` 已生成 Server/客户端辅助类，但 **2026-09-18 新生成工程编译验证失败**：装配代码调用无参 `NetworkRuntime.module()`，现有 API 要求显式 policy/limiter。以下命令用于复现该限制，暂不作为开箱即用入口；真实 TCP 收发请使用上面的 `rpg-tcp-generated` 示例。
+
+```bash
+java scripts/NewLocalGame.java --template local --components net --projectName tcp-demo --packageName group.example.tcpdemo --outputDir target/tcp-demo
+mvn -q -f target/tcp-demo/pom.xml clean test
+```
+
+Server 源码定义了 `--port`、`--once` 和关闭流程，客户端类是没有独立 main 的 smoke 辅助类；这些入口在装配编译问题解决前不能由上述新工程运行。响应设计仍是请求 DTO 的最小回显。认证、TLS、心跳、限流和断线重连需应用接入，见[网络完整链路](guides/net-full-flow.zh-CN.md)及[本轮核对报告](reports/documentation-audit-20260918.zh-CN.md)。
+
+## 4. 中心—逻辑服务器
+
+完成根目录安装后，先运行无需中间件的接口调用：
+
+```bash
+mvn -q -f examples/modular-composition/center-logic/pom.xml clean test exec:java
+```
+
+示例中 `CenterRpc` 是共享接口，中心实现 `CenterService`，逻辑侧通过 `RpcClientFactory` 调用，输出 `heartbeats=1`。这是单进程示例，便于先开发业务契约。
+
+已有[共享契约、center 与 logic 三模块 Kafka 示例](../examples/modular-composition/center-logic-kafka/README.md)，可作为双进程接线起点；真实 broker 验收需另行执行，不能由本地编译通过推断。
+
+需要自行组装时，分别生成工程：
+
+```bash
+java scripts/NewLocalGame.java --template runtime --components kafka --projectName center --outputDir target/center
+java scripts/NewLocalGame.java --template runtime --components kafka --projectName logic --outputDir target/logic
+mvn -q -f target/center/pom.xml clean test exec:java
+mvn -q -f target/logic/pom.xml clean test exec:java
+```
+
+默认只诊断配置，不连接 Kafka。将共享接口和各自业务放入工程，用 `RpcServiceBinder` 绑定服务，通过 `RpcRuntime.RPC_HANDLER_REGISTRY` / `RPC_TRANSPORT` 取得所选实现。两进程使用不同的 `client-id`、`consumer-group-id` 和 `reply-topic`，请求 topic 路由保持一致。
+
+静态部署不需要 Nacos；选择 `nacos` 后仍须显式注册实例和绑定 resolver。接线细节见[RPC 设计](rpc.zh-CN.md)与 [Kafka 使用指南](../zero-rpc-kafka/USER-GUIDE.zh-CN.md)。目前远程 RPC Adapter 为 Kafka，免 broker 的轻量双进程方案在[路线图](optimization-roadmap.zh-CN.md)中。
+
+## 5. 按需接入外部基础设施
+
+以下演示全部可选 Adapter，可从 `--components` 中删去不需要的项：
+
+```bash
+java scripts/NewLocalGame.java --template runtime --components kafka,nacos,mongo,redis,postgresql --projectName services --outputDir target/services
+mvn -q -f target/services/pom.xml clean test exec:java
+```
+
+生成工程包含所选依赖、`RuntimeAssembly.java` 和 `config/application.properties.example`。把配置样例复制到自己管理的文件，填写所选服务的地址与认证信息，再指定绝对路径。例如 PowerShell：
 
 ```powershell
-java scripts/RunLocalPrototype.java `
-  --fromKeywords "rpg scene sync" `
-  --projectName my-game `
-  --packageName group.example.mygame `
-  --force
+$env:ZERO_CONFIG_FILE='D:\my-game-config\services.properties'
+mvn -q -f target/services/pom.xml exec:java '-Dexec.args=--diagnose'
+mvn -q -f target/services/pom.xml exec:java '-Dexec.args=--start'
 ```
 
-Bash：
+`runtime-diagnosis=incomplete` 表示缺配置，`ok` 表示配置和组件图有效；两者都不证明连通。`--start` 创建 Adapter、执行启动健康检查，然后关闭本次验证的资源。上述无连接的默认行为适用于 `runtime` 模板；业务模板额外选择外部 Adapter 后，需要真实配置和服务。
 
-```bash
-java scripts/RunLocalPrototype.java \
-  --fromKeywords "rpg scene sync" \
-  --projectName my-game \
-  --packageName group.example.mygame \
-  --force
-```
+配置 `zero.mode` 支持 `standalone`、`external-test`、`production`，外部模板默认 `external-test`。档位本身不会自动启用中间件。
 
-Runner 会：
+组合规则：
 
-```text
-环境检查
-  -> 安装当前 zeroServer SNAPSHOT
-  -> 按关键词选择模板
-  -> 生成 target/generated/my-game
-  -> 解析 .si 并生成协议代码
-  -> Maven test
-  -> 运行本地入口
-  -> 输出 BUSINESS_GUIDE.md 首个业务修改位置
-```
+- `kafka` 替换本地 `rpc`，`nacos` 替换本地 `discovery`；无需手工排除被替换的 provider。
+- `redis` 选择 Redis 数据来源；同时选择 `cache` 仍是本地缓存。Redis L2 需显式 codec 和 cache 配置。
+- 单数据来源默认提供 `main`；多来源按 `local`、`redis`、`mongo`、`postgresql` 命名。业务角色绑定见 [Repository 指南](guides/repository-composition-guide.zh-CN.md)。
+- 业务对象通过构造器接收 Repository、RPC 接口、Actor 或 EventBus，装配入口负责选择实现。
 
-预期最后出现类似摘要：
+手工 Maven/Java 接入、typed 配置与 provider 替换见[按需装配](guides/modular-composition-guide.zh-CN.md)。`runtime + net` 只生成网络运行时策略依赖与配置，不创建 listener；`local + net` 另生成上面的 Server 与 TcpClient 类。手工接入长驻 TCP 时显式装配 `ServerFactory.tcp`、业务 executor 与 `ZeroServerTcpApplication`，按 `start → probe → stop` 管理生命周期；`127.0.0.1:0` 仅用于本地测试，`runDemo`/smoke 输出不等于长驻网络服务或生产就绪。安全接线见[生产网络契约](reference/production-network-lifecycle-contract.zh-CN.md)。
 
-```text
-zero-local-prototype=ok|project=my-game|template=scene-sync|externalMiddleware=false|productionReady=false
-```
+## 6. 统一命令和验证
 
-生成工程的重要文件：
+POSIX 使用 `scripts/zero.sh`，PowerShell 使用 `.\scripts\zero.ps1`：
 
-| 文件 | 用途 |
+| 子命令 | 用途 |
 | --- | --- |
-| `README.md` | 运行命令和下一步入口 |
-| `BUSINESS_GUIDE.md` | 第一个协议/业务修改 recipe |
-| `COMPONENTS.md` | 当前模板组件和交互 |
-| `NEXT_STEPS.md` | 从原型走向正式实现前的风险清单 |
-| `zero-scaffold.json` | 模板、协议文件、摘要和组件 manifest |
-| `src/main/proto/*.si` | 推荐修改的协议 DSL |
+| `doctor` | 检查环境与入口 |
+| `init --fromKeywords "rpg scene sync" --projectName my-game` | 执行上面的完整原型流程 |
+| `generate --template runtime --projectName my-runtime` | 生成工程 |
+| `diagnose --projectDir DIR` | 检查工程结构；runtime 模板的组件诊断直接用 Maven `--diagnose` |
+| `test --projectDir DIR` | 测试生成工程 |
+| `run --projectDir DIR` / `stop` | 启动并记录受管进程、停止该进程；不会让一次性示例自动变成长驻服务 |
 
-## 3. 生产入口安全组合
+本地测试用 `mvn -B -ntp test`。需要验证框架改动时用 `java scripts/ZeroStage0Acceptance.java --level quick` 或 `--level full`，层级和范围见 [Stage 0 验收](operations/local-stage0-acceptance.zh-CN.md)。所有可运行示例集中在[示例索引](../examples/README.md)。
 
-生产网络不自动发现身份 provider。应用必须在 production builder 中显式组合 `SecurityChain.production(authentication, replayProtection, tlsMaterials)`；缺少 provider 时采用 fail-closed 语义。`SecurityContext` 只保存认证摘要、权限和可信来源元数据，不保存 token、密码或私钥。
+## 7. 常见问题
 
-当前安全切片提供认证、请求重放决策、TLS 材料快照边界和显式上下文传播契约，但不包含账号系统、JWT、证书供应商、WAF/DDoS、分布式限流或完整 HTTP/RPC 网关。迁移细节见 [`docs/migrations/0.1.0-p0-2-entry-security.zh-CN.md`](migrations/0.1.0-p0-2-entry-security.zh-CN.md)。
-
-
-查看全部模板：
-
-```bash
-java scripts/NewLocalGame.java --listTemplates
-```
-
-按关键词推荐：
-
-```bash
-java scripts/NewLocalGame.java --recommend "room ranking world"
-java scripts/NewLocalGame.java --recommend "aoi scene sync"
-```
-
-| 模板 | 适用场景 |
+| 问题 | 处理 |
 | --- | --- |
-| `local` | RPG、回合、卡牌、通用单进程业务原型 |
-| `room` | 房间、匹配、准备、开始、结算 |
-| `scene-sync` | 场景进入、移动、AOI/状态同步起点 |
-| `frame-sync` | 帧输入、帧序、回放和确定性逻辑起点 |
-| `npc-tick` | NPC/AI 调度、世界 tick 和预算控制起点 |
-| `ranking-season` | 排行榜、赛季切换和结算起点 |
-| `world-shard` | 开放世界分片、路由和迁移起点 |
-
-手工生成指定模板：
-
-```bash
-java scripts/NewLocalGame.java \
-  --template room \
-  --projectName my-room \
-  --packageName group.example.myroom \
-  --outputDir target/my-room \
-  --force
-```
-
-仅检查结构：
-
-```bash
-java scripts/InspectLocalScaffold.java --projectDir target/my-room
-java scripts/RunLocalScaffold.java --projectDir target/my-room --skipTests --skipRun
-```
-
-完整测试并运行：
-
-```bash
-java scripts/RunLocalScaffold.java --projectDir target/my-room
-```
-
-模板只承诺 local/prototype 闭环。要把模板抽取为正式公共模块，应先在 GitHub 创建 Design Proposal，明确公共 API、Actor 所有权、协议兼容、存储、安全、性能和验证边界。
-
-## 5. 构建仓库
-
-首次上手或日常关键路径 smoke：
-
-```bash
-java scripts/ZeroStage0Acceptance.java --level quick
-```
-
-提交前或阶段验收：
-
-```bash
-java scripts/ZeroStage0Acceptance.java --level full
-```
-
-`quick` 串联 Doctor、架构守卫、默认测试、SNAPSHOT 安装和需求驱动原型；`full` 进一步验证质量门禁、本地集成测试、Starter、六类独立示例、七类业务脚手架和五条按需生成路径。输出写入 `target/stage0-acceptance/` 与 `target/generated-composition-verify/`，不会连接外部中间件。详细映射见[阶段 0 开箱即用验收](local-stage0-acceptance.zh-CN.md)。
-
-各层也可以独立运行。
-
-默认测试：
-
-```bash
-mvn -B -ntp test
-```
-
-质量门禁：
-
-```bash
-mvn -B -ntp -Pquality verify
-```
-
-该 profile 执行：
-
-- Surefire 单元测试。
-- JaCoCo 报告。
-- Checkstyle。
-- PMD。
-- SpotBugs。
-
-不依赖真实外部组件的集成测试：
-
-```bash
-mvn -B -ntp -Pintegration-tests verify
-```
-
-外部测试不会默认执行。只有准备好 Kafka、MongoDB、Redis、PostgreSQL 和 Nacos 安全配置后才运行：
-
-```bash
-mvn -B -ntp -Pexternal-tests verify
-```
-
-## 6. 运行 Starter 完整本地 Demo
-
-```bash
-mvn -B -ntp -DskipTests install
-mvn -B -ntp -pl zero-server-starter -DskipTests \
-  -Dexec.mainClass=group.zn.zero.starter.ZeroServerFullLocalDemoStart \
-  exec:java
-```
-
-PowerShell 建议把带点号的 `-D` 参数放在引号中：
-
-```powershell
-mvn -B -ntp -pl zero-server-starter -DskipTests `
-  "-Dexec.mainClass=group.zn.zero.starter.ZeroServerFullLocalDemoStart" `
-  exec:java
-```
-
-该 Demo 在单进程内组合生命周期、协议 Frame、Netty TCP、事件、Actor、本地 RPC、Cache、Repository、日志和指标。它不会自动启用真实 Adapter。
-
-## 7. 运行独立示例
-
-先安装当前 SNAPSHOT：
-
-```bash
-mvn -B -ntp -DskipTests install
-```
-
-### RPG 最小闭环
-
-```bash
-mvn -B -ntp -f examples/rpg-minimal/pom.xml test
-mvn -B -ntp -f examples/rpg-minimal/pom.xml exec:java
-mvn -B -ntp -f examples/rpg-minimal/pom.xml \
-  -Dexec.mainClass=group.zn.zero.examples.rpg.RpgProtocolApplication \
-  exec:java
-```
-
-覆盖登录、玩家加载、场景进入、移动、Repository/Cache、GM 查询和协议生成。
-
-### 真实 TCP generated dispatcher
-
-```bash
-mvn -B -ntp -f examples/rpg-tcp-generated/pom.xml test
-mvn -B -ntp -f examples/rpg-tcp-generated/pom.xml exec:java
-```
-
-覆盖 `.si` → DTO/Codec/BO/Dispatcher → Netty TCP Frame → Actor → 响应。
-
-### CSV 配置热重载
-
-```bash
-mvn -B -ntp -f examples/config-hot-reload-local/pom.xml test
-mvn -B -ntp -f examples/config-hot-reload-local/pom.xml exec:java
-```
-
-示例先发布 v1，合法候选原子替换为 v2，再拒绝重复 key 的候选并保持 v2。
-
-### 受管定时任务
-
-```bash
-mvn -B -ntp -f examples/managed-scheduler-local/pom.xml test exec:java
-```
-
-覆盖 once、fixed-delay、fixed-rate 跳过、失败终止/继续、Actor dispatch、远程 IO、取消、日志和指标。
-
-### 可观测性安全门
-
-```bash
-mvn -B -ntp -f examples/observability-local/pom.xml test
-mvn -B -ntp -f examples/observability-local/pom.xml exec:java
-```
-
-覆盖业务、错误、审计、性能、安全日志，以及敏感 token 字段和高基数 `traceId` 指标标签的拒绝路径。
-
-## 8. 从协议开始开发
-
-推荐流程：
-
-1. 在生成工程中打开 `src/main/proto/*.si`。
-2. 新增请求/响应或事件方法。
-3. 运行 Maven generate/package，让 codegen 生成 DTO、Codec、EventBO 和 Dispatcher。
-4. 在手写 `XXXEventBOImp` 中实现业务。
-5. 把玩家/场景状态修改投递到所属 Actor lane。
-6. 远程 IO 使用异步接口，完成后把结果投回 Actor。
-7. 为成功、失败、超时、重复和越界路径补测试。
-
-协议 ID、字段顺序、nullable 和集合线格式是兼容契约。不要随意重排或复用协议 ID。详细规则见[协议 DSL](protocol-dsl.zh-CN.md)。
-
-## 9. local 与 production
-
-### local
-
-`LocalRuntime.create()` 提供无 Docker 全量默认装配。精简工程使用 `RuntimeBasics.builder().install(...)`，按组件集成入口的 typed key 显式注册并选择 provider；例如 `ActorRuntime.ACTOR_SCHEDULER`。引入真实 Adapter 依赖不会自动改变行为。组件依赖、替换、生命周期和迁移示例见[按需装配指南](modular-composition-guide.zh-CN.md)。
-
-适合：
-
-- 本地开发和单元/集成测试。
-- 游戏玩法原型。
-- 单进程小规模服务的业务验证。
-
-### production/external-test
-
-显式引入 `zero-server-starter-production` 并选择 profile：
-
-```properties
-zero.mode=production
-zero.adapter.rpc.kafka.enabled=false
-zero.adapter.data.mongo.enabled=false
-zero.adapter.data.redis.enabled=false
-zero.adapter.cache.redis.enabled=false
-zero.adapter.data.postgresql.enabled=false
-zero.discovery.mode=local
-```
-
-启用 Adapter 后对应配置成为必填；创建、启动、健康或预算失败时 fail-fast，并逆序关闭已创建资源。不会静默 fallback 到本地实现。
-
-凭据应通过环境变量或密钥管理系统注入，不写入仓库。完整配置见[Production Adapter fail-fast 契约](production-adapter-failfast-contract.zh-CN.md)。
-
-## 10. 性能基准
-
-构建 JMH 叶子模块：
-
-```bash
-mvn -B -ntp -Pbenchmarks -pl :zero-benchmarks -am -DskipTests package
-java -jar zero-benchmarks/target/benchmarks.jar
-```
-
-默认 Reactor 和普通质量门禁不运行 JMH，也不设置性能阈值。协议对比、JMH 参数、结果与复现命令见[性能设计与基准](performance.zh-CN.md)。
-
-## 11. 常见问题
-
-### Maven 提示 Java 版本不满足
-
-`java -version` 和 `mvn -version` 可能指向不同 JDK。检查 Maven 输出的 `Java home`，将 `JAVA_HOME` 和 PATH 同时切到 JDK 21。
-
-### 独立示例找不到 zeroServer SNAPSHOT
-
-示例不加入根 Reactor。先在根目录执行：
-
-```bash
-mvn -B -ntp -DskipTests install
-```
-
-### 生成目录已存在
-
-更换 `--projectName`/`--outputDir`，或在确认目录可以覆盖后使用 `--force`。生成物默认位于 `target/`，不要把真实项目源码长期放在临时目录。
-
-### 为什么默认不启动 Kafka/数据库
-
-本地原型应该快速、确定且低依赖；外部服务还涉及凭据、端口、数据和清理。zeroServer 将真实 Adapter 设为显式 opt-in，避免仅添加依赖就产生连接副作用。
-
-### 可以直接上线吗
-
-不能把当前 SNAPSHOT 直接视为生产发行版。上线前需要独立完成安全网关、真实鉴权、GM 权限与审批、生产日志/监控、容量/长稳、故障恢复、备份和运维流程。检查 README 的“生产使用注意事项”和[能力矩阵](capability-matrix.zh-CN.md)。
-
-## 12. 下一步
-
-- 理解架构：[总体架构](architecture.zh-CN.md)、[模块图](module-map.md)。
-- 验收本地闭环：[阶段 0 开箱即用验收](local-stage0-acceptance.zh-CN.md)。
-- 写业务：[事件模型](event-model.zh-CN.md)、[线程模型](threading-model.zh-CN.md)、[协议 DSL](protocol-dsl.zh-CN.md)。
-- 接数据：[数据与缓存](data-cache.zh-CN.md)。
-- 做跨服：[RPC](rpc.zh-CN.md)、[Production Adapter](production-adapter-failfast-contract.zh-CN.md)。
-- 做运维：[日志与可观测性](logging-observability.zh-CN.md)、[GM](gm-admin.zh-CN.md)。
-- 看性能：[性能设计与基准](performance.zh-CN.md)。
+| Java 版本不满足 | 同时检查 `java -version` 和 `mvn -version`，修正 `JAVA_HOME` 与 PATH |
+| 示例找不到 SNAPSHOT | 在根目录执行 `mvn -B -ntp -DskipTests install` |
+| 生成目录已存在 | 新建工程使用新目录；升级先用 `--plan`/`--diff`，确认后 `--apply`；`--force` 不绕过 ownership 冲突。长期业务源码应移出 `target/` |
+| Adapter 配置不完整 | 根据生成的配置样例和 `missingConfigKeys` 补齐后再次诊断 |
+| 想部署正式服务 | 按[能力矩阵](capability-matrix.zh-CN.md)核对安全、恢复、持久化和容量缺口，再参考[部署基线](operations/deployment-baseline.zh-CN.md) |
+
+后续查阅从[文档总览](README.md)进入；已有项目升级参见[迁移说明](migrations/README.md)。

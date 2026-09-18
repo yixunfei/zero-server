@@ -45,7 +45,7 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Collect repository and local acceptance evidence
-        run: java scripts/ZeroAcceptanceEvidence.java --level quick --no-stage0
+        run: java scripts/ZeroAcceptanceEvidence.java --level full
       - name: Upload acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -113,9 +113,9 @@ jobs:
       - name: Run architecture guard
         run: java scripts/ZeroArchitectureGuard.java
       - name: Verify framework gap ledger
-        run: java scripts/ZeroFrameworkGapLedger.java --allow-missing-evidence
+        run: java scripts/ZeroFrameworkGapLedger.java
       - name: Verify release readiness materials
-        run: java scripts/ZeroReleaseHardeningReadiness.java --allow-missing-evidence
+        run: java scripts/ZeroReleaseHardeningReadiness.java
 
   stage0:
     name: Full local framework acceptance

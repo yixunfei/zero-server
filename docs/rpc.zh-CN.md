@@ -174,5 +174,10 @@ consumer 侧默认调用路径仍由 `RpcClientFactory`、`RpcRoute` 和具体 t
 - common 接口本地闭环已按 `接口代理 -> ProtocolCodec 编码 -> RpcRequest -> 远端实现 -> RpcResponse -> ProtocolCodec 解码` 形态落地。
 - `InMemoryRpcTransport` 支持 request/response 和 oneway，并在本地链路里校验 `timeoutAt`、`correlationId` 和 `traceId`。
 - `zero-rpc-kafka` 当前提供 `KafkaRpcAdapter`、`KafkaRpcSettings`、`KafkaRpcEnvelopeCodec`、`KafkaRpcTopicResolver`、`KafkaRpcPendingRequests` 和内部 `KafkaRpcTimeoutWheel`，已接入 Apache Kafka producer/consumer gateway，并支持默认单元测试使用内存 gateway 验证；Kafka adapter 已发出 RPC 观测事件并暴露 pending、发送、拒绝和 consumer 重启计数快照。
-- `docs/rpc-pending-performance-evidence.zh-CN.md` 与 `scripts/ZeroRpcPendingBenchmarkReadiness.java` 已整理 pending 注册/完成、并发容量、时间轮误差、observer、fail-all 和发送失败的 benchmark 前置口径；该入口不启动时间轮、不连接 Kafka，也不证明生产容量。
+- `docs/operations/evidence/rpc-pending-performance-evidence.zh-CN.md` 已整理 pending 注册/完成、并发容量、时间轮误差、observer、fail-all 和发送失败的 benchmark 前置口径；该入口不启动时间轮、不连接 Kafka，也不证明生产容量。
 - 当前 `replyTopic`、`serviceName`、`methodName`、`traceId`、`timeoutAt`、`topic`、`group` 和 `partitionKey` 已进入 RPC/Kafka 路由链路；RPC discovery 模型只描述服务发现实例 metadata 和显式选择结果，不改变 RPC/Kafka envelope 和 transport 请求语义。Kafka/Nacos 多 JVM external-test 已覆盖远程 Actor caller JVM 通过 Nacos 解析 Kafka route 后向 provider JVM 投递 Actor 消息的最小闭环。
+
+
+## 2026-09-17 报告核实修订
+
+同步客户端从调用入口计算一次超时预算，构造请求的 deadline 与本地剩余等待共用该预算；无法抢占同步阻塞的第三方 SPI。Kafka envelope 拒绝尾随字节及超出剩余载荷的声明长度，时间轮在取得桶锁后重验 tick，避免任务落入刚扫描完的桶。

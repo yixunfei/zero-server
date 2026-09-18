@@ -65,8 +65,18 @@ public final class ScaffoldComponents {
             if (id.equals("discovery")) {
                 return java.util.stream.Stream.of(MavenCoordinate.zero("zero-runtime-discovery"));
             }
+            if (id.equals("net")) {
+                return java.util.stream.Stream.of(
+                        MavenCoordinate.zero("zero-server-starter"),
+                        MavenCoordinate.zero("zero-runtime-net"));
+            }
             return providers(id).stream().flatMap(provider -> provider.artifacts().stream());
-        }).distinct().sorted().toList();
+        }).flatMap(coordinate -> java.util.stream.Stream.concat(
+                java.util.stream.Stream.of(coordinate),
+                coordinate.artifactId().equals("zero-runtime-net")
+                        ? java.util.stream.Stream.of(MavenCoordinate.zero("zero-net"))
+                        : java.util.stream.Stream.empty()))
+                .distinct().sorted().toList();
         List<String> providerIds = new ArrayList<>(ids.stream().flatMap(id -> providers(id).stream())
                 .map(provider -> provider.providerId().value()).distinct().sorted().toList());
         if (ids.contains("custom-actor")) {
@@ -147,6 +157,7 @@ public final class ScaffoldComponents {
         add(specs, "mongo", "mongo.MongoRuntime", StandardRuntimeCapabilityModel.PRODUCTION_MONGO_DATA);
         add(specs, "postgresql", "postgresql.PostgresqlRuntime", StandardRuntimeCapabilityModel.PRODUCTION_POSTGRESQL_DATA);
         add(specs, "custom-actor", "");
+        add(specs, "net", "net.NetworkRuntime", StandardRuntimeCapabilityModel.PRODUCTION_NETWORK_LIFECYCLE);
         return java.util.Collections.unmodifiableMap(specs);
     }
 

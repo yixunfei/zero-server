@@ -138,7 +138,10 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
     @Override
     public CompletionStage<Void> invalidate(final K key) {
         Objects.requireNonNull(key, "key");
-        entries.remove(key);
+        entries.compute(key, (ignored, previous) -> {
+            loading.remove(key);
+            return null;
+        });
         invalidateCount.incrementAndGet();
         return CompletableFuture.completedFuture(null);
     }
@@ -158,31 +161,30 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
             return CompletableFuture.completedFuture(entry.optionalValue());
         }
         missCount.incrementAndGet();
-        CompletableFuture<Optional<V>> future = loading.computeIfAbsent(Objects.requireNonNull(key, "key"), ignored -> {
-            CompletableFuture<Optional<V>> loadFuture = new CompletableFuture<>();
-            try {
-                loader.load(key).whenComplete((loaded, throwable) -> {
-                    try {
-                        if (throwable != null) {
-                            completeLoadFailure(loadFuture, key, throwable);
-                            return;
-                        }
-                        Optional<V> value = Objects.requireNonNull(loaded, "loaded");
-                        storeLoadedValue(key, value);
-                        loadCount.incrementAndGet();
-                        loadFuture.complete(value);
-                    } catch (RuntimeException ex) {
-                        completeLoadFailure(loadFuture, key, ex);
-                    } finally {
-                        loading.remove(key);
+        CompletableFuture<Optional<V>> future = new CompletableFuture<>();
+        CompletableFuture<Optional<V>> existing = loading.putIfAbsent(key, future);
+        if (existing != null) {
+            return existing;
+        }
+        try {
+            loader.load(key).whenComplete((loaded, throwable) -> {
+                try {
+                    if (throwable != null) {
+                        completeLoadFailure(future, key, throwable);
+                        return;
                     }
-                });
-            } catch (RuntimeException ex) {
-                completeLoadFailure(loadFuture, key, ex);
-                loading.remove(key);
-            }
-            return loadFuture;
-        });
+                    Optional<V> value = Objects.requireNonNull(loaded, "loaded");
+                    storeLoadedValue(key, value, future);
+                    loadCount.incrementAndGet();
+                    loading.remove(key, future);
+                    future.complete(value);
+                } catch (RuntimeException ex) {
+                    completeLoadFailure(future, key, ex);
+                }
+            });
+        } catch (RuntimeException ex) {
+            completeLoadFailure(future, key, ex);
+        }
         return future;
     }
 
@@ -242,11 +244,11 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
     public CompletionStage<Void> putVersioned(final K key, final V value, final long version) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(value, "value");
-        entries.compute(key, (ignored, previous) -> new CacheEntry<>(
-                value,
-                version < 0L ? nextVersion(previous) : version,
-                Instant.now().plus(effectiveTtl(policy.ttl())),
-                false));
+        entries.compute(key, (ignored, previous) -> {
+            loading.remove(key);
+            return new CacheEntry<>(value, version < 0L ? nextVersion(previous) : version,
+                    Instant.now().plus(effectiveTtl(policy.ttl())), false);
+        });
         evictIfNeeded();
         putCount.incrementAndGet();
         return CompletableFuture.completedFuture(null);
@@ -260,11 +262,11 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
      */
     public CompletionStage<Void> putNegative(final K key) {
         Objects.requireNonNull(key, "key");
-        entries.compute(key, (ignored, previous) -> new CacheEntry<>(
-                null,
-                nextVersion(previous),
-                Instant.now().plus(effectiveTtl(policy.negativeTtl())),
-                true));
+        entries.compute(key, (ignored, previous) -> {
+            loading.remove(key);
+            return new CacheEntry<>(null, nextVersion(previous),
+                    Instant.now().plus(effectiveTtl(policy.negativeTtl())), true);
+        });
         evictIfNeeded();
         putCount.incrementAndGet();
         return CompletableFuture.completedFuture(null);
@@ -278,7 +280,12 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
      * @return 写入完成信号；不可为空；线程安全。
      */
     public CompletionStage<Void> putEntry(final K key, final CacheEntry<V> entry) {
-        entries.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(entry, "entry"));
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(entry, "entry");
+        entries.compute(key, (ignored, previous) -> {
+            loading.remove(key);
+            return entry;
+        });
         evictIfNeeded();
         putCount.incrementAndGet();
         return CompletableFuture.completedFuture(null);
@@ -297,8 +304,13 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
         return entry;
     }
 
-    private void storeLoadedValue(final K key, final Optional<V> value) {
-        entries.compute(key, (ignored, previous) -> value
+    private void storeLoadedValue(final K key, final Optional<V> value,
+            final CompletableFuture<Optional<V>> owner) {
+        entries.compute(key, (ignored, previous) -> {
+            if (loading.get(key) != owner || previous != null && !previous.expired(Instant.now())) {
+                return previous;
+            }
+            return value
                 .map(current -> new CacheEntry<>(
                         current,
                         previous == null ? 1L : previous.version() + 1L,
@@ -308,11 +320,31 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
                         null,
                         previous == null ? 1L : previous.version() + 1L,
                         Instant.now().plus(effectiveTtl(policy.negativeTtl())),
-                        true)));
+                        true));
+        });
         evictIfNeeded();
     }
 
+    /**
+     * 原子合并分层缓存回填，旧版本不得覆盖较新版本。调用方可并发使用。
+     * @param key 缓存键；不可为空。
+     * @param candidate 带原始有效期的候选条目；不可为空。
+     * @return 合并后条目；不可为空；不可变。
+     */
+    CacheEntry<V> mergeEntry(final K key, final CacheEntry<V> candidate) {
+        CacheEntry<V> selected = entries.compute(key, (ignored, previous) -> {
+            if (previous != null && !previous.expired(Instant.now()) && previous.version() >= candidate.version()) {
+                return previous;
+            }
+            loading.remove(key);
+            return candidate;
+        });
+        evictIfNeeded();
+        return selected;
+    }
+
     private void completeLoadFailure(final CompletableFuture<Optional<V>> loadFuture, final K key, final Throwable throwable) {
+        loading.remove(key, loadFuture);
         loadFailureCount.incrementAndGet();
         loadFuture.completeExceptionally(ZeroException.of(
                 CacheErrorCode.LOADER_FAILED,

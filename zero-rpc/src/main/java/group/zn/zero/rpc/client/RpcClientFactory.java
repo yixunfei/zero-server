@@ -287,29 +287,32 @@ public final class RpcClientFactory {
                         "method is not an rpc method: " + method.getName(),
                         null);
             }
-            CompletionStage<RpcResult<Object>> stage = invokeRemote(binding, args);
+            long timeoutMillis = RpcCallContext.current().resolveTimeoutMillis(options, binding.descriptor().timeoutMillis());
+            long startedAt = System.nanoTime();
+            Instant timeoutAt = Instant.now().plusMillis(timeoutMillis);
+            CompletionStage<RpcResult<Object>> stage = invokeRemote(binding, args, timeoutAt);
             if (binding.descriptor().asyncReturn()) {
                 return stage;
             }
-            return waitResult(binding.descriptor(), stage);
+            return waitResult(binding.descriptor(), stage, startedAt, TimeUnit.MILLISECONDS.toNanos(timeoutMillis));
         }
 
         private CompletionStage<RpcResult<Object>> invokeRemote(
                 final MethodBinding binding,
-                final Object[] args) {
+                final Object[] args,
+                final Instant timeoutAt) {
             RpcMethodDescriptor descriptor = binding.descriptor();
             RpcCallContext context = RpcCallContext.current();
             String correlationId = correlationIdGenerator.nextCorrelationId();
             String replyTopic = context.resolveReplyTopic(options);
             String traceId = context.resolveTraceId(options);
-            long timeoutMillis = context.resolveTimeoutMillis(options, descriptor.timeoutMillis());
             RpcRequest request = new RpcRequest(
                     correlationId,
                     replyTopic,
                     descriptor.routeServiceName(),
                     descriptor.routeMethodName(),
                     traceId,
-                    Instant.now().plusMillis(timeoutMillis),
+                    timeoutAt,
                     descriptor.transportMode(),
                     descriptor.topic(),
                     descriptor.group(),
@@ -336,10 +339,13 @@ public final class RpcClientFactory {
         }
         private Object waitResult(
                 final RpcMethodDescriptor descriptor,
-                final CompletionStage<RpcResult<Object>> stage) {
+                final CompletionStage<RpcResult<Object>> stage,
+                final long startedAt,
+                final long timeoutNanos) {
             try {
-                long timeoutMillis = RpcCallContext.current().resolveTimeoutMillis(options, descriptor.timeoutMillis());
-                return stage.toCompletableFuture().get(timeoutMillis, TimeUnit.MILLISECONDS);
+                long remaining = timeoutNanos - (System.nanoTime() - startedAt);
+                if (remaining <= 0) return RpcResult.failure(RpcErrorCode.REQUEST_TIMEOUT, "rpc invocation timed out");
+                return stage.toCompletableFuture().get(remaining, TimeUnit.NANOSECONDS);
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
                 return RpcResult.failure(RpcErrorCode.REQUEST_TIMEOUT, "rpc invocation interrupted");

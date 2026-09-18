@@ -112,40 +112,38 @@ public final class LocalActorScheduler implements ActorScheduler {
     }
 
     private void drain(final LaneKey laneKey) {
-        while (true) {
-            Envelope envelope;
-            synchronized (this) {
-                LaneQueue laneQueue = lanes.get(laneKey);
-                if (laneQueue == null) {
-                    return;
-                }
-                envelope = laneQueue.messages().poll();
-                if (envelope == null) {
-                    laneQueue.running(false);
-                    lanes.remove(laneKey);
-                    return;
-                }
+        Envelope envelope;
+        synchronized (this) {
+            LaneQueue laneQueue = lanes.get(laneKey);
+            if (laneQueue == null) {
+                return;
             }
-            handle(envelope);
+            envelope = laneQueue.messages().poll();
+            if (envelope == null) {
+                laneQueue.running(false);
+                lanes.remove(laneKey);
+                return;
+            }
         }
+        handle(envelope, laneKey);
     }
 
-    private void handle(final Envelope envelope) {
+    private void handle(final Envelope envelope, final LaneKey laneKey) {
         ActorMessage message = envelope.message();
         try {
-            CompletionStage<Void> stage = envelope.handler().handle(ActorContext.from(message), message);
-            Objects.requireNonNull(stage, "actor handler result")
-                    .whenComplete((ignored, ex) -> {
-                        if (ex == null) {
-                            envelope.completion().complete(null);
-                        } else {
-                            envelope.completion().completeExceptionally(asZeroException(ex));
-                        }
-                    })
-                    .toCompletableFuture()
-                    .join();
+            CompletionStage<Void> stage = Objects.requireNonNull(
+                    envelope.handler().handle(ActorContext.from(message), message), "actor handler result");
+            stage.whenComplete((ignored, ex) -> {
+                if (ex == null) {
+                    envelope.completion().complete(null);
+                } else {
+                    envelope.completion().completeExceptionally(asZeroException(ex));
+                }
+                drain(laneKey);
+            });
         } catch (RuntimeException | Error ex) {
             envelope.completion().completeExceptionally(asZeroException(ex));
+            drain(laneKey);
         }
     }
 

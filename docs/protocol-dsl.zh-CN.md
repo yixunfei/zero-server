@@ -258,3 +258,8 @@ zero-codegen/src/test/resources/protocol-dsl/sample/
 - CLI 与 Swing GUI 共用 `ProtocolCodegenRunner`，避免服务端、客户端和工具链入口出现重复生成逻辑。
 - `zero-codegen` Maven `package` 阶段会附加 `zero-codegen-<version>-all.jar`，可通过 `--gui` 启动图形工具，也可通过 `jpackage` 包装为平台可执行文件。
 - 面向客户端和活动策划的完整用户指南位于 `zero-codegen/docs/user-guide.zh-CN.md`。
+
+
+## 2026-09-17 报告核实修订
+
+Java 包名覆盖须为合法 Java 21 限定标识符，Java DTO 后缀须能组成合法标识符；非法路径输入在生成前拒绝，包目录解析后须位于配置输出根内。二进制数组和集合声明长度在分配前按剩余载荷检查；自定义集合元素读取器须至少消费 1 字节（空对象也需携带对象长度）。有效线格式不变。

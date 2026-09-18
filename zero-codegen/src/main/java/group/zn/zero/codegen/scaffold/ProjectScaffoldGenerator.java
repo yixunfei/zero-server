@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -43,20 +45,25 @@ public final class ProjectScaffoldGenerator {
         }
         String applicationClass = ScaffoldJavaNames.applicationClass(current.projectName());
         String testClass = applicationClass + "Test";
+        String serverClass = applicationClass + "Server";
+        String clientClass = applicationClass + "TcpClient";
         String packagePath = current.packageName().replace('.', '/');
         var selection = new ScaffoldComponents(capabilityModel).resolve(current.template().capabilityIds(), current.components());
-        Map<String, String> values = placeholders(current, applicationClass, testClass, packagePath, selection);
-        List<FileMapping> mappings = mappings(current.template(), applicationClass, testClass, packagePath);
+        Map<String, String> values = placeholders(current, applicationClass, testClass, serverClass, clientClass, packagePath, selection);
+        List<FileMapping> mappings = mappings(current.template(), applicationClass, testClass, serverClass, clientClass,
+                packagePath, sourceRoot, selection);
         Files.createDirectories(target);
         for (FileMapping mapping : mappings) {
             render(sourceRoot, target, mapping, values);
         }
         var assembly = new ScaffoldAssemblyRenderer();
-        Files.writeString(target.resolve("src/main/java/" + packagePath + "/RuntimeAssembly.java"),
-                assembly.render(current, selection), StandardCharsets.UTF_8);
-        Files.createDirectories(target.resolve("config"));
-        Files.writeString(target.resolve("config/application.properties.example"),
-                assembly.configExample(current, selection), StandardCharsets.UTF_8);
+        String assemblyOutput = "src/main/java/" + packagePath + "/RuntimeAssembly.java";
+        String configOutput = "config/application.properties.example";
+        String assemblyContent = assembly.render(current, selection);
+        String configContent = assembly.configExample(current, selection);
+        write(target, assemblyOutput, assemblyContent);
+        write(target, configOutput, configContent);
+        writeOwnershipManifest(target, mappings, assemblyOutput, configOutput, current, values);
         return new ProjectScaffoldResult(target, current.template().id(), current.projectName(), mappings.size() + 2);
     }
 
@@ -64,6 +71,8 @@ public final class ProjectScaffoldGenerator {
             final ProjectScaffoldRequest request,
             final String applicationClass,
             final String testClass,
+            final String serverClass,
+            final String clientClass,
             final String packagePath,
             final ScaffoldComponents.Selection selection) {
         ScaffoldTemplate template = request.template();
@@ -72,6 +81,8 @@ public final class ProjectScaffoldGenerator {
         values.put("__PACKAGE__", request.packageName());
         values.put("__PACKAGE_PATH__", packagePath);
         values.put("__APP_CLASS__", applicationClass);
+        values.put("__SERVER_CLASS__", serverClass);
+        values.put("__CLIENT_CLASS__", clientClass);
         values.put("__TEST_CLASS__", testClass);
         values.put("__ZERO_VERSION__", request.zeroVersion());
         values.put("__TEMPLATE_NAME__", template.id());
@@ -144,7 +155,11 @@ public final class ProjectScaffoldGenerator {
             final ScaffoldTemplate template,
             final String applicationClass,
             final String testClass,
-            final String packagePath) {
+            final String serverClass,
+            final String clientClass,
+            final String packagePath,
+            final Path sourceRoot,
+            final ScaffoldComponents.Selection selection) {
         List<FileMapping> result = new ArrayList<>(List.of(
                 new FileMapping("pom.xml.tpl", "pom.xml"),
                 new FileMapping("Application.java.tpl",
@@ -156,11 +171,31 @@ public final class ProjectScaffoldGenerator {
                 new FileMapping("COMPONENTS.md.tpl", "COMPONENTS.md"),
                 new FileMapping("NEXT_STEPS.md.tpl", "NEXT_STEPS.md"),
                 new FileMapping("zero-scaffold.json.tpl", "zero-scaffold.json")));
+        if ("local".equals(template.id())) {
+            addIfPresent(result, sourceRoot, "LocalGameBO.java.tpl", "src/main/java/" + packagePath + "/LocalGameBO.java");
+            addIfPresent(result, sourceRoot, "LocalGameObservation.java.tpl", "src/main/java/" + packagePath + "/LocalGameObservation.java");
+            addIfPresent(result, sourceRoot, "LocalGameFixture.java.tpl", "src/main/java/" + packagePath + "/LocalGameFixture.java");
+            addIfPresent(result, sourceRoot, "LocalGameFlow.java.tpl", "src/main/java/" + packagePath + "/LocalGameFlow.java");
+            addIfPresent(result, sourceRoot, "LocalGameAsyncTest.java.tpl", "src/test/java/" + packagePath + "/LocalGameAsyncTest.java");
+            if (selection.components().contains("net")) {
+                addIfPresent(result, sourceRoot, "LocalGameServer.java.tpl",
+                        "src/main/java/" + packagePath + '/' + serverClass + ".java");
+                addIfPresent(result, sourceRoot, "LocalGameTcpClient.java.tpl",
+                        "src/main/java/" + packagePath + '/' + clientClass + ".java");
+            }
+        }
         if (template.generatesProtocol()) {
             result.add(new FileMapping(template.protocolTemplate(), template.protocolOutput()));
             result.add(new FileMapping("protoId.txt.tpl", "src/main/protocol/protoId.txt"));
         }
         return List.copyOf(result);
+    }
+
+    private void addIfPresent(final List<FileMapping> mappings, final Path sourceRoot,
+            final String template, final String output) {
+        if (Files.isRegularFile(sourceRoot.resolve(template))) {
+            mappings.add(new FileMapping(template, output));
+        }
     }
 
     private void render(
@@ -177,8 +212,63 @@ public final class ProjectScaffoldGenerator {
         for (Map.Entry<String, String> entry : values.entrySet()) {
             content = content.replace(entry.getKey(), entry.getValue());
         }
+        write(targetRoot, mapping.output(), content);
+    }
+
+    private void write(final Path targetRoot, final String relativePath, final String content) throws IOException {
+        Path output = targetRoot.resolve(relativePath).normalize();
+        if (!output.startsWith(targetRoot)) {
+            throw new IllegalStateException("scaffold output escapes its root");
+        }
         Files.createDirectories(Objects.requireNonNull(output.getParent(), "output.parent"));
         Files.writeString(output, content, StandardCharsets.UTF_8);
+    }
+
+    private void writeOwnershipManifest(
+            final Path target,
+            final List<FileMapping> mappings,
+            final String assemblyOutput,
+            final String configOutput,
+            final ProjectScaffoldRequest request,
+            final Map<String, String> values) throws IOException {
+        List<OwnedFile> files = new ArrayList<>();
+        for (FileMapping mapping : mappings) {
+            if (!mapping.output().equals("zero-scaffold.json")) {
+                files.add(new OwnedFile(mapping.output(), "generated", mapping.template(), sha256(target.resolve(mapping.output()))));
+            }
+        }
+        files.add(new OwnedFile(assemblyOutput, "generated", "<runtime-assembly>", sha256(target.resolve(assemblyOutput))));
+        files.add(new OwnedFile(configOutput, "generated", "<configuration>", sha256(target.resolve(configOutput))));
+        files.add(new OwnedFile("zero-scaffold.json", "generated", "zero-scaffold.json.tpl", ""));
+        files.sort(java.util.Comparator.comparing(OwnedFile::path));
+        StringBuilder rendered = new StringBuilder();
+        for (OwnedFile file : files) {
+            if (rendered.length() > 0) rendered.append(",\n");
+            rendered.append("    {\"path\": ").append(jsonString(file.path()))
+                    .append(", \"owner\": ").append(jsonString(file.owner()))
+                    .append(", \"template\": ").append(jsonString(file.template()))
+                    .append(", \"sha256\": ").append(jsonString(file.sha256())).append("}");
+        }
+        values.put("__OWNERSHIP_FILES__", rendered.toString());
+        String manifest = Files.readString(
+                request.templateRoot().resolve(request.template().directory()).resolve("zero-scaffold.json.tpl"),
+                StandardCharsets.UTF_8);
+        for (Map.Entry<String, String> entry : values.entrySet()) manifest = manifest.replace(entry.getKey(), entry.getValue());
+        write(target, "zero-scaffold.json", manifest);
+    }
+
+    private String sha256(final Path file) throws IOException {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file));
+            StringBuilder result = new StringBuilder();
+            for (byte value : digest) result.append(String.format(Locale.ROOT, "%02x", value));
+            return result.toString();
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
+    }
+
+    private record OwnedFile(String path, String owner, String template, String sha256) {
     }
 
     private boolean hasAnyChild(final Path path) throws IOException {

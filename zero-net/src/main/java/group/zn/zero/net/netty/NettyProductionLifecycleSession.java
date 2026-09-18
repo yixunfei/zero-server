@@ -122,6 +122,16 @@ final class NettyProductionLifecycleSession {
                 NetworkRateLimitScope.NONE,
                 null,
                 0L);
+        if (lifecycle.config().tlsRequired()
+                && !connection.attributes().get(ProductionNetworkConnectionAttributes.TLS_ESTABLISHED).orElse(false)) {
+            reject(
+                    ConnectionLifecycleEventType.CONNECTION_REJECTED,
+                    NetErrorCode.UNAUTHENTICATED,
+                    ConnectionRejectionReason.UNAUTHENTICATED,
+                    NetworkRateLimitScope.CONNECTION,
+                    null);
+            return;
+        }
         boolean allowed;
         try {
             allowed = lifecycle.rateLimiter().allowConnection(connection);
@@ -469,6 +479,15 @@ final class NettyProductionLifecycleSession {
                         null);
                 return false;
             }
+            if (pendingSecurityChecks + inboundInFlight >= lifecycle.config().maxInboundFrames()) {
+                reject(
+                        ConnectionLifecycleEventType.INBOUND_OVERFLOW,
+                        NetErrorCode.INBOUND_OVERFLOW,
+                        ConnectionRejectionReason.INBOUND_OVERFLOW,
+                        NetworkRateLimitScope.FRAME,
+                        null);
+                return false;
+            }
             CompletionStage<ReplayProtection.ReplayDecision> replayStage =
                     securityPolicy.checkReplayAsync(frame, securityContext);
             pendingSecurityChecks++;
@@ -532,7 +551,7 @@ final class NettyProductionLifecycleSession {
                     null);
             return false;
         }
-        if (inboundInFlight >= lifecycle.config().maxInboundFrames()) {
+        if (inboundInFlight + pendingSecurityChecks >= lifecycle.config().maxInboundFrames()) {
             reject(
                     ConnectionLifecycleEventType.INBOUND_OVERFLOW,
                     NetErrorCode.INBOUND_OVERFLOW,

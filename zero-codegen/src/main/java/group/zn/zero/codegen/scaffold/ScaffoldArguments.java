@@ -7,7 +7,10 @@ import java.util.Set;
 
 /** Canonical option parsing shared by generation and catalog commands. */
 final class ScaffoldArguments {
-    private static final Set<String> FLAGS = Set.of("--help", "--force", "--listtemplates");
+    private static final Set<String> FLAGS = Set.of("--help", "--force", "--listtemplates", "--plan", "--diff",
+            "--apply", "--abort", "--rollback", "--migrate");
+    private static final Set<String> OPERATIONS = Set.of(
+            "--plan", "--diff", "--apply", "--abort", "--rollback", "--migrate");
     private static final Set<String> VALUES = Set.of("--projectname", "--packagename", "--outputdir",
             "--zeroversion", "--template", "--components", "--fromkeywords", "--templateroot",
             "--recommend", "--describetemplate");
@@ -42,6 +45,11 @@ final class ScaffoldArguments {
                 .filter(values::containsKey).count();
         if (commands > 1) {
             throw new IllegalArgumentException("select only one catalog command");
+        }
+        long operations = OPERATIONS.stream().filter(values::containsKey).count();
+        if (operations > 1) {
+            throw new IllegalArgumentException("select only one scaffold operation: "
+                    + OPERATIONS.stream().filter(values::containsKey).sorted().toList());
         }
         return Map.copyOf(values);
     }

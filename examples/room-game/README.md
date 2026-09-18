@@ -19,4 +19,4 @@ room-game=ok|mode=local|events=created,join,ready,start,disconnect,reconnect,set
 
 ## 边界
 
-示例只验证本地 room owner lane 和内存状态，不创建线程池、端口或外部连接；不提供匹配、观战、广播、持久化、跨服迁移或生产容量保证。容量口径、拒绝策略和限制值见 `docs/room-component-capacity.zh-CN.md`。
+示例只验证本地 room owner lane 和内存状态，不创建线程池、端口或外部连接；不提供匹配、观战、广播、持久化、跨服迁移或生产容量保证。容量口径、拒绝策略和限制值见 `docs/reference/room-component-minimum-contract.zh-CN.md`。

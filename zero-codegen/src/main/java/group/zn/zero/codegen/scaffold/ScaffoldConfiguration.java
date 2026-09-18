@@ -53,6 +53,9 @@ final class ScaffoldConfiguration {
                     + "# Each process needs its own client ID, consumer group and reply topic.\n"
                     + "zero.rpc.kafka.client-id=" + name + "\nzero.rpc.kafka.consumer-group-id=" + name + "\n"
                     + "zero.rpc.kafka.topic-prefix=game\nzero.rpc.kafka.reply-topic=game.reply." + name + "\n";
+            case "net" -> "zero.net.host=127.0.0.1\n"
+                    + "zero.net.port=0\n"
+                    + "zero.net.maxFrameLength=16777216\n";
             case "nacos" -> "zero.discovery.nacos.server-addr=127.0.0.1:8848\n"
                     + "zero.discovery.nacos.namespace=game\nzero.discovery.nacos.default-group=DEFAULT_GROUP\n"
                     + "zero.discovery.nacos.default-cluster=DEFAULT\n";

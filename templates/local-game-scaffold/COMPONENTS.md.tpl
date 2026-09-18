@@ -32,10 +32,11 @@ Load an external properties file with `ZERO_CONFIG_FILE`. Protocol generation us
 __PROTOCOL_FILE__
   -> Maven generate-sources / zero-codegen
   -> generated DTO / codec / BO / GeneratedProtocolDispatcher
-  -> handwritten BO implementation in __APP_CLASS__
-  -> selected components in RuntimeAssembly
+  -> LocalGameBO (async business adapter)
+  -> LocalGameFlow / LocalGameFixture composition
+  -> injected player/scene service ports
   -> local Actor lane state mutation
-  -> log sink and monitor registry
+  -> LocalGameObservation, log sink and monitor registry
 ~~~
 
 ## Framework Touchpoints

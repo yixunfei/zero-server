@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -39,13 +40,13 @@ public final class ZeroAcceptanceEvidence {
         records.add(capabilityRecord(root));
         records.add(runCommand(root, "actor-async-thread-contract", List.of(options.maven(), "-pl", "zero-actor,zero-runtime-bootstrap", "-am",
                 "-Dtest=ExecutorActorSchedulerTest,LocalActorSchedulerTest,ZeroRuntimeExecutorsFocusedTest",
-                "-Dsurefire.failIfNoSpecifiedTests=false", "test"), "matrix.actor-async-thread-contract"));
+                "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "matrix.actor-async-thread-contract"));
         records.add(runCommand(root, "empty-runtime", List.of(options.maven(), "-f", "examples/modular-composition/minimal/pom.xml",
-                "-Dtest=MinimalConsumerTest", "-Dsurefire.failIfNoSpecifiedTests=false", "test"), "matrix.empty-runtime"));
+                "-Dtest=MinimalConsumerTest", "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "matrix.empty-runtime"));
         records.add(runCommand(root, "event-actor", List.of(options.maven(), "-f", "examples/modular-composition/event-actor/pom.xml",
-                "-Dtest=EventActorConsumerTest", "-Dsurefire.failIfNoSpecifiedTests=false", "test"), "matrix.event-actor"));
-        records.add(runCommand(root, "tcp-starter-template", List.of(options.maven(), "-pl", "zero-server-starter", "-Dtest=ZeroServerTcpApplicationTest", "-Dsurefire.failIfNoSpecifiedTests=false", "test"), "matrix.single-process-tcp"));
-        records.add(runCommand(root, "tcp-net-real-socket", List.of(options.maven(), "-pl", "zero-net", "-Dtest=NettyServerImplementationsTest", "-Dsurefire.failIfNoSpecifiedTests=false", "test"), "matrix.tcp-real-socket"));
+                "-Dtest=EventActorConsumerTest", "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "matrix.event-actor"));
+        records.add(runCommand(root, "tcp-starter-template", List.of(options.maven(), "-pl", "zero-server-starter", "-Dtest=ZeroServerTcpApplicationTest", "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "matrix.single-process-tcp"));
+        records.add(runCommand(root, "tcp-net-real-socket", List.of(options.maven(), "-pl", "zero-net", "-Dtest=NettyServerImplementationsTest", "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "matrix.tcp-real-socket"));
         records.add(runCommand(root, "kafka-slice-build", List.of(options.maven(), "-f", "examples/modular-composition/center-logic-kafka/pom.xml", "clean", "test"), "matrix.center-logic-build"));
         records.add(runCommand(root, "kafka-dual-jvm", List.of(findPwsh(), "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "scripts/VerifyCenterLogicKafka.ps1"), "matrix.center-logic"));
         records.add(runCommand(root, "adapters", List.of("java", "scripts/VerifyAdapterCompositions.java"), "matrix.adapters"));
@@ -54,8 +55,8 @@ public final class ZeroAcceptanceEvidence {
                 "matrix.no-sdk-external-service"));
         records.add(runCommand(root, "config-lint", List.of("java", "scripts/ZeroConfigLint.java", "--projectDir",
                 createConfigLintFixture(root).toString()), "matrix.config-lint"));
-        records.add(runCommand(root, "scaffold-transaction-tests", List.of(options.maven(), "-pl", "zero-codegen", "-Dtest=ScaffoldTransactionTest", "-Dsurefire.failIfNoSpecifiedTests=false", "test"), "matrix.scaffold-conflict-recovery"));
-        records.add(runCommand(root, "scaffold-concurrent-lock-tests", List.of(options.maven(), "-pl", "zero-codegen", "-Dtest=ScaffoldTransactionTest#concurrentApplyIsRejectedAndLockIsReleased", "-Dsurefire.failIfNoSpecifiedTests=false", "test"), "matrix.scaffold-concurrent-lock"));
+        records.add(runCommand(root, "scaffold-transaction-tests", List.of(options.maven(), "-pl", "zero-codegen", "-Dtest=ScaffoldTransactionTest", "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "matrix.scaffold-conflict-recovery"));
+        records.add(runCommand(root, "scaffold-concurrent-lock-tests", List.of(options.maven(), "-pl", "zero-codegen", "-Dtest=ScaffoldTransactionTest#concurrentApplyIsRejectedAndLockIsReleased", "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "matrix.scaffold-concurrent-lock"));
         records.add(cliExitCodeMatrix(root, options));
         records.add(runCommand(root, "release-artifact-evidence", List.of("java", "scripts/ZeroReleaseArtifactEvidence.java"), "release.artifact-local"));
         records.add(productionEvidenceRecord());
@@ -97,7 +98,13 @@ public final class ZeroAcceptanceEvidence {
                     .redirectErrorStream(true);
             inheritCurrentJavaHome(builder);
             Process process = builder.start();
-            output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            CompletableFuture<String> outputFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                } catch (IOException exception) {
+                    return exception.getClass().getSimpleName() + ": " + safe(exception.getMessage());
+                }
+            });
             boolean completed;
             try {
                 completed = process.waitFor(COMMAND_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
@@ -113,13 +120,15 @@ public final class ZeroAcceptanceEvidence {
                 reason = "timeout";
             } else {
                 exit = process.exitValue();
-                if (id.equals("matrix.center-logic") && output.contains("center-logic-kafka=blocked")) {
+                if (id.equals("matrix.center-logic") && outputFuture.isDone()
+                        && outputFuture.join().contains("center-logic-kafka=blocked")) {
                     status = "blocked";
                     reason = "external Kafka/Docker prerequisite unavailable";
                 } else {
                     status = exit == 0 ? "passed" : "failed";
                 }
             }
+            output = outputFuture.join();
         } catch (IOException exception) {
             output = exception.getClass().getSimpleName() + ": " + safe(exception.getMessage());
             exit = 127;

@@ -22,6 +22,7 @@ import group.zn.zero.log.LogType;
 import group.zn.zero.log.ZeroLogRecord;
 import group.zn.zero.logic.LocalLogicExample;
 import group.zn.zero.logic.LogicFlowResult;
+import group.zn.zero.net.IServer;
 import group.zn.zero.protocol.ProtocolDirection;
 import group.zn.zero.runtime.api.ComponentId;
 import group.zn.zero.runtime.api.GameRuntime;
@@ -54,6 +55,14 @@ class ZeroServerApplicationTest {
      */
     @TempDir
     private Path tempDir;
+
+    @Test
+    void applicationWithoutServerDoesNotExposeNetworkLifecycle() {
+        ZeroServerApplication application = new ZeroServerApplication(
+                new MapZeroConfig(Map.of("zero.mode", "test")), new InMemoryLogSink());
+
+        assertTrue(application.server().isEmpty());
+    }
 
     /**
      * 验证最小应用生命周期可以启动和停止。

@@ -164,14 +164,27 @@ public final class InMemoryEventBus implements EventBus {
             return CompletableFuture.failedFuture(zeroException);
         }
 
+        List<ZeroException> failures = new ArrayList<>();
         CompletionStage<Void> stage = CompletableFuture.completedFuture(null);
         for (HandlerRegistration registration : handlerSnapshot) {
-            stage = stage.thenCompose(ignored -> handle(event, registration.handler()));
+            stage = stage.thenCompose(ignored -> handle(event, registration.handler()).handle((result, failure) -> {
+                if (failure != null) {
+                    ZeroException current = asZeroException(failure);
+                    failures.add(current);
+                    recordDeadLetter(event, current);
+                }
+                return null;
+            }));
         }
-        return stage.exceptionallyCompose(ex -> {
-            ZeroException zeroException = asZeroException(ex);
-            recordDeadLetter(event, zeroException);
-            return CompletableFuture.failedFuture(zeroException);
+        return stage.thenCompose(ignored -> {
+            if (failures.isEmpty()) {
+                return CompletableFuture.completedFuture(null);
+            }
+            ZeroException first = failures.getFirst();
+            for (int index = 1; index < failures.size(); index++) {
+                if (failures.get(index) != first) first.addSuppressed(failures.get(index));
+            }
+            return CompletableFuture.failedFuture(first);
         });
     }
 

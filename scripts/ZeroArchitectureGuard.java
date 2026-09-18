@@ -637,6 +637,7 @@ public final class ZeroArchitectureGuard {
         List<Dependency> dependencies = dependenciesOf(report, BENCHMARK_MODULE);
         Set<String> runtimeModules = new HashSet<>();
         boolean jmhCorePresent = false;
+        boolean protocolTestPresent = false;
         List<Dependency> unexpected = new ArrayList<>();
         for (Dependency dependency : dependencies) {
             if ("group.zn.zero".equals(dependency.groupId())
@@ -653,14 +654,17 @@ public final class ZeroArchitectureGuard {
                     && "test".equals(dependency.scope())) {
                 // The opt-in protocol gate exercises codec classes without adding the
                 // protocol module to the runtime class path of the benchmark artifact.
+                protocolTestPresent = true;
             } else {
                 unexpected.add(dependency);
             }
         }
         BenchmarkJmhMetadata metadata = readBenchmarkJmhMetadata(report);
+        // 运行时依赖 + jmh-core + 可选 test 作用域 zero-protocol；注解处理器只出现在 plugin 中。
+        int expectedDependencies = BENCHMARK_RUNTIME_MODULES.size() + 1 + (protocolTestPresent ? 1 : 0);
         boolean frozen = runtimeModules.equals(BENCHMARK_RUNTIME_MODULES)
                 && jmhCorePresent
-                && dependencies.size() == BENCHMARK_RUNTIME_MODULES.size() + 2
+                && dependencies.size() == expectedDependencies
                 && unexpected.isEmpty()
                 && JMH_VERSION.equals(metadata.propertyVersion())
                 && metadata.artifacts().equals(BENCHMARK_JMH_ARTIFACTS)

@@ -113,10 +113,10 @@ public final class KafkaRpcEnvelopeCodec {
         try {
             DataInputStream in = new DataInputStream(new ByteArrayInputStream(payload));
             KafkaRpcEnvelopeKind kind = readHeader(in);
-            if (kind == KafkaRpcEnvelopeKind.REQUEST) {
-                return KafkaRpcEnvelope.request(readRequest(in));
-            }
-            return KafkaRpcEnvelope.response(readResponse(in));
+            KafkaRpcEnvelope envelope = kind == KafkaRpcEnvelopeKind.REQUEST
+                    ? KafkaRpcEnvelope.request(readRequest(in)) : KafkaRpcEnvelope.response(readResponse(in));
+            if (in.available() != 0) throw new IllegalArgumentException("trailing kafka rpc envelope bytes");
+            return envelope;
         } catch (IOException | RuntimeException ex) {
             throw ZeroException.of(RpcErrorCode.CODEC_FAILED, "kafka rpc envelope decode failed", ex);
         }
@@ -231,6 +231,9 @@ public final class KafkaRpcEnvelopeCodec {
         }
         if (length > maxLength) {
             throw new IllegalArgumentException(tooLargeMessage);
+        }
+        if (length > in.available()) {
+            throw new IllegalArgumentException("declared kafka rpc length exceeds remaining payload");
         }
         return length;
     }

@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /** Independent platform and production-focused acceptance gate with fresh evidence. */
@@ -29,7 +30,7 @@ public final class ZeroPlatformProductionGate {
             case LOCAL_PRODUCTION_FOCUSED -> List.of(
                     run(root, output, "network-focused", List.of(maven(), "-B", "-ntp", "-pl", "zero-net,zero-runtime-net,zero-server-starter-production", "-am",
                             "-Dtest=ProductionNetworkLifecycleFocusedTest,ProductionNetworkTelemetryObserverTest,ProductionNetworkProviderTest",
-                            "-Dsurefire.failIfNoSpecifiedTests=false", "test"), "BUILD SUCCESS"),
+                            "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "BUILD SUCCESS"),
                     run(root, output, "gm-focused", List.of(maven(), "-B", "-ntp", "-pl", "zero-gm,zero-gm-rest", "-am", "test"), "BUILD SUCCESS"),
                     run(root, output, "release-artifact", List.of(javaCommand(), "scripts/ZeroReleaseArtifactEvidence.java"), "zero-release-artifact-evidence=passed"),
                     run(root, output, "performance-gate", List.of(maven(), "-B", "-ntp", "-Pperformance-gate", "-f", "zero-benchmarks/pom.xml", "-am", "verify"), "protocol-codec-gate=ok"));
@@ -61,15 +62,25 @@ public final class ZeroPlatformProductionGate {
         inheritJava(builder);
         try {
             Process process = builder.start();
-            StringBuilder text = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                reader.lines().forEach(line -> text.append(line).append(System.lineSeparator()));
-            }
+            CompletableFuture<String> outputFuture = CompletableFuture.supplyAsync(() -> {
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                        process.getInputStream(), StandardCharsets.UTF_8))) {
+                    return reader.lines().collect(java.util.stream.Collectors.joining(System.lineSeparator()))
+                            + System.lineSeparator();
+                } catch (IOException exception) {
+                    return exception.toString();
+                }
+            });
             boolean done = process.waitFor(TIMEOUT.toSeconds(), TimeUnit.SECONDS);
-            if (!done) { process.destroyForcibly(); Files.writeString(log, text, StandardCharsets.UTF_8); return new Result(id, "blocked", 124, log, start); }
+            if (!done) {
+                process.destroyForcibly();
+                String text = outputFuture.join();
+                Files.writeString(log, text, StandardCharsets.UTF_8);
+                return new Result(id, "blocked", 124, log, start);
+            }
+            String text = outputFuture.join();
             Files.writeString(log, text, StandardCharsets.UTF_8);
-            String content = text.toString();
-            return new Result(id, process.exitValue() == 0 && content.contains(marker) ? "passed" : "failed",
+            return new Result(id, process.exitValue() == 0 && text.contains(marker) ? "passed" : "failed",
                     process.exitValue(), log, start);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();

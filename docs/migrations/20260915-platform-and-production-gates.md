@@ -34,3 +34,15 @@ Windows Java 21 fresh run：
 ## GitHub Actions 首次真实矩阵运行
 
 Gate commit `7bb28757c2c622b50bf76b4c7c2dc09aa9f08f8c` 已推送，CI run `34981381210` 实际启动 Ubuntu/macOS/Windows platform transaction jobs。三项 job 均执行 checkout、Java 21、gate 和 evidence upload，但 gate step 均为 failure；当前凭据无法下载私有 job logs/artifacts（API 返回 403 admin required），因此没有把 artifact 解释为 passed。下一次修复应先取得 job log，定位 wrapper/测试摘要失败原因，再重跑矩阵。
+
+## 第二次 CI 矩阵运行
+
+提交 `b44b2972e4f1aac8198f1a9f903d11ed1ab36419` 修复平台 gate marker 后，CI run `34995588781` 的 Ubuntu/macOS/Windows platform transaction jobs 均为 `success`。artifact 列表存在且上传成功，但当前 API 凭据下载 artifact 返回 401，无法读取 manifest 内容；job conclusion 只能证明 runner gate 命令成功，不能替代 manifest 逐字段审查。
+
+## Follow-up diagnosis
+
+CI run `34995588781` 的三个 platform jobs 均 success；后续本地审查发现 gate 若要求精确测试摘要会受 Surefire 实际计数影响，因此工作树中的 `0d33f72` 将 marker 调整为当前提交中三个选择类实际合计的 `Tests run: 10`。该修复尚未推送（当前网络连接 GitHub 失败），所以不应将其视为 runner 证据。artifact 下载仍需 Actions 读取权限。
+
+## 第三次 CI 矩阵运行
+
+提交 `2b216370b8f6dbb1500b6de8eb23e7f0a5c8e7c8` 修正 gate marker 后，CI run `35001808595` 的 Ubuntu/macOS/Windows platform transaction jobs 均为 `success`，对应 artifacts 已上传（Ubuntu `10410096994`、macOS `10410520340`）。当前会话的 artifact API 读取仍返回 401，故无法读取 manifest 内容；job conclusion 证明 gate 命令完成成功，但不替代逐字段 artifact 审查。

@@ -70,7 +70,7 @@ public final class RuntimeAdapterResilience {
         inFlight.updateAndGet(value -> Math.max(0, value - 1));
     }
 
-    public RuntimeAdapterRecovery.RecoveryDecision onFailure(
+    public synchronized RuntimeAdapterRecovery.RecoveryDecision onFailure(
             final RuntimeAdapterRecovery.FailureContext failure) {
         RuntimeAdapterRecovery.RecoveryDecision decision = recovery.onFailure(
                 Objects.requireNonNull(failure, "failure"));
@@ -84,10 +84,17 @@ public final class RuntimeAdapterResilience {
         }
         if (decision == RuntimeAdapterRecovery.RecoveryDecision.RETRY
                 || decision == RuntimeAdapterRecovery.RecoveryDecision.REBUILD) {
-            if (stateMachine.snapshot().state() == RuntimeAdapterStateMachine.State.READY) {
-                stateMachine.transition(RuntimeAdapterStateMachine.State.DEGRADED);
+            RuntimeAdapterStateMachine.Snapshot current = stateMachine.snapshot();
+            if (current.state() == RuntimeAdapterStateMachine.State.READY) {
+                current = stateMachine.transitionIf(
+                        RuntimeAdapterStateMachine.State.READY,
+                        RuntimeAdapterStateMachine.State.DEGRADED);
             }
-            stateMachine.transition(RuntimeAdapterStateMachine.State.RECOVERING);
+            if (current.state() == RuntimeAdapterStateMachine.State.DEGRADED) {
+                stateMachine.transitionIf(
+                        RuntimeAdapterStateMachine.State.DEGRADED,
+                        RuntimeAdapterStateMachine.State.RECOVERING);
+            }
         } else if (decision == RuntimeAdapterRecovery.RecoveryDecision.DRAIN) {
             stateMachine.transition(RuntimeAdapterStateMachine.State.DRAIN);
         } else if (decision == RuntimeAdapterRecovery.RecoveryDecision.FAIL) {
@@ -96,30 +103,29 @@ public final class RuntimeAdapterResilience {
         return decision;
     }
 
-    public void recovered() {
-        if (stateMachine.snapshot().state() == RuntimeAdapterStateMachine.State.RECOVERING) {
-            stateMachine.transition(RuntimeAdapterStateMachine.State.READY);
+    public synchronized void recovered() {
+        stateMachine.transitionIf(
+                RuntimeAdapterStateMachine.State.RECOVERING,
+                RuntimeAdapterStateMachine.State.READY);
+    }
+
+    public synchronized void drain() {
+        RuntimeAdapterStateMachine.Snapshot current = stateMachine.snapshot();
+        if (current.state() != RuntimeAdapterStateMachine.State.DRAIN) {
+            stateMachine.transitionIf(current.state(), RuntimeAdapterStateMachine.State.DRAIN);
         }
     }
 
-    public void drain() {
-        if (stateMachine.snapshot().state() != RuntimeAdapterStateMachine.State.DRAIN) {
-            stateMachine.transition(RuntimeAdapterStateMachine.State.DRAIN);
+    public synchronized void stop() {
+        RuntimeAdapterStateMachine.Snapshot current = stateMachine.snapshot();
+        if (current.state() == RuntimeAdapterStateMachine.State.DRAIN
+                || current.state() == RuntimeAdapterStateMachine.State.READY
+                || current.state() == RuntimeAdapterStateMachine.State.FAILED) {
+            stateMachine.transitionIf(current.state(), RuntimeAdapterStateMachine.State.STOP);
         }
     }
 
-    public void stop() {
-        if (stateMachine.snapshot().state() == RuntimeAdapterStateMachine.State.DRAIN) {
-            stateMachine.transition(RuntimeAdapterStateMachine.State.STOP);
-        } else if (stateMachine.snapshot().state() == RuntimeAdapterStateMachine.State.READY
-                || stateMachine.snapshot().state() == RuntimeAdapterStateMachine.State.FAILED) {
-            stateMachine.transition(RuntimeAdapterStateMachine.State.STOP);
-        }
-    }
-
-    public void close() {
-        if (stateMachine.snapshot().state() == RuntimeAdapterStateMachine.State.STOP) {
-            stateMachine.transition(RuntimeAdapterStateMachine.State.CLOSE);
-        }
+    public synchronized void close() {
+        stateMachine.transitionIf(RuntimeAdapterStateMachine.State.STOP, RuntimeAdapterStateMachine.State.CLOSE);
     }
 }

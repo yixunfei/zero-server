@@ -22,6 +22,12 @@ zeroServer 的线程模型必须同时满足极致性能、状态安全、业务
 - Actor 线程不允许执行不可控远程 IO。
 - 线程安全 API 与非线程安全 API 必须在注释中明确标明。
 
+## 2.1 Local scaffold 异步业务契约
+
+`local-game-scaffold` 生成工程将 composition root、协议业务适配器、流程编排、服务 fixture 和观测 facade 分离。`LocalGameBO` 只把生成 DTO 转换为注入的 player/scene 业务端口调用，并通过 `CompletionStage.whenComplete` 传播成功或异常；它不调用 `join()`/`get()`、不创建线程池，也不关闭框架执行器。
+
+`LocalGameFixture` 只负责服务订阅的装配和释放；执行域仍由 `RuntimeAssembly`/starter 注入。`LocalGameFlow` 负责协议 dispatch，`LocalGameObservation` 只记录完成/失败计数。生成的 `Application` 仅可在最外层 `runDemo` smoke 边界等待最终 stage；该单次等待不代表 handler、Actor 或 Netty IO 路径可以阻塞。超时、取消、重复请求和远程错误必须由业务端口显式定义，框架不隐式重试或改变幂等语义。
+
 ## 3. Actor 绑定
 
 默认 lane key 包括：
@@ -54,7 +60,12 @@ zeroServer 的线程模型必须同时满足极致性能、状态安全、业务
 - 调度器本身不创建线程池，只使用外部传入的 `Executor`。
 - 同一 `LaneKey` 内消息按提交顺序串行执行。
 - handler 返回异步 `CompletionStage` 时，后续同 lane 消息必须等待前一条完成后再执行。
+- 未完成 stage 通过 completion continuation 恢复 lane drain；Actor 执行线程不得使用 `join()`/`get()` 等待远程或用户异步操作。`ExecutorActorScheduler` 只在 stage 已完成时读取结果。
+- handler 的异常、取消和超时必须让当前 dispatch stage 结束并带有统一错误码；lane 不能因失败留下不可回收的 pending 队列。
+- executor 拒绝新任务时，当前 lane 的排队消息必须失败并释放；关闭由外部执行器/运行时统一负责。
 - 该实现用于阶段 3 原型执行域探索，不替代后续生产级 Actor 集群、背压、限流和队列监控设计。
+
+WP-02 的 focused 契约测试覆盖 direct 调用线程归属、异步成功/异常/取消/超时、未完成 stage 的阻塞检测、executor 拒绝和受管执行器关闭。该测试证明的是本地执行边界，不代表生产容量、跨进程恢复或第三方 provider 的阻塞行为已验证。
 
 阶段 4B 新增分布式 Actor gateway 的第一版投递边界：
 
@@ -82,7 +93,7 @@ zeroServer 的线程模型必须同时满足极致性能、状态安全、业务
 - `zero-player` 登录会话写入 session lane。
 - `zero-player` 玩家在线档案写入 player lane；玩家加载可通过 `CacheService` / `CrudRepository` 获取数据，真实远程实现接入前必须放入 remote IO 执行域。
 - `zero-scene` 进入场景、实体坐标、移动、离开和实体列表快照写入或读取 scene lane。
-- `docs/scene-move-loop-performance-evidence.zh-CN.md` 与 `scripts/ZeroSceneMoveLoopBenchmarkReadiness.java` 已定义基础 SceneService、Local/Executor scheduler、generated scene-sync 和未来 AOI/广播的分层性能证据口径；该入口不运行场景服务，也不批准线程模型或移动语义变更。
+- `docs/operations/evidence/scene-move-loop-performance-evidence.zh-CN.md` 已定义基础 SceneService、Local/Executor scheduler、generated scene-sync 和未来 AOI/广播的分层性能证据口径；该入口不运行场景服务，也不批准线程模型或移动语义变更。
 - GM 查询首轮只读，通过 player lane 或 scene lane 获取快照，不直接跨 lane 修改状态。
 - 远程 IO 必须先在 remote IO 执行域完成，再把结果投递回对应 actor lane。
 
@@ -99,7 +110,7 @@ zeroServer 的线程模型必须同时满足极致性能、状态安全、业务
 - 玩家、场景和实体状态仍必须把 `ScheduledTaskContext.traceId()` 显式传入 `ActorMessage`，在对应 lane 内修改。
 - 远程 IO 只提交到受管 remote IO 执行域或异步客户端并返回 stage，禁止在 scheduler worker 上 `join()` / `get()`。
 
-该实现不替换 Netty EventLoop timer、Kafka RPC pending 时间轮或 `PersistenceScheduler` 既有局部语义，也不适用于生产高频 tick、cron、持久化任务或分布式唯一执行。完整 API、配置、L1 生命周期、观测和非目标见 [本地受管定时任务运行时](managed-scheduler.zh-CN.md)。
+该实现不替换 Netty EventLoop timer、Kafka RPC pending 时间轮或 `PersistenceScheduler` 既有局部语义，也不适用于生产高频 tick、cron、持久化任务或分布式唯一执行。完整 API、配置、L1 生命周期、观测和非目标见 [本地受管定时任务运行时](guides/managed-scheduler.zh-CN.md)。
 
 ## 4. 强一致策略
 

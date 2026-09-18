@@ -45,6 +45,16 @@ class ScaffoldComponentsTest {
     }
 
     @Test
+    void networkSelectionUsesExplicitProductionNetworkProvider() {
+        var result = components.resolve(List.of(), List.of("net"));
+        assertTrue(result.external());
+        assertTrue(result.components().contains("net"));
+        assertTrue(result.capabilities().contains(StandardRuntimeCapabilityModel.NETWORK_LIFECYCLE));
+        assertTrue(result.artifacts().contains(MavenCoordinate.zero("zero-net")));
+        assertTrue(result.artifacts().contains(MavenCoordinate.zero("zero-runtime-net")));
+    }
+
+    @Test
     void discoverySelectionIncludesTheResolverInstalledByItsIntegrationModule() {
         var result = components.resolve(List.of(StandardRuntimeCapabilityModel.RPC_SERVICE_RESOLVER), List.of());
         assertEquals(List.of("bootstrap", "discovery"), result.components());

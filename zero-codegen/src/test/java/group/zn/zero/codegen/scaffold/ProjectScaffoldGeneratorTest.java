@@ -5,11 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -63,8 +67,57 @@ class ProjectScaffoldGeneratorTest {
         assertTrue(manifest.contains("zero-runtime"));
         assertFalse(pom.contains("__"));
         assertFalse(manifest.contains("__"));
+        JsonArray files = JsonParser.parseString(manifest).getAsJsonObject().getAsJsonArray("files");
+        assertEquals(12, files.size());
+        assertEquals(files.size(), files.size());
+        Set<String> paths = new java.util.HashSet<>();
+        files.forEach(value -> paths.add(value.getAsJsonObject().get("path").getAsString()));
+        assertEquals(files.size(), paths.size());
+        assertTrue(files.get(0).getAsJsonObject().get("path").getAsString()
+                .compareTo(files.get(files.size() - 1).getAsJsonObject().get("path").getAsString()) <= 0);
+        files.forEach(value -> {
+            JsonObject file = value.getAsJsonObject();
+            String sha256 = file.get("sha256").getAsString();
+            boolean selfManaged = file.get("path").getAsString().equals("zero-scaffold.json");
+            assertEquals("generated", file.get("owner").getAsString());
+            assertFalse(file.get("template").getAsString().isBlank());
+            assertTrue(selfManaged ? sha256.isEmpty() : sha256.matches("[0-9a-f]{64}"));
+        });
+        boolean hasManifest = false;
+        boolean hasAssembly = false;
+        boolean hasConfig = false;
+        for (var value : files) {
+            String path = value.getAsJsonObject().get("path").getAsString();
+            hasManifest |= path.equals("zero-scaffold.json");
+            hasAssembly |= path.endsWith("RuntimeAssembly.java");
+            hasConfig |= path.equals("config/application.properties.example");
+        }
+        assertTrue(hasManifest && hasAssembly && hasConfig);
         assertThrows(IllegalStateException.class, () ->
                 new ProjectScaffoldGenerator(catalog.capabilityModel()).generate(request));
+    }
+
+    @Test
+    void networkSelectionIncludesListenerRuntimeAndDefaultDoesNot() throws Exception {
+        var catalog = ScaffoldCatalog.standard();
+        Path output = temporaryDirectory.resolve("network-game");
+        new ProjectScaffoldGenerator(catalog.capabilityModel()).generate(new ProjectScaffoldRequest(
+                "network-game", "group.zn.network.game", output, "0.1.0-SNAPSHOT", catalog.require("runtime"),
+                Path.of("../templates"), "", List.of("net"), false));
+        String pom = Files.readString(output.resolve("pom.xml"));
+        String config = Files.readString(output.resolve("config/application.properties.example"));
+        assertTrue(pom.contains("<artifactId>zero-net</artifactId>"));
+        assertTrue(pom.contains("<artifactId>zero-runtime-net</artifactId>"));
+        assertTrue(config.contains("zero.net.host=127.0.0.1"));
+        assertTrue(config.contains("zero.net.port=0"));
+
+        Path local = temporaryDirectory.resolve("local-no-network");
+        new ProjectScaffoldGenerator(catalog.capabilityModel()).generate(new ProjectScaffoldRequest(
+                "local-game", "group.zn.local.game", local, "0.1.0-SNAPSHOT", catalog.require("runtime"),
+                Path.of("../templates"), "", List.of(), false));
+        String localPom = Files.readString(local.resolve("pom.xml"));
+        assertFalse(localPom.contains("<artifactId>zero-net</artifactId>"));
+        assertFalse(localPom.contains("<artifactId>zero-runtime-net</artifactId>"));
     }
 
     @Test
@@ -117,6 +170,9 @@ class ProjectScaffoldGeneratorTest {
         write(root, "COMPONENTS.md.tpl", "__TEMPLATE_DESCRIPTION__\n");
         write(root, "NEXT_STEPS.md.tpl", "__PRODUCTION_GAP__\n");
         write(root, "zero-scaffold.json.tpl", "{\n"
+                + "  \"schemaVersion\": 1,\n"
+                + "  \"ownershipSchemaVersion\": 1,\n"
+                + "  \"files\": [\n__OWNERSHIP_FILES__\n  ],\n"
                 + "  \"project\": __PROJECT_NAME_JSON__,\n"
                 + "  \"components\": [\n__FRAMEWORK_COMPONENTS_JSON__\n  ],\n"
                 + "  \"capabilities\": [\n__RUNTIME_CAPABILITIES_JSON__\n  ]\n}\n");

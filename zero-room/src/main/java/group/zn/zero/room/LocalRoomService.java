@@ -5,7 +5,7 @@ import group.zn.zero.actor.LaneKey;
 import group.zn.zero.actor.scheduler.ActorScheduler;
 import group.zn.zero.actor.scheduler.LocalActorScheduler;
 import group.zn.zero.actor.handler.ActorHandler;
-import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -37,7 +37,15 @@ public final class LocalRoomService {
     }
     public RoomSnapshot snapshot(RoomId id) { return room(id).snapshot(); }
     public RoomStats stats(RoomId id) { return room(id).stats; }
-    public List<RoomEvent> events(RoomId id) { return List.copyOf(room(id).events); }
+    public List<RoomEvent> events(RoomId id) {
+        MutableRoom current = room(id);
+        synchronized (current.events) { return List.copyOf(current.events); }
+    }
+    /** @param id 房间身份；不可为空。 @return 历史淘汰数；线程安全，不修改数据。 */
+    public long droppedEventCount(RoomId id) {
+        MutableRoom current = room(id);
+        synchronized (current.events) { return current.droppedEvents; }
+    }
     public CompletionStage<Void> join(RoomId id, String playerId) { return dispatch(id, new Join(player(playerId))); }
     public CompletionStage<Void> leave(RoomId id, String playerId) { return dispatch(id, new Leave(player(playerId))); }
     public CompletionStage<Void> disconnect(RoomId id, String playerId, long now) {
@@ -47,6 +55,18 @@ public final class LocalRoomService {
     public CompletionStage<Void> ready(RoomId id, String playerId) { return dispatch(id, new Ready(player(playerId))); }
     public CompletionStage<Void> start(RoomId id) { return dispatch(id, new Start()); }
     public CompletionStage<Void> close(RoomId id) { return dispatch(id, new Close()); }
+    /**
+     * 在房间 lane 释放已关闭房间。释放后查询和命令返回不存在。
+     * @param id 房间身份；不可为空。
+     * @return 完成信号；不可为空；可跨线程调用。
+     */
+    public CompletionStage<Void> destroy(RoomId id) {
+        return dispatch(id, room -> {
+            if (room.state != RoomState.CLOSED) throw failure("room must be closed before destroy");
+            rooms.remove(id, room);
+        });
+    }
+
     public CompletionStage<Settlement> settle(RoomId id, String key, String result) {
         SettlementReply reply = new SettlementReply(nonBlank(key, "settlement key"), Objects.requireNonNull(result, "result"));
         dispatch(id, reply).whenComplete((ignored, failure) -> {
@@ -90,10 +110,10 @@ public final class LocalRoomService {
         public void apply(MutableRoom r) { value = r.settle(key, result); }
     }
     private final class MutableRoom {
-        final RoomId id; final int capacity; final long window; final ConcurrentMap<String,RoomMember> members=new ConcurrentHashMap<>(); final List<RoomEvent> events=new ArrayList<>(); RoomState state=RoomState.WAITING; long seq; String settlementId, settlementResult; RoomStats stats=new RoomStats(0,0,0,0,0,0);
+        final RoomId id; final int capacity; final long window; final ConcurrentMap<String,RoomMember> members=new ConcurrentHashMap<>(); final ArrayDeque<RoomEvent> events=new ArrayDeque<>(); long droppedEvents; RoomState state=RoomState.WAITING; long seq; String settlementId, settlementResult; RoomStats stats=new RoomStats(0,0,0,0,0,0);
         MutableRoom(RoomId i,int c,long w){id=i;capacity=c;window=w;}
         void join(String p){ if(state==RoomState.CLOSED) throw failure("room closed"); if(members.containsKey(p)&&members.get(p).slot()!=PlayerSlot.LEFT) return; if(state!=RoomState.WAITING) throw failure("room not accepting joins"); if(members.values().stream().filter(m->m.slot()!=PlayerSlot.LEFT).count()>=capacity) throw failure("room full"); members.put(p,new RoomMember(p,PlayerSlot.JOINED,0)); stats=new RoomStats(stats.joins()+1,stats.leaves(),stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements()); emit(RoomEvent.Type.JOINED,p); }
-        void leave(String p){ RoomMember m=member(p); if(m.slot()==PlayerSlot.LEFT)return; members.put(p,new RoomMember(p,PlayerSlot.LEFT,0)); stats=new RoomStats(stats.joins(),stats.leaves()+1,stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements());emit(RoomEvent.Type.LEFT,p); }
+        void leave(String p){ if(members.remove(p)==null)return; stats=new RoomStats(stats.joins(),stats.leaves()+1,stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements());emit(RoomEvent.Type.LEFT,p); }
         void disconnect(String p,long now){ RoomMember m=member(p); if(m.slot()==PlayerSlot.LEFT)return; members.put(p,new RoomMember(p,PlayerSlot.DISCONNECTED,now)); emit(RoomEvent.Type.DISCONNECTED,p); }
         void reconnect(String p,long now){ RoomMember m=member(p); if(!m.reconnectable(now,window)) throw failure("reconnect window expired"); members.put(p,new RoomMember(p,state==RoomState.RUNNING?PlayerSlot.PLAYING:PlayerSlot.JOINED,0)); stats=new RoomStats(stats.joins(),stats.leaves(),stats.reconnects()+1,stats.readyChanges(),stats.starts(),stats.settlements());emit(RoomEvent.Type.RECONNECTED,p); }
         void ready(String p){ RoomMember m=member(p); if(m.slot()!=PlayerSlot.JOINED) return; members.put(p,new RoomMember(p,PlayerSlot.READY,0));stats=new RoomStats(stats.joins(),stats.leaves(),stats.reconnects(),stats.readyChanges()+1,stats.starts(),stats.settlements());emit(RoomEvent.Type.READY_CHANGED,p); }
@@ -101,7 +121,20 @@ public final class LocalRoomService {
         void close(){ if(state==RoomState.CLOSED)return; state=RoomState.CLOSED; emit(RoomEvent.Type.CLOSED,null); }
         Settlement settle(String k,String result){ Objects.requireNonNull(k);Objects.requireNonNull(result);if(settlementId!=null){if(settlementId.equals(k)&&settlementResult.equals(result))return new Settlement(k,settlementResult);throw failure("settlement already submitted");}if(state!=RoomState.RUNNING)throw failure("room not running");settlementId=k;settlementResult=result;state=RoomState.SETTLED;stats=new RoomStats(stats.joins(),stats.leaves(),stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements()+1);emit(RoomEvent.Type.SETTLED,null);return new Settlement(k,result); }
         RoomMember member(String p){RoomMember m=members.get(p);if(m==null)throw failure("member not found");return m;}
-        void emit(RoomEvent.Type type,String player){ long eventSequence = type == RoomEvent.Type.CREATED ? seq : ++seq; RoomEvent e=new RoomEvent(id,eventSequence,type,player,System.currentTimeMillis()); events.add(e); try { eventConsumer.accept(e); } catch(RuntimeException ignored) {} }
+        void emit(RoomEvent.Type type, String player) {
+            long eventSequence = type == RoomEvent.Type.CREATED ? seq : ++seq;
+            RoomEvent event = new RoomEvent(id, eventSequence, type, player, System.currentTimeMillis());
+            synchronized (events) {
+                if (events.size() == 1024) { events.removeFirst(); droppedEvents++; }
+                events.addLast(event);
+            }
+            try {
+                eventConsumer.accept(event);
+            } catch (RuntimeException failure) {
+                throw group.zn.zero.core.error.ZeroException.of(group.zn.zero.core.error.SystemErrorCode.SYSTEM_ERROR,
+                        "room event consumer failed after state transition", failure);
+            }
+        }
         RoomSnapshot snapshot(){return new RoomSnapshot(id,state,capacity,members.values().stream().sorted(Comparator.comparing(RoomMember::playerId)).toList(),seq,settlementId,settlementResult);}
     }
 }

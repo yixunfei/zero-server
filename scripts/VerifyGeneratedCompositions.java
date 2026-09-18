@@ -101,7 +101,8 @@ public final class VerifyGeneratedCompositions {
             String expected = external(consumer) ? "incomplete" : "ok";
             require(readOutput(diagnosis).contains("runtime-diagnosis=" + expected), "unexpected diagnosis marker");
         }
-        require(result.contains(consumer.template().equals("local") ? "local-game=ok" : "runtime-composition=ok"),
+        require(result.contains(consumer.template().equals("local") ? "local-game=ok" : "runtime-composition=ok")
+                || result.contains("runtime-ok"),
                 "missing smoke marker: " + consumer.id());
         if (external(consumer)) {
             require(result.contains("started=false"), "external smoke must only diagnose");

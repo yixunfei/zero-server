@@ -158,14 +158,15 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
             throw new IllegalArgumentException("entityVersion must be non-negative");
         }
         CacheStoreEntry<V> entry = normalStoreEntry(value, entityVersion);
-        l1Cache.putVersioned(key, value, entry.cacheVersion());
         if (l2Store == null) {
+            storeL1FromL2(key, entry);
             return CompletableFuture.completedFuture(null);
         }
         return l2Store.putIfVersion(key, entry).thenAccept(saved -> {
             if (!saved) {
                 throw ZeroException.of(CacheErrorCode.VERSION_CONFLICT, "cache version conflict", null);
             }
+            storeL1FromL2(key, entry);
         }).exceptionally(throwable -> {
             markBackendFailure();
             throw wrapCompletion(throwable);
@@ -335,12 +336,11 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
         if (entry.expired(Instant.now())) {
             return Optional.empty();
         }
-        if (entry.negative()) {
-            l1Cache.putNegative(key);
-            return Optional.of(entry);
-        }
-        l1Cache.putVersioned(key, entry.value(), entry.cacheVersion());
-        return Optional.of(entry);
+        cacheVersionGenerator.accumulateAndGet(entry.cacheVersion(), Math::max);
+        CacheEntry<V> selected = l1Cache.mergeEntry(key, new CacheEntry<>(
+                entry.value(), entry.cacheVersion(), entry.expiresAt(), entry.negative()));
+        return Optional.of(new CacheStoreEntry<>(selected.value(), selected.version(),
+                entry.entityVersion(), selected.expiresAt(), selected.negative()));
     }
 
     private CompletionStage<Optional<V>> storeLoaded(final K key, final Optional<V> value) {

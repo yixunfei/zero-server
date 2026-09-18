@@ -15,6 +15,7 @@
         <module>event-actor</module>
         <module>discovery</module>
         <module>center-logic</module>
+        <module>center-logic-kafka</module>
         <module>redis</module>
     </modules>
     <dependencyManagement>

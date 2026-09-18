@@ -128,21 +128,19 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
     void schedule(final String correlationId, final Instant timeoutAt, final long token) {
         Objects.requireNonNull(correlationId, "correlationId");
         Objects.requireNonNull(timeoutAt, "timeoutAt");
-        if (!running.get()) {
-            return;
-        }
-        long delayMillis = Math.max(1L, timeoutAt.toEpochMilli() - System.currentTimeMillis());
-        long delayTicks = Math.max(1L, divideCeil(delayMillis, tickMillis)) + 1L;
-        long tick = currentTick.get();
-        long rounds = (delayTicks - 1L) / wheelSize;
-        int bucketIndex = bucketIndex(tick + delayTicks);
-        TimeoutTask task = new TimeoutTask(correlationId, timeoutAt.toEpochMilli(), rounds, token);
-        ArrayDeque<TimeoutTask> bucket = buckets[bucketIndex];
-        synchronized (bucket) {
-            if (!running.get()) {
+        while (running.get()) {
+            long delayMillis = Math.max(1L, timeoutAt.toEpochMilli() - System.currentTimeMillis());
+            long delayTicks = Math.max(1L, divideCeil(delayMillis, tickMillis)) + 1L;
+            long tick = currentTick.get();
+            long rounds = (delayTicks - 1L) / wheelSize;
+            ArrayDeque<TimeoutTask> bucket = buckets[bucketIndex(tick + delayTicks)];
+            synchronized (bucket) {
+                if (!running.get()) return;
+                // 等待桶锁期间时间轮可能已经扫描目标桶，重新选桶避免多等一轮。
+                if (currentTick.get() != tick) continue;
+                bucket.addLast(new TimeoutTask(correlationId, timeoutAt.toEpochMilli(), rounds, token));
                 return;
             }
-            bucket.addLast(task);
         }
     }
 

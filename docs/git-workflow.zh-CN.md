@@ -97,7 +97,7 @@ Pull Request 必须写明未运行项、原因和剩余风险。外部测试记�
 
 项目维护 `CHANGELOG.md`。用户可见能力、行为变化、修复、性能变化、弃用、破坏性变化和迁移要求都应记录在 `Unreleased`。
 
-版本号由维护者决定。`0.x` 阶段可能出现破坏性变化，但仍必须提供清晰的 Changelog、迁移说明和回滚边界。正式发布前使用 `docs/release-checklist.zh-CN.md` 做分层复核。
+版本号由维护者决定。`0.x` 阶段可能出现破坏性变化，但仍必须提供清晰的 Changelog、迁移说明和回滚边界。正式发布前使用 `docs/operations/release-checklist.zh-CN.md` 做分层复核。
 
 ## 7. 合并与历史
 

@@ -18,6 +18,18 @@ import org.junit.jupiter.api.Test;
 class EventActorConsumerTest {
     @Test
     void publishesAnEventToAnActorWithoutTheStarterOrNetworking() {
+        var planned = RuntimeBasics.builder().install(EventRuntime.module())
+                .install(ActorRuntime.module()).diagnose();
+        // 本组合的 REQUIRED 闭包恰为两条边：dead-letter -> event-bus，executors -> actor。
+        var required = planned.edges().stream()
+                .filter(edge -> edge.kind()
+                        == group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan.DependencyEdgeKind.REQUIRED)
+                .map(edge -> edge.from().value() + "->" + edge.to().value())
+                .sorted()
+                .toList();
+        assertEquals(java.util.List.of(
+                "zero.local.dead-letter->zero.local.event-bus",
+                "zero.local.executors->zero.local.actor"), required);
         AtomicInteger handled = new AtomicInteger();
         try (GameRuntime runtime = RuntimeBasics.builder().install(EventRuntime.module())
                 .install(ActorRuntime.module()).build()) {

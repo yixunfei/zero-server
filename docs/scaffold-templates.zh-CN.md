@@ -14,12 +14,12 @@
 | --- | --- | --- | --- |
 | 最小内核 / 自选组件 | `--template runtime` | 最小依赖、显式装配、实现替换 | 外部服务与部署验证 |
 | RPG 最小本地流程 | `--template local` | 登录、进入场景、移动、玩家 / 场景服务组合 | 账号鉴权、断线重连、正式在线状态和持久化策略 |
-| 房间 / 对战小局 | `--template room` | 创建房间、加入、准备、开始、提交帧输入 | 匹配、广播、断线恢复、观战、结算和跨服房间；正式化前阅读 [房间组件最小契约草案](room-component-minimum-contract.zh-CN.md) |
-| 场景同步 / 简单 AOI | `--template scene-sync` | 进入场景、移动、可见性查询 | 正式 AOI、广播、delta 压缩、快照协议和跨服迁移；正式化前阅读 [AOI / 状态同步最小契约草案](aoi-state-sync-minimum-contract.zh-CN.md) |
-| 帧同步 / lockstep | `--template frame-sync` | 加入比赛、提交输入、推进帧、查询快照 | 时钟模型、断线补帧、回滚、观战、可靠广播和反作弊；正式化前阅读 [帧同步最小契约草案](frame-sync-minimum-contract.zh-CN.md) |
-| AI NPC / tick | `--template npc-tick` | NPC 生成、行为切换、zone tick、状态查询 | 行为树、寻路、战斗 AI、tick 预算、背压和跨服迁移；正式化前阅读 [NPC tick 最小契约草案](npc-tick-minimum-contract.zh-CN.md) |
-| 排行榜 / 赛季 | `--template ranking-season` | 积分提交、Top 查询、玩家排名、赛季切换 | Redis sorted set、跨服榜、结算奖励、幂等和容量验证；正式化前阅读 [排行榜 / 赛季最小契约草案](ranking-season-minimum-contract.zh-CN.md) |
-| 开放世界 / 分片迁移 | `--template world-shard` | 进入世界、实体移动、分片迁移、状态查询 | 跨进程迁移、状态交接、跨服广播、AOI 拼接和一致性协议；正式化前阅读 [开放世界 / 分片迁移最小契约草案](world-shard-minimum-contract.zh-CN.md) |
+| 房间 / 对战小局 | `--template room` | 创建房间、加入、准备、开始、提交帧输入 | 匹配、广播、断线恢复、观战、结算和跨服房间；模块用法见 [房间组件本地契约与扩展边界](reference/room-component-minimum-contract.zh-CN.md) |
+| 场景同步 / 简单 AOI | `--template scene-sync` | 进入场景、移动、可见性查询 | 正式 AOI、广播、delta 压缩、快照协议和跨服迁移；模块用法见 [AOI / 状态同步本地契约与扩展边界](reference/aoi-state-sync-minimum-contract.zh-CN.md) |
+| 帧同步 / lockstep | `--template frame-sync` | 加入比赛、提交输入、推进帧、查询快照 | 时钟模型、断线补帧、回滚、观战、可靠广播和反作弊；模块用法见 [帧同步本地契约与扩展边界](reference/frame-sync-minimum-contract.zh-CN.md) |
+| AI NPC / tick | `--template npc-tick` | NPC 生成、行为切换、zone tick、状态查询 | 行为树、寻路、战斗 AI、tick 预算、背压和跨服迁移；模块用法见 [NPC tick 本地契约与扩展边界](reference/npc-tick-minimum-contract.zh-CN.md) |
+| 排行榜 / 赛季 | `--template ranking-season` | 积分提交、Top 查询、玩家排名、赛季切换 | Redis sorted set、跨服榜、结算奖励、幂等和容量验证；模块用法见 [排行榜 / 赛季本地契约与扩展边界](reference/ranking-season-minimum-contract.zh-CN.md) |
+| 开放世界 / 分片迁移 | `--template world-shard` | 进入世界、实体移动、分片迁移、状态查询 | 跨进程迁移、状态交接、跨服广播、AOI 拼接和一致性协议；模块用法见 [开放世界 / 分片迁移本地契约与扩展边界](reference/world-shard-minimum-contract.zh-CN.md) |
 
 脚本事实入口以命令输出为准：
 
@@ -27,7 +27,23 @@
 java scripts/NewLocalGame.java --listTemplates
 ```
 
-## 2. 命令式推荐
+### local 模板的异步边界
+
+`local` 模板生成的业务代码拆分为 composition root、`LocalGameBO`、`LocalGameFlow`、`LocalGameFixture` 和 `LocalGameObservation`。Player/scene 服务通过构造器注入，返回 `CompletionStage`；`LocalGameBO` 和 Actor/IO 路径禁止调用 `join()`/`get()`。只有最外层 `runDemo` smoke 编排允许等待最终结果，不能将其视为长驻网络服务或生产就绪证明。超时、取消、重复请求和异常语义由业务端口显式定义。
+
+## CLI 退出码契约
+
+`ProjectScaffoldCli` 作为进程运行时使用稳定退出码：
+
+- `0`：成功（包括只读 catalog 查询）。
+- `1`：普通生成失败；stderr 以 `SCAFFOLD-GENERATION-FAILED|<message>` 开头。
+- `2`：参数解析失败；stderr 以 `SCAFFOLD-INVALID-ARGUMENT|<message>` 开头。
+- `3`：`--plan`/`--diff` 或升级事务被阻塞；stderr 以 `SCAFFOLD-PLAN-BLOCKED|<message>` 或对应稳定升级错误码开头。
+
+这些错误文本写入 stderr，stdout 仅保留成功摘要或 plan 输出。进程级 0/1/2/3 矩阵由 `ZeroAcceptanceEvidence` 在独立子进程中执行，并将每个场景的 stdout、原始 stderr、预期/实际退出码保存到 `target/acceptance-evidence/cli-exit-matrix/`。
+
+
+## 2. 按关键词选择
 
 如果不想先读完整目录，可以直接用关键词让脚手架推荐模板：
 
@@ -106,13 +122,14 @@ java scripts/RunLocalPrototype.java `
 
 先运行 `mvn -B -ntp -q -DskipTests install` 安装本次框架与生成工具。`--components` 接收逗号分隔的组件 ID，附加到模板必须能力上。未知 ID 会在写入工程前失败。
 
-支持：`bootstrap`、`actor`、`event`、`protocol`、`rpc`、`data`、`cache`、`log`、`monitor`、`discovery`、`redis`、`kafka`、`nacos`、`mongo`、`postgresql`、`custom-actor`。基础配置/执行器始终存在，组件依赖自动补齐。`redis` 选择 Redis 数据工厂；`custom-actor` 用应用 provider 替换 Actor 调度器。`kafka`/`nacos` 替换同次选择的本地 `rpc`/`discovery`。网络监听仍需应用显式接入，不提供 `net` 生成选项。
+支持：`bootstrap`、`actor`、`event`、`protocol`、`rpc`、`data`、`cache`、`log`、`monitor`、`discovery`、`redis`、`kafka`、`nacos`、`mongo`、`postgresql`、`net`、`custom-actor`。基础配置/执行器始终存在，组件依赖自动补齐。`redis` 选择 Redis 数据工厂；`custom-actor` 用应用 provider 替换 Actor 调度器。`kafka`/`nacos` 替换同次选择的本地 `rpc`/`discovery`。`runtime + net` 生成网络策略依赖与配置；`local + net` 额外生成 `<Application>Server` 与 `<Application>TcpClient`，必须显式运行 Server 才监听。当前新生成的 net 工程调用无参 `NetworkRuntime.module()`，与现有 policy/limiter API 不匹配，编译验证失败；不能按已通过模板使用。默认无 net 的 smoke 入口仍会退出；复现与可用替代示例见[快速上手](quickstart.zh-CN.md#3-生成并运行业务原型)。
 
 | 路径 | 生成参数 | 默认验收行为 |
 | --- | --- | --- |
 | 最小运行时 | `--template runtime` | 仅 3 个框架依赖，启动后关闭 |
 | 事件 / Actor | `--template runtime --components event,actor` | 7 个框架依赖，启动后关闭 |
-| 本地 RPG | `--template local` | 原有登录、场景进入与移动流程 |
+| 本地 RPG | `--template local` | 登录、场景进入与移动后退出 |
+| TCP 原型（当前受阻） | `--template local --components net` | Server 文件可生成；装配 API 不匹配导致编译失败 |
 | 单 Redis | `--template runtime --components redis` | 仅诊断，不创建客户端，输出 `started=false` |
 | 中心—逻辑 RPC | `--template runtime --components kafka` | 自动补齐日志，未选数据库/发现 SDK 缺席 |
 | 分布式基础设施组合 | `--template runtime --components kafka,nacos,mongo,redis,postgresql` | 仅诊断所选配置，不连接真实服务 |
@@ -126,7 +143,7 @@ java scripts/VerifyGeneratedCompositions.java
 
 POM 由所选 provider 的 Maven 坐标及模板源码需要组成。RPG 的 player/scene 仍传递需要 game、data、cache 抽象；这些类存在不代表安装了对应运行时 provider。其他六类业务模板不会固定引入 player/scene。codegen 是 exec 插件依赖，不进入应用运行类路径。最小 `runtime` 模板没有协议文件或协议构建插件。
 
-每个工程还生成 `config/application.properties.example` 和 `RuntimeAssembly.java`，清单增加 `selectedComponents`、`selectedProviders`、`runtimeCapabilities`。一个数据来源绑定角色 `main`；多个来源按来源名绑定，应用可改为业务角色。业务接入见 [Repository 指南](repository-composition-guide.zh-CN.md)。
+每个工程还生成 `config/application.properties.example` 和 `RuntimeAssembly.java`，清单增加 `selectedComponents`、`selectedProviders`、`runtimeCapabilities`。一个数据来源绑定角色 `main`；多个来源按来源名绑定，应用可改为业务角色。业务接入见 [Repository 指南](guides/repository-composition-guide.zh-CN.md)。
 
 配置文件通过 `ZERO_CONFIG_FILE` 或 `-Dzero.config.file` 交给 `ZeroConfigLoader`。外部 runtime 模板默认只诊断，不创建客户端；缺配置输出 `runtime-diagnosis=incomplete`，齐全则为 `ok`。使用样例配置后执行 `mvn -q exec:java '-Dexec.args=--start'` 才进行真实启动健康检查；`zero.mode` 可为 standalone/external-test/production。给业务模板额外添加 Adapter 后，业务启动及测试需要真实配置和服务，不属于七类默认本地 smoke。
 
@@ -167,7 +184,7 @@ local-game=ok
 框架能力触点：
 
 - `zero-codegen` 生成 DTO / codec / BO / dispatcher。
-- `zero-server-starter` 提供本地运行时装配。
+- 默认通过生成的 `RuntimeAssembly` 按需装配；选择 `net` 时 Server 使用 `ZeroServerTcpApplication` 管理 runtime/listener 生命周期。
 - `zero-player` 和 `zero-scene` 提供玩家与场景原型能力。
 - `zero-log` 和 `zero-monitor` 记录本地日志与指标。
 
@@ -209,7 +226,7 @@ room-game=ok
 生产缺口：
 
 - 不包含正式匹配、房间广播、断线恢复、观战和结算。
-- 不冻结 `zero-room` 模块或跨服房间路由 API；正式化前先阅读 [房间组件最小契约草案](room-component-minimum-contract.zh-CN.md)。
+- 不冻结 `zero-room` 模块或跨服房间路由 API；模块用法见 [房间组件本地契约与扩展边界](reference/room-component-minimum-contract.zh-CN.md)。
 
 ### 4.3 scene-sync
 
@@ -242,7 +259,7 @@ scene-sync=ok
 生产缺口：
 
 - 不包含正式 AOI 索引、广播、delta 压缩或客户端快照协议。
-- 不覆盖跨服迁移、地图切分或复杂场景一致性；正式化前先阅读 [AOI / 状态同步最小契约草案](aoi-state-sync-minimum-contract.zh-CN.md)。
+- 不覆盖跨服迁移、地图切分或复杂场景一致性；模块用法见 [AOI / 状态同步本地契约与扩展边界](reference/aoi-state-sync-minimum-contract.zh-CN.md)。
 
 ### 4.4 frame-sync
 
@@ -275,7 +292,7 @@ frame-sync=ok
 
 生产缺口：
 
-- 不包含时钟同步、断线补帧、回滚、观战和可靠广播；正式化前先阅读 [帧同步最小契约草案](frame-sync-minimum-contract.zh-CN.md)。
+- 不包含时钟同步、断线补帧、回滚、观战和可靠广播；模块用法见 [帧同步本地契约与扩展边界](reference/frame-sync-minimum-contract.zh-CN.md)。
 - 不冻结正式帧协议、反作弊或跨服房间语义。
 
 ### 4.5 npc-tick
@@ -311,7 +328,7 @@ npc-tick=ok
 
 - 不包含行为树、寻路、战斗 AI、tick 预算或背压策略。
 - 不覆盖 NPC 跨服迁移、热更新行为脚本或生产调度观测。
-- 正式化前先阅读 [NPC tick 最小契约草案](npc-tick-minimum-contract.zh-CN.md)。
+- 模块用法见 [NPC tick 本地契约与扩展边界](reference/npc-tick-minimum-contract.zh-CN.md)。
 
 ### 4.6 ranking-season
 
@@ -346,7 +363,7 @@ ranking-season=ok
 
 - 不包含 Redis sorted set、跨服榜、结算奖励和幂等补偿。
 - 不覆盖容量、热 key、排行榜快照或降级策略。
-- 正式化前先阅读 [排行榜 / 赛季最小契约草案](ranking-season-minimum-contract.zh-CN.md)。
+- 模块用法见 [排行榜 / 赛季本地契约与扩展边界](reference/ranking-season-minimum-contract.zh-CN.md)。
 
 ### 4.7 world-shard
 
@@ -381,11 +398,11 @@ world-shard=ok
 
 - 不包含跨进程迁移、可靠状态交接、跨服广播或 AOI 拼接。
 - 不冻结正式 WorldShard、ScenePartition、迁移协议或一致性边界。
-- 正式化前先阅读 [开放世界 / 分片迁移最小契约草案](world-shard-minimum-contract.zh-CN.md)。
+- 模块用法见 [开放世界 / 分片迁移本地契约与扩展边界](reference/world-shard-minimum-contract.zh-CN.md)。
 
-## 5. 从模板晋升为正式模块
+## 5. 从模板接入现有模块与生产能力
 
-模板可以帮助业务团队快速验证玩法，但晋升为正式框架模块前至少需要单独完成以下设计和验证：
+模板内的业务演示与框架模块是不同产物。Room、AOI/状态同步、帧同步、NPC、榜单、世界分片已有本地最小模块，应先参考对应示例复用；面向生产扩展时仍需以下设计和验证：
 
 | 方向 | 必须补齐 |
 | --- | --- |
@@ -393,27 +410,27 @@ world-shard=ok
 | 线程与 Actor | lane 选择、背压、队列指标、跨 Actor 消息边界 |
 | 网络接入 | 握手、鉴权、心跳、重连、限流、连接治理和压测 |
 | 数据与缓存 | Repository / Cache 抽象接入、脏数据追踪、落库失败降级 |
-| 日志与指标 | 复用 `schemaVersion=1`、`LogAppender`、真实 ErrorCode、有序标签 schema；补齐 production sink、Prometheus endpoint、容量和告警闭环 |
+| 日志与指标 | 复用 `schemaVersion=1`、`LogAppender`、真实 ErrorCode、有序标签 schema；补齐 production sink、Endpoint 安全接入、容量和告警闭环 |
 | 分布式语义 | RPC、服务发现、跨进程路由、幂等和故障演练 |
 | 安全与运营 | GM dry-run、审批、RBAC、IP 白名单和审计 |
 
-Room / Matchmaking 方向的首个独立设计输入是 [房间组件最小契约草案](room-component-minimum-contract.zh-CN.md)，其中列出生命周期、成员状态、Actor 归属、广播顺序、结算幂等、匹配 ticket 和跨服边界候选。
+Room / Matchmaking 方向的现有本地实现与扩展候选见 [房间组件本地契约与扩展边界](reference/room-component-minimum-contract.zh-CN.md)，其中列出生命周期、成员状态、Actor 归属、广播顺序、结算幂等、匹配 ticket 和跨服边界候选。
 
-AOI / State Sync 方向的首个独立设计输入是 [AOI / 状态同步最小契约草案](aoi-state-sync-minimum-contract.zh-CN.md)，其中列出 AOI、兴趣管理、实体状态、可见性事件、snapshot / delta、广播背压和跨服迁移边界候选。
+AOI / State Sync 方向的现有本地实现与扩展候选见 [AOI / 状态同步本地契约与扩展边界](reference/aoi-state-sync-minimum-contract.zh-CN.md)，其中列出 AOI、兴趣管理、实体状态、可见性事件、snapshot / delta、广播背压和跨服迁移边界候选。
 
-Frame Sync 方向的首个独立设计输入是 [帧同步最小契约草案](frame-sync-minimum-contract.zh-CN.md)，其中列出固定帧时钟、输入收集、帧推进、snapshot / rollback 边界、广播顺序、观战和反作弊边界候选。
+Frame Sync 方向的现有本地实现与扩展候选见 [帧同步本地契约与扩展边界](reference/frame-sync-minimum-contract.zh-CN.md)，其中列出固定帧时钟、输入收集、帧推进、snapshot / rollback 边界、广播顺序、观战和反作弊边界候选。
 
-NPC Tick 方向的首个独立设计输入是 [NPC tick 最小契约草案](npc-tick-minimum-contract.zh-CN.md)，其中列出 NPC 生命周期、zone tick、行为状态、tick 预算、背压、降级、adapter 超时和热更边界候选。
+NPC Tick 方向的现有本地实现与扩展候选见 [NPC tick 本地契约与扩展边界](reference/npc-tick-minimum-contract.zh-CN.md)，其中列出 NPC 生命周期、zone tick、行为状态、tick 预算、背压、降级、adapter 超时和热更边界候选。
 
-Ranking / Season 方向的首个独立设计输入是 [排行榜 / 赛季最小契约草案](ranking-season-minimum-contract.zh-CN.md)，其中列出排行榜模型、赛季生命周期、积分提交、查询快照、Redis / Cache 边界、结算奖励和幂等补偿候选。
+Ranking / Season 方向的现有本地实现与扩展候选见 [排行榜 / 赛季本地契约与扩展边界](reference/ranking-season-minimum-contract.zh-CN.md)，其中列出排行榜模型、赛季生命周期、积分提交、查询快照、Redis / Cache 边界、结算奖励和幂等补偿候选。
 
-World Shard 方向的首个独立设计输入是 [开放世界 / 分片迁移最小契约草案](world-shard-minimum-contract.zh-CN.md)，其中列出世界模型、分片模型、实体归属、迁移状态机、状态交接、跨服路由、AOI 拼接和广播一致性候选。
+World Shard 方向的现有本地实现与扩展候选见 [开放世界 / 分片迁移本地契约与扩展边界](reference/world-shard-minimum-contract.zh-CN.md)，其中列出世界模型、分片模型、实体归属、迁移状态机、状态交接、跨服路由、AOI 拼接和广播一致性候选。
 
-除七种完整玩法模板外，`templates/config-hot-reload-snippet` 提供可叠加到任意生成项目的 CSV 配置片段，包括 typed 道具 record、独立配置模块、示例 CSV 和 Starter 装配说明。它不会改变 `NewLocalGame` 的七种模板清单；复制后仍需显式配置 `zero.config.hot-reload.enabled=true` 并使用受管非内联 remote IO executor。详细边界见 [CSV 配置加载与本地原子热重载](csv-config-hot-reload.zh-CN.md)。
+除七种完整玩法模板外，`templates/config-hot-reload-snippet` 提供可叠加到任意生成项目的 CSV 配置片段，包括 typed 道具 record、独立配置模块、示例 CSV 和 Starter 装配说明。它不会改变 `NewLocalGame` 的七种模板清单；复制后仍需显式配置 `zero.config.hot-reload.enabled=true` 并使用受管非内联 remote IO executor。详细边界见 [CSV 配置加载与本地原子热重载](guides/csv-config-hot-reload.zh-CN.md)。
 
-`templates/managed-scheduler-snippet` 提供另一类可叠加片段：统一注册 once、fixed-delay、fixed-rate 和 Actor deadline 消息，直接返回异步 gateway stage，并在模块关闭时取消周期 handle。它同样不改变七种完整玩法模板清单；复制后必须显式配置 `zero.scheduler.enabled=true`，使用非内联 background executor，并保证 player/scene/entity 状态只在 Actor lane 修改。详细边界见 [本地受管定时任务运行时](managed-scheduler.zh-CN.md)。
+`templates/managed-scheduler-snippet` 提供另一类可叠加片段：统一注册 once、fixed-delay、fixed-rate 和 Actor deadline 消息，直接返回异步 gateway stage，并在模块关闭时取消周期 handle。它同样不改变七种完整玩法模板清单；复制后必须显式配置 `zero.scheduler.enabled=true`，使用非内联 background executor，并保证 player/scene/entity 状态只在 Actor lane 修改。详细边界见 [本地受管定时任务运行时](guides/managed-scheduler.zh-CN.md)。
 
-`templates/observability-snippet` 提供可叠加的最小日志/指标模块：装配层创建一次 `LogPipeline` 并向业务注入 `LogAppender`，业务不保存或直接调用 terminal `LogSink`；成功记录不携带 ErrorCode，失败记录传入真实 ErrorCode；`MetricDefinition` 显式声明 `module / operation / result` 有序 schema。默认安全门拒绝 token、密码、secret、credential、raw command 和凭据 URI，并脱敏 IP、operator、accountId、playerId、targetId；TraceId 和完整 IP 不进入指标标签。该片段同样不改变七种完整玩法模板清单，完整边界见 [可观测性最小运行时](observability-runtime.zh-CN.md)。
+`templates/observability-snippet` 提供可叠加的最小日志/指标模块：装配层创建一次 `LogPipeline` 并向业务注入 `LogAppender`，业务不保存或直接调用 terminal `LogSink`；成功记录不携带 ErrorCode，失败记录传入真实 ErrorCode；`MetricDefinition` 显式声明 `module / operation / result` 有序 schema。默认安全门拒绝 token、密码、secret、credential、raw command 和凭据 URI，并脱敏 IP、operator、accountId、playerId、targetId；TraceId 和完整 IP 不进入指标标签。该片段同样不改变七种完整玩法模板清单，完整边界见 [可观测性最小运行时](guides/observability-runtime.zh-CN.md)。
 
 上述三个片段都是 local / single-process / minimum-slice 接入。可观测性片段不提供 production file/Kafka sink、Prometheus HTTP endpoint、容量、长稳或 SLA 保证，`productionReady=false`。
 
@@ -443,7 +460,6 @@ java scripts/VerifyLocalScaffolds.java --outputDir target\scaffold-verify
 从仓库根目录执行：
 
 ```powershell
-. ./scripts/dev-env.ps1
 mvn -B -ntp -q -DskipTests install
 java scripts/NewLocalGame.java --template runtime --components event,custom-actor --projectName my-runtime --packageName group.example.runtime --outputDir target/my-runtime
 mvn -B -ntp -q -f target/my-runtime/pom.xml clean test
@@ -451,10 +467,10 @@ mvn -B -ntp -q -f target/my-runtime/pom.xml exec:java '-Dexec.args=--diagnose'
 mvn -B -ntp -q -f target/my-runtime/pom.xml exec:java
 ```
 
-在生成的 `RuntimeAssembly.java` 中替换 provider；业务服务继续依赖能力接口。`custom-actor` 给出显式注册和 override 示例。选择 `data` 或 `redis` 时，生成的 Repository 角色 `main` 分别绑定 `local` 或 `redis`；自定义角色与 MongoDB/PostgreSQL 接入见 [Repository 指南](repository-composition-guide.zh-CN.md)。
+在生成的 `RuntimeAssembly.java` 中替换 provider；业务服务继续依赖能力接口。`custom-actor` 给出显式注册和 override 示例。选择 `data` 或 `redis` 时，生成的 Repository 角色 `main` 分别绑定 `local` 或 `redis`；自定义角色与 MongoDB/PostgreSQL 接入见 [Repository 指南](guides/repository-composition-guide.zh-CN.md)。
 
-`--diagnose` 与 `--start` 分开执行。Redis 默认只构建与关闭，需根据 `config/application.properties.example` 设置 `ZERO_CONFIG_FILE`，检查外部诊断报告的 `missingConfigKeys`，再执行 `mvn ... exec:java '-Dexec.args=--start'`。诊断成功不表示服务可达。
+`--diagnose` 与 `--start` 分开执行。外部 runtime 默认只诊断配置，不创建客户端，需根据 `config/application.properties.example` 设置 `ZERO_CONFIG_FILE`，检查外部诊断报告的 `missingConfigKeys`，再执行 `mvn ... exec:java '-Dexec.args=--start'`。诊断成功不表示服务可达。
 
 脚手架在写入文件前拒绝未知参数、重复参数（包括别名重复）、非法组件、Java 关键字包名及不能形成合法类名的项目名。例如 `123-game` 被拒绝，`game-123` 可生成 `Game123Application`。`--components` 必须准确拼写；不会将拼错的参数静默变成默认选择。
 
-`VerifyGeneratedCompositions` 从代码生成器组件目录读取选择集合，不单独维护另一份组件目录。当前包含五条代表消费路径、十二个单组件选择和两条混合路径，共十九个生成消费者。清单/POM 的结构检查使用 JSON/XML 解析，runtime 模板测试再对照实际 runtime plan 检查所选 provider 与 capability。
+`VerifyGeneratedCompositions` 从代码生成器组件目录读取选择集合，不单独维护另一份组件目录。当前包含五条代表消费路径、十六个单组件选择、两条混合路径及中心—逻辑/分布式组合，共二十五个生成消费者。清单/POM 的结构检查使用 JSON/XML 解析，runtime 模板测试再对照实际 runtime plan 检查所选 provider 与 capability。

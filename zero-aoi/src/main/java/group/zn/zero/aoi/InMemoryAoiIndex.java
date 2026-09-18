@@ -10,7 +10,7 @@ import java.util.Set;
 /** Deterministic, single-owner in-memory AOI implementation. */
 public final class InMemoryAoiIndex implements AoiIndex {
     private final Map<String, AoiEntity> entities = new HashMap<>();
-    private final Map<String, Set<String>> observed = new HashMap<>();
+    private final Map<String, Map<String, AoiEntity>> observed = new HashMap<>();
     private final Map<String, Long> syncSequences = new HashMap<>();
     private long sceneSequence;
 
@@ -35,18 +35,18 @@ public final class InMemoryAoiIndex implements AoiIndex {
     }
     @Override public List<VisibilityEvent> observe(final String observerId, final Position center, final int range) {
         Set<String> next = new HashSet<>(visible(center, range));
-        Set<String> prior = observed.computeIfAbsent(observerId, ignored -> new HashSet<>());
+        Map<String, AoiEntity> prior = observed.computeIfAbsent(observerId, ignored -> new HashMap<>());
         List<VisibilityEvent> result = new ArrayList<>();
-        next.stream().filter(id -> !prior.contains(id)).sorted().forEach(id -> result.add(event(VisibilityEvent.Type.ENTER, observerId, entities.get(id))));
-        next.stream().filter(prior::contains).sorted().forEach(id -> result.add(event(VisibilityEvent.Type.UPDATE, observerId, entities.get(id))));
-        prior.stream().filter(id -> !next.contains(id)).sorted().forEach(id -> result.add(new VisibilityEvent(VisibilityEvent.Type.LEAVE, observerId, null, sceneSequence, nextSync(observerId))));
-        prior.clear(); prior.addAll(next);
+        next.stream().filter(id -> !prior.containsKey(id)).sorted().forEach(id -> result.add(event(VisibilityEvent.Type.ENTER, observerId, entities.get(id))));
+        next.stream().filter(prior::containsKey).filter(id -> !entities.get(id).equals(prior.get(id))).sorted().forEach(id -> result.add(event(VisibilityEvent.Type.UPDATE, observerId, entities.get(id))));
+        prior.keySet().stream().filter(id -> !next.contains(id)).sorted().forEach(id -> result.add(event(VisibilityEvent.Type.LEAVE, observerId, prior.get(id))));
+        prior.clear(); next.forEach(id -> prior.put(id, entities.get(id)));
         return List.copyOf(result);
     }
     private VisibilityEvent event(final VisibilityEvent.Type type, final String observer, final AoiEntity entity) {
         return new VisibilityEvent(type, observer, entity, sceneSequence, nextSync(observer));
     }
     private long nextSync(final String observer) { return syncSequences.merge(observer, 1L, Long::sum); }
-    private static int chebyshev(final Position a, final Position b) { return Math.max(Math.abs(a.x() - b.x()), Math.abs(a.y() - b.y())); }
+    private static long chebyshev(final Position a, final Position b) { return Math.max(Math.abs((long) a.x() - b.x()), Math.abs((long) a.y() - b.y())); }
     @Override public long sceneSeq() { return sceneSequence; }
 }

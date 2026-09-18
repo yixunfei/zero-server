@@ -15,4 +15,4 @@ mvn -B -ntp -f examples/npc-tick/pom.xml exec:java
 npc-tick=ok|mode=local|ticks=2|steps=2|behavior=patrol|position=12,20|productionReady=false
 ```
 
-示例只验证单 JVM、调用方串行 owner lane 内的内存状态变更。它不创建线程池，不连接网络、数据库或消息系统，也不实现行为树、寻路、战斗 AI、异步 adapter、背压调度器、持久化、热更或跨服能力。`productionReady=false` 是明确的边界标记，不是生产容量、延迟、SLA 或可靠性声明。容量和测试口径见 `docs/npc-tick-capacity.zh-CN.md`；候选正式契约见 `docs/npc-tick-minimum-contract.zh-CN.md`。
+示例只验证单 JVM、调用方串行 owner lane 内的内存状态变更。它不创建线程池，不连接网络、数据库或消息系统，也不实现行为树、寻路、战斗 AI、异步 adapter、背压调度器、持久化、热更或跨服能力。`productionReady=false` 是明确的边界标记，不是生产容量、延迟、SLA 或可靠性声明。容量和测试口径见 `docs/reference/npc-tick-minimum-contract.zh-CN.md`；候选正式契约见 `docs/reference/npc-tick-minimum-contract.zh-CN.md`。

@@ -35,9 +35,9 @@ public final class ZeroReleaseHardeningReadiness {
             path("module-map", "docs", "module-map.md"),
             path("build-smoke", "scripts", "ZeroBuildSmokeVerifier.java"),
             path("framework-boundary", "scripts", "ZeroFrameworkBoundaryGuard.java"),
-            path("release-readiness", "docs", "release-hardening-readiness.zh-CN.md"),
-            path("release-checklist", "docs", "release-checklist.zh-CN.md"),
-            path("migration-template", "docs", "migration-guide-template.zh-CN.md"));
+            path("release-readiness", "docs", "operations", "release-hardening-readiness.zh-CN.md"),
+            path("release-checklist", "docs", "operations", "release-checklist.zh-CN.md"),
+            path("migration-template", "docs", "migrations", "template.zh-CN.md"));
 
     /**
      * 发布准备材料中的稳定 marker。
@@ -69,15 +69,15 @@ public final class ZeroReleaseHardeningReadiness {
                     "zero-build-smoke-verifier=ok"),
             marker("framework-boundary-summary", "scripts/ZeroFrameworkBoundaryGuard.java",
                     "zero-framework-boundary-guard=ok"),
-            marker("readiness-state", "docs/release-hardening-readiness.zh-CN.md", "partial-evidence"),
-            marker("readiness-confirmation", "docs/release-hardening-readiness.zh-CN.md",
+            marker("readiness-state", "docs/operations/release-hardening-readiness.zh-CN.md", "partial-evidence"),
+            marker("readiness-confirmation", "docs/operations/release-hardening-readiness.zh-CN.md",
                     "requiresConfirmation=true"),
-            marker("checklist-scope", "docs/release-checklist.zh-CN.md", "scope=true"),
-            marker("checklist-levels", "docs/release-checklist.zh-CN.md", "layeredVerification=true"),
-            marker("checklist-rollback", "docs/release-checklist.zh-CN.md", "rollbackRecovery=true"),
-            marker("migration-breaking", "docs/migration-guide-template.zh-CN.md", "breakingChanges=true"),
-            marker("migration-verification", "docs/migration-guide-template.zh-CN.md", "zero-migration-verification-and-rollback=required"),
-            marker("migration-rollback", "docs/migration-guide-template.zh-CN.md", "zero-migration-verification-and-rollback=required"));
+            marker("checklist-scope", "docs/operations/release-checklist.zh-CN.md", "scope=true"),
+            marker("checklist-levels", "docs/operations/release-checklist.zh-CN.md", "layeredVerification=true"),
+            marker("checklist-rollback", "docs/operations/release-checklist.zh-CN.md", "rollbackRecovery=true"),
+            marker("migration-breaking", "docs/migrations/template.zh-CN.md", "breakingChanges=true"),
+            marker("migration-verification", "docs/migrations/template.zh-CN.md", "zero-migration-verification-and-rollback=required"),
+            marker("migration-rollback", "docs/migrations/template.zh-CN.md", "zero-migration-verification-and-rollback=required"));
 
     /**
      * 明确区分的验证与外部动作层级。
@@ -175,8 +175,8 @@ public final class ZeroReleaseHardeningReadiness {
                 + "|warnings=0");
         System.out.println();
         System.out.println("Next:");
-        System.out.println("  Read docs/release-checklist.zh-CN.md");
-        System.out.println("  Copy docs/migration-guide-template.zh-CN.md for a concrete breaking release");
+        System.out.println("  Read docs/operations/release-checklist.zh-CN.md");
+        System.out.println("  Copy docs/migrations/template.zh-CN.md for a concrete breaking release");
         System.out.println("  java scripts/ZeroBuildSmokeVerifier.java");
         System.out.println("  mvn -B -ntp test");
         System.out.println("  mvn -B -ntp -Pquality verify");

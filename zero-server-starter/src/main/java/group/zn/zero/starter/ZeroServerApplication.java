@@ -9,6 +9,7 @@ import group.zn.zero.log.LogSink;
 import group.zn.zero.log.LogSource;
 import group.zn.zero.log.LogType;
 import group.zn.zero.log.ZeroLogRecord;
+import group.zn.zero.net.IServer;
 import group.zn.zero.runtime.api.GameRuntime;
 import group.zn.zero.runtime.bootstrap.RuntimeBasics;
 import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
@@ -28,6 +29,9 @@ public final class ZeroServerApplication extends AbstractLifecycle {
      * 运行时组件。
      */
     private final GameRuntime runtime;
+
+    /** 可选网络服务器；为空时应用不监听端口。 */
+    private final IServer server;
 
     /**
      * 创建应用实例。
@@ -57,7 +61,18 @@ public final class ZeroServerApplication extends AbstractLifecycle {
      * @throws NullPointerException 当运行时为空时抛出。
      */
     public ZeroServerApplication(final GameRuntime runtime) {
+        this(runtime, null);
+    }
+
+    /**
+     * 创建带可选 TCP/网络服务器的应用实例。
+     *
+     * @param runtime 模块化运行时；不可为空。
+     * @param server 可选网络服务器；为空时不 bind；由应用负责启动和停止。
+     */
+    public ZeroServerApplication(final GameRuntime runtime, final IServer server) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
+        this.server = server;
     }
 
     /**
@@ -79,6 +94,15 @@ public final class ZeroServerApplication extends AbstractLifecycle {
     }
 
     /**
+     * 返回可选网络服务器。
+     *
+     * @return 网络服务器；未配置 listener 时为空。
+     */
+    public java.util.Optional<IServer> server() {
+        return java.util.Optional.ofNullable(server);
+    }
+
+    /**
      * 启动运行时组件并写入启动日志。
      *
      * <p>该方法只写入启动观测记录，不修改业务状态；线程安全性由生命周期基类的同步启动流程保证。
@@ -86,6 +110,20 @@ public final class ZeroServerApplication extends AbstractLifecycle {
     @Override
     protected void doStart() {
         runtime.start();
+        try {
+            if (server != null) {
+                server.start();
+            }
+        } catch (RuntimeException failure) {
+            try {
+                if (runtime.running()) {
+                    runtime.stop();
+                }
+            } finally {
+                runtime.close();
+            }
+            throw failure;
+        }
         String mode = config().get(ZeroRuntimeConfigKeys.ZERO_MODE).orElse("unknown");
         String name = config().get(ZeroRuntimeConfigKeys.ZERO_NAME).orElse("unknown");
         runtime.require(LogRuntime.LOG_APPENDER).append(ZeroLogRecord.create(
@@ -106,6 +144,9 @@ public final class ZeroServerApplication extends AbstractLifecycle {
      */
     @Override
     protected void doStop() {
+        if (server != null) {
+            server.stop();
+        }
         runtime.stop();
     }
 

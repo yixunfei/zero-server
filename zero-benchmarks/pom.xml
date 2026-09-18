@@ -24,6 +24,7 @@
         <dependency>
             <groupId>group.zn.zero</groupId>
             <artifactId>zero-protocol</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>group.zn.zero</groupId>

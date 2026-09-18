@@ -20,6 +20,32 @@ public final class RuntimeAdapterStateMachine {
         return current.get();
     }
 
+    /**
+     * 在状态仍为指定值时执行一次原子状态转换。
+     *
+     * @param expected 期望的当前状态。
+     * @param next 目标状态。
+     * @return 转换后的当前快照；若状态已变化则返回实际快照；线程安全。
+     */
+    public Snapshot transitionIf(final State expected, final State next) {
+        Objects.requireNonNull(expected, "expected");
+        Objects.requireNonNull(next, "next");
+        while (true) {
+            Snapshot previous = current.get();
+            if (previous.state() != expected) {
+                return previous;
+            }
+            if (!allowed(previous.state(), next)) {
+                throw new IllegalStateException(
+                        "invalid adapter state transition: " + previous.state() + " -> " + next);
+            }
+            Snapshot updated = new Snapshot(previous.adapterName(), next, Instant.now());
+            if (current.compareAndSet(previous, updated)) {
+                return updated;
+            }
+        }
+    }
+
     public Snapshot transition(final State next) {
         Objects.requireNonNull(next, "next");
         return current.updateAndGet(previous -> {

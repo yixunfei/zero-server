@@ -1,5 +1,9 @@
 {
   "schemaVersion": 1,
+  "ownershipSchemaVersion": 1,
+  "files": [
+__OWNERSHIP_FILES__
+  ],
   "generator": "zero-codegen/project-scaffold",
   "projectName": __PROJECT_NAME_JSON__,
   "packageName": __PACKAGE_JSON__,
