@@ -6,6 +6,7 @@ import group.zn.zero.rpc.observer.RpcTransportObserver;
 import group.zn.zero.rpc.RpcRequest;
 import group.zn.zero.rpc.RpcResponse;
 import group.zn.zero.rpc.spi.RpcHandler;
+import group.zn.zero.security.SecurityMetadataVerifier;
 import java.util.concurrent.CompletionStage;
 import java.util.Objects;
 import java.util.Optional;
@@ -38,7 +39,13 @@ interface KafkaRpcAdapterResourceFactory {
      * @return 生产资源工厂；不可为空，无状态且线程安全。
      */
     static KafkaRpcAdapterResourceFactory production() {
-        return DefaultKafkaRpcAdapterResource::new;
+        return production(SecurityMetadataVerifier.failClosed());
+    }
+
+    /** 在 handler 注册前安装验证器，返回尚未发布的真实资源。 */
+    static KafkaRpcAdapterResourceFactory production(final SecurityMetadataVerifier verifier) {
+        Objects.requireNonNull(verifier, "verifier");
+        return (settings, observer) -> new DefaultKafkaRpcAdapterResource(settings, observer, verifier);
     }
 }
 
@@ -133,10 +140,12 @@ final class DefaultKafkaRpcAdapterResource implements KafkaRpcAdapterResource {
      */
     DefaultKafkaRpcAdapterResource(
             final KafkaRpcSettings settings,
-            final RpcTransportObserver observer) {
+            final RpcTransportObserver observer,
+            final SecurityMetadataVerifier verifier) {
         this.adapter = new KafkaRpcAdapter(
                 Objects.requireNonNull(settings, "settings"),
                 Objects.requireNonNull(observer, "observer"));
+        this.adapter.securityMetadataVerifier(verifier);
     }
 
     /**

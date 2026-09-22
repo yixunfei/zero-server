@@ -8,6 +8,11 @@ RPC 编解码优先使用自研协议，但必须抽象 SPI，支持未来平滑
 
 ## 2. Kafka RPC
 
+接收端默认 fail-closed，必须配置安全元数据验证器；runtime 入口为 `KafkaRuntime.module(properties, verifier)`。
+消费确认等待异步 handler 和响应 producer ack，pause 期间继续 poll 心跳；失败/停机/重平衡允许重投。
+默认 earliest 和实例独立 consumer group；竞争消费和跨重启恢复须显式设置共享或稳定组名。
+这是至少一次语义，业务需要幂等。具体错误处理、配置和迁移见[安全与确认迁移](migrations/20260922-security-storage-concurrency.md)。
+
 zeroServer 支持同步 RPC 通过 Kafka，但默认鼓励异步回调通知。
 
 同步 RPC 默认超时：

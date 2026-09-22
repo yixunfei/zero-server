@@ -12,6 +12,7 @@ import java.util.Objects;
  * @param maxLocalEntries 本地缓存最大条目数。
  * @param maxConcurrentLoads 最大并发加载数。
  * @param allowStaleOnBackendFailure 后端失败时是否允许返回过期本地值。
+ * @param loadTimeout 单次加载最长等待时间；必须为正数。
  * @author zn
  */
 public record CachePolicy(
@@ -20,7 +21,27 @@ public record CachePolicy(
         Duration ttlJitter,
         int maxLocalEntries,
         int maxConcurrentLoads,
-        boolean allowStaleOnBackendFailure) {
+        boolean allowStaleOnBackendFailure,
+        Duration loadTimeout) {
+
+    /** 默认加载超时，防止无响应加载永久占用单飞许可。 */
+    public static final Duration DEFAULT_LOAD_TIMEOUT = Duration.ofSeconds(3);
+
+    /**
+     * 使用默认加载超时创建缓存策略；策略不可变，可并发共享。
+     * @param ttl 正常缓存有效期。
+     * @param negativeTtl 负缓存有效期。
+     * @param ttlJitter TTL 抖动上限。
+     * @param maxLocalEntries 本地容量。
+     * @param maxConcurrentLoads 并发加载上限。
+     * @param allowStaleOnBackendFailure 后端失败时是否允许旧值。
+     * @throws IllegalArgumentException 当时间或容量不合法时抛出。
+     */
+    public CachePolicy(final Duration ttl, final Duration negativeTtl, final Duration ttlJitter,
+            final int maxLocalEntries, final int maxConcurrentLoads, final boolean allowStaleOnBackendFailure) {
+        this(ttl, negativeTtl, ttlJitter, maxLocalEntries, maxConcurrentLoads,
+                allowStaleOnBackendFailure, DEFAULT_LOAD_TIMEOUT);
+    }
 
     /**
      * 默认缓存有效期。
@@ -57,6 +78,7 @@ public record CachePolicy(
         ttl = positive(ttl, "ttl");
         negativeTtl = positive(negativeTtl, "negativeTtl");
         ttlJitter = nonNegative(ttlJitter, "ttlJitter");
+        loadTimeout = positive(loadTimeout, "loadTimeout");
         if (maxLocalEntries <= 0) {
             throw new IllegalArgumentException("maxLocalEntries must be positive");
         }

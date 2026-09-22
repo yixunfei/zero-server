@@ -96,7 +96,7 @@ processor 无法绕过终端复验；附加 `SensitiveFieldPolicy` 只能增加�
 - `MetricSample`：值、标签和值发生时间；标签必须与定义 schema 完全匹配。
 - `MetricRegistry` / `InMemoryMetricRegistry`：定义注册、样本记录和不可变快照。
 - `SystemMetricCollector`：显式采集 JVM 内存、线程、GC、CPU、磁盘和网络接口状态。
-- `PrometheusExporter`：确定性 Prometheus 文本导出；`PrometheusHttpEndpoint`：低依赖、显式 bind/stop 的 JDK HTTP `/metrics` 与 `/health`，不含认证/TLS。
+- `PrometheusExporter`：确定性 Prometheus 文本导出；`PrometheusHttpEndpoint`：显式 bind/stop 的 JDK HTTP `/metrics` 与 `/health`，使用外部管理的异步执行器，支持 Bearer token；非回环必须配置 token。TLS 由部署入口提供。
 - `GrafanaDashboardTemplate`：最小 dashboard JSON 模板生成。
 - `AlertRule` / `AlertEvaluator` / `AlertSink`：本地告警评估与落地扩展点。
 - `PrometheusAlertRuleExporter`：Prometheus alert rules YAML 导出。

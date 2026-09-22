@@ -41,6 +41,7 @@ class RedisCacheStoreExternalIT {
             boolean firstSaved = store.putIfVersion("player-1", entry("v1", 1L)).toCompletableFuture().join();
             Optional<CacheStoreEntry<String>> first = store.get("player-1").toCompletableFuture().join();
             boolean secondSaved = store.putIfVersion("player-1", entry("v2", 2L)).toCompletableFuture().join();
+            boolean equalSaved = store.putIfVersion("player-1", entry("same-version", 2L)).toCompletableFuture().join();
             boolean staleSaved = store.putIfVersion("player-1", entry("stale", 1L)).toCompletableFuture().join();
             boolean oldInvalidate = store.invalidateIfVersion("player-1", 1L).toCompletableFuture().join();
             Optional<CacheStoreEntry<String>> afterOldInvalidate = store.get("player-1").toCompletableFuture().join();
@@ -50,6 +51,7 @@ class RedisCacheStoreExternalIT {
             assertTrue(firstSaved);
             assertEquals(Optional.of("v1"), first.flatMap(CacheStoreEntry::optionalValue));
             assertTrue(secondSaved);
+            assertFalse(equalSaved);
             assertFalse(staleSaved);
             assertFalse(oldInvalidate);
             assertEquals(Optional.of("v2"), afterOldInvalidate.flatMap(CacheStoreEntry::optionalValue));

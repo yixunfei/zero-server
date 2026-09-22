@@ -24,6 +24,13 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
      * Redis 条件保存脚本。
      */
     private static final byte[] SAVE_IF_VERSION_SCRIPT = """
+            local types = {'string', 'string', 'set', 'set', 'list'}
+            for i = 1, #KEYS do
+              local actual = redis.call('TYPE', KEYS[i]).ok
+              if actual ~= 'none' and actual ~= types[i] then
+                return redis.error_reply('WRONGTYPE data key type mismatch')
+              end
+            end
             local current = redis.call('GET', KEYS[2])
             if ARGV[1] == '0' then
               if current then
@@ -39,6 +46,29 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
             redis.call('SADD', KEYS[3], ARGV[4])
             redis.call('SADD', KEYS[4], KEYS[3])
             redis.call('RPUSH', KEYS[5], ARGV[5])
+            return 1
+            """.getBytes(StandardCharsets.UTF_8);
+
+    /**
+     * 原子删除快照、版本、索引和删除日志脚本。
+     */
+    private static final byte[] DELETE_SCRIPT = """
+            local types = {'string', 'string', 'set', 'list'}
+            for i = 1, #KEYS do
+              local actual = redis.call('TYPE', KEYS[i]).ok
+              if actual ~= 'none' and actual ~= types[i] then
+                return redis.error_reply('WRONGTYPE data key type mismatch')
+              end
+            end
+            if not redis.call('GET', KEYS[1]) then
+              return 0
+            end
+            if redis.call('GET', KEYS[2]) ~= ARGV[3] then
+              return -1
+            end
+            redis.call('DEL', KEYS[1], KEYS[2])
+            redis.call('SREM', KEYS[3], ARGV[1])
+            redis.call('RPUSH', KEYS[4], ARGV[2])
             return 1
             """.getBytes(StandardCharsets.UTF_8);
 
@@ -192,11 +222,14 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
                             journalEntryCodec.encode(entry)));
             return result instanceof Number number && number.longValue() == 1L;
         } catch (RuntimeException ex) {
-            if (localJournal == null) {
-                throw ZeroException.of(DataErrorCode.WRITE_FAILED, "redis conditional write failed", ex);
+            if (localJournal != null) {
+                try {
+                    appendLocal(entry);
+                } catch (RuntimeException journalFailure) {
+                    ex.addSuppressed(journalFailure);
+                }
             }
-            appendLocal(entry);
-            return true;
+            throw ZeroException.of(DataErrorCode.WRITE_FAILED, "redis conditional write failed", ex);
         }
     }
 
@@ -217,16 +250,31 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
             ZeroDataEnvelope envelope = envelopeCodec.decode(envelopeBytes);
             String indexKey = indexKey(currentId);
             String journalKey = journalKey(currentId);
-            client.del(bytes(dataKey), bytes(versionKey(currentId)));
-            client.srem(indexKey, currentId);
             RedisDataJournalEntry entry = RedisDataJournalEntry.delete(
                     namespace,
                     collection,
                     currentId,
                     envelope.version(),
                     System.currentTimeMillis());
-            client.rpush(bytes(journalKey), journalEntryCodec.encode(entry));
+            Object result = client.eval(
+                    DELETE_SCRIPT,
+                    List.of(
+                            bytes(dataKey),
+                            bytes(versionKey(currentId)),
+                            bytes(indexKey),
+                            bytes(journalKey)),
+                    List.of(bytes(currentId), journalEntryCodec.encode(entry),
+                            bytes(String.valueOf(envelope.version()))));
+            if (result instanceof Number number && number.longValue() == -1L) {
+                throw ZeroException.of(DataErrorCode.VERSION_CONFLICT, "redis delete version conflict", null);
+            }
+            if (!(result instanceof Number number) || number.longValue() < 0L || number.longValue() > 1L) {
+                throw ZeroException.of(DataErrorCode.DELETE_FAILED, "unexpected redis delete result", null);
+            }
         } catch (RuntimeException ex) {
+            if (ex instanceof ZeroException zeroException) {
+                throw zeroException;
+            }
             throw ZeroException.of(DataErrorCode.DELETE_FAILED, "redis delete failed", ex);
         }
     }

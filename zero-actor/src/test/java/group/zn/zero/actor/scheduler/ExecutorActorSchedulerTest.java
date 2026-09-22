@@ -30,6 +30,35 @@ import org.junit.jupiter.api.Test;
  */
 class ExecutorActorSchedulerTest {
 
+    /** 异步续调拒绝时当前消息已完成，拒绝窗口内排队消息失败，后续 lane 可恢复。 */
+    @Test
+    void asynchronousRescheduleRejectionDoesNotStrandLane() {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var schedulerRef = new java.util.concurrent.atomic.AtomicReference<ActorScheduler>();
+        var duringRejection = new java.util.concurrent.atomic.AtomicReference<CompletableFuture<Void>>();
+        LaneKey lane = LaneKey.player("rejection-window");
+        ActorScheduler scheduler = new ExecutorActorScheduler(task -> {
+            if (calls.incrementAndGet() == 2) {
+                duringRejection.set(schedulerRef.get().dispatch(new ActorMessage(lane, "during"))
+                        .toCompletableFuture());
+                throw new java.util.concurrent.RejectedExecutionException("transient");
+            }
+            task.run();
+        });
+        schedulerRef.set(scheduler);
+        CompletableFuture<Void> handler = new CompletableFuture<>();
+        scheduler.register(String.class, (context, message) -> "first".equals(message.payload())
+                ? handler : CompletableFuture.completedFuture(null));
+        var first = scheduler.dispatch(new ActorMessage(lane, "first")).toCompletableFuture();
+        var queued = scheduler.dispatch(new ActorMessage(lane, "queued")).toCompletableFuture();
+        handler.complete(null);
+        assertTrue(first.isDone());
+        assertFalse(first.isCompletedExceptionally());
+        assertTrue(queued.isCompletedExceptionally());
+        assertTrue(duringRejection.get().isCompletedExceptionally());
+        assertTrue(scheduler.dispatch(new ActorMessage(lane, "after")).toCompletableFuture().isDone());
+    }
+
     /**
      * 验证同一 lane 的消息在外部执行器中按顺序执行。
      */

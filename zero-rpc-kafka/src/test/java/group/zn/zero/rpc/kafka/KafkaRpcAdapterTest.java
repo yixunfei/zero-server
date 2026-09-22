@@ -53,6 +53,8 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class KafkaRpcAdapterTest {
+    /** 本地测试签名器，不用于生产。 */
+    private static final SecurityMetadataAssertion ASSERTION = SecurityMetadataAssertion.digest(new byte[] {1, 2, 3});
 
     /** Verifies tampered metadata and replayed assertions are rejected before handler execution. */
     @Test
@@ -143,15 +145,17 @@ class KafkaRpcAdapterTest {
         KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway);
         KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway);
         new RpcServiceBinder(provider, codecRegistry).bind(PlayerRemoteRpc.class, new PlayerRemoteRpcImpl());
+        provider.securityMetadataVerifier(SecurityMetadataAssertion.verifier(ASSERTION));
         PlayerRemoteRpc client = new RpcClientFactory(
                 caller,
                 codecRegistry,
                 RpcCallOptions.defaults()
                         .withReplyTopic("reply-caller")
-                        .withTraceId("trace-kafka"))
+                        .withTraceId("trace-kafka"), ASSERTION)
                 .create(PlayerRemoteRpc.class);
 
-        PlayerQueryResponseDTO response = client.queryPlayer(new PlayerQueryRequestDTO(10086L)).orThrow();
+        PlayerQueryResponseDTO response = group.zn.zero.security.SecurityContextBridge.with(context(),
+                () -> client.queryPlayer(new PlayerQueryRequestDTO(10086L)).orThrow());
 
         assertEquals(10086L, response.uid);
         assertEquals("player-10086", response.name);
@@ -173,13 +177,15 @@ class KafkaRpcAdapterTest {
         KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway);
         AtomicInteger touched = new AtomicInteger();
         new RpcServiceBinder(provider, codecRegistry).bind(PlayerRemoteRpc.class, new PlayerRemoteRpcOnewayImpl(touched));
+        provider.securityMetadataVerifier(SecurityMetadataAssertion.verifier(ASSERTION));
         PlayerRemoteRpc client = new RpcClientFactory(
                 caller,
                 codecRegistry,
-                RpcCallOptions.defaults().withReplyTopic("reply-caller"))
+                RpcCallOptions.defaults().withReplyTopic("reply-caller"), ASSERTION)
                 .create(PlayerRemoteRpc.class);
 
-        RpcResult<Void> result = client.touchPlayer(new PlayerTouchRequestDTO(7L));
+        RpcResult<Void> result = group.zn.zero.security.SecurityContextBridge.with(context(),
+                () -> client.touchPlayer(new PlayerTouchRequestDTO(7L)));
 
         assertTrue(result.success());
         assertEquals(7, touched.get());
@@ -197,16 +203,18 @@ class KafkaRpcAdapterTest {
         RpcCodecRegistry codecRegistry = codecRegistry();
         KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway, observer);
         KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway, observer);
+        provider.securityMetadataVerifier(SecurityMetadataAssertion.verifier(ASSERTION));
         new RpcServiceBinder(provider, codecRegistry).bind(PlayerRemoteRpc.class, new PlayerRemoteRpcImpl());
         PlayerRemoteRpc client = new RpcClientFactory(
                 caller,
                 codecRegistry,
                 RpcCallOptions.defaults()
                         .withReplyTopic("reply-caller")
-                        .withTraceId("trace-observed"))
+                        .withTraceId("trace-observed"), ASSERTION)
                 .create(PlayerRemoteRpc.class);
 
-        PlayerQueryResponseDTO response = client.queryPlayer(new PlayerQueryRequestDTO(42L)).orThrow();
+        PlayerQueryResponseDTO response = group.zn.zero.security.SecurityContextBridge.with(context(),
+                () -> client.queryPlayer(new PlayerQueryRequestDTO(42L)).orThrow());
 
         RpcTransportSnapshot callerSnapshot = caller.snapshot();
         RpcTransportSnapshot providerSnapshot = provider.snapshot();

@@ -6,15 +6,15 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 
 /**
  * Minimal embedded Prometheus HTTP endpoint.
  *
- * <p>This endpoint owns only the explicitly bound JDK HTTP server. Requests are
- * handled synchronously through an explicit executor and no application
- * thread pool is created. Authentication, TLS, rate limiting and proxy
- * policy are intentionally outside this minimum slice.</p>
+ * <p>请求交给调用方管理的异步执行器；本类不创建线程池。非回环绑定必须配置 Bearer token，
+ * token 同时保护 metrics 与 health。TLS 由部署入口提供。</p>
  */
 public final class PrometheusHttpEndpoint implements AutoCloseable {
     /** Prometheus scrape path. */
@@ -27,18 +27,48 @@ public final class PrometheusHttpEndpoint implements AutoCloseable {
     private final InetSocketAddress bindAddress;
     private final MetricRegistry registry;
     private final PrometheusExporter exporter;
+    /** 可选 token 的字节快照，不用于诊断输出。 */
+    private final byte[] bearerToken;
     private HttpServer server;
+    /** 外部管理的非内联执行器，生命周期由装配方负责。 */
+    private final Executor executor;
 
     /**
      * Creates an endpoint with an explicit bind address and registry.
      *
      * @param bindAddress address and port to bind; port 0 is allowed for tests.
      * @param registry registry to scrape; not null.
+     * @param executor externally managed asynchronous executor; must not run tasks inline.
      */
-    public PrometheusHttpEndpoint(final InetSocketAddress bindAddress, final MetricRegistry registry) {
+    public PrometheusHttpEndpoint(
+            final InetSocketAddress bindAddress, final MetricRegistry registry, final Executor executor) {
+        this(bindAddress, registry, executor, null);
+    }
+
+    /**
+     * 创建带鉴权的端点；构造不启动资源，start/stop 线程安全。
+     * @param bindAddress 监听地址；非回环必须配置 token。
+     * @param registry 指标表；不可为空。
+     * @param executor 外部管理的异步执行器；不得内联运行，端点不负责关闭。
+     * @param bearerToken token；仅回环监听可以为空。
+     * @throws IllegalArgumentException token 为空白或非回环缺少 token 时抛出。
+     */
+    public PrometheusHttpEndpoint(
+            final InetSocketAddress bindAddress,
+            final MetricRegistry registry,
+            final Executor executor,
+            final String bearerToken) {
         this.bindAddress = Objects.requireNonNull(bindAddress, "bindAddress");
         this.registry = Objects.requireNonNull(registry, "registry");
         this.exporter = new PrometheusExporter();
+        this.executor = Objects.requireNonNull(executor, "executor");
+        if (bearerToken != null && bearerToken.isBlank()) {
+            throw new IllegalArgumentException("bearerToken must not be blank");
+        }
+        if (bearerToken == null && !isLoopback(bindAddress)) {
+            throw new IllegalArgumentException("bearerToken is required for non-loopback bind");
+        }
+        this.bearerToken = bearerToken == null ? null : bearerToken.getBytes(StandardCharsets.UTF_8);
     }
 
     /** Starts the endpoint, binding before returning. Repeated starts are idempotent. */
@@ -49,8 +79,7 @@ public final class PrometheusHttpEndpoint implements AutoCloseable {
         HttpServer created = HttpServer.create(bindAddress, 0);
         created.createContext(METRICS_PATH, this::handleMetrics);
         created.createContext(HEALTH_PATH, this::handleHealth);
-        // Do not let the JDK install an implicit executor/thread pool.
-        created.setExecutor(Runnable::run);
+        created.setExecutor(executor);
         try {
             created.start();
             server = created;
@@ -90,6 +119,9 @@ public final class PrometheusHttpEndpoint implements AutoCloseable {
     }
 
     private void handleMetrics(final HttpExchange exchange) throws IOException {
+        if (!authorized(exchange)) {
+            return;
+        }
         if (!METRICS_PATH.equals(exchange.getRequestURI().getPath())) {
             send(exchange, 404, "not found\n", HEALTH_CONTENT_TYPE);
             return;
@@ -102,6 +134,13 @@ public final class PrometheusHttpEndpoint implements AutoCloseable {
     }
 
     private void handleHealth(final HttpExchange exchange) throws IOException {
+        if (!authorized(exchange)) {
+            return;
+        }
+        if (!HEALTH_PATH.equals(exchange.getRequestURI().getPath())) {
+            send(exchange, 404, "not found\n", HEALTH_CONTENT_TYPE);
+            return;
+        }
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             send(exchange, 405, "method not allowed\n", HEALTH_CONTENT_TYPE);
             return;
@@ -121,5 +160,30 @@ public final class PrometheusHttpEndpoint implements AutoCloseable {
         try (OutputStream output = exchange.getResponseBody()) {
             output.write(bytes);
         }
+    }
+
+    private boolean authorized(final HttpExchange exchange) throws IOException {
+        if (bearerToken == null) {
+            return true;
+        }
+        String authorization = exchange.getRequestHeaders().getFirst("Authorization");
+        String prefix = "Bearer ";
+        if (authorization == null || !authorization.startsWith(prefix)) {
+            exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer");
+            send(exchange, 401, "unauthorized\n", HEALTH_CONTENT_TYPE);
+            return false;
+        }
+        byte[] supplied = authorization.substring(prefix.length()).getBytes(StandardCharsets.UTF_8);
+        if (!MessageDigest.isEqual(bearerToken, supplied)) {
+            exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer");
+            send(exchange, 401, "unauthorized\n", HEALTH_CONTENT_TYPE);
+            return false;
+        }
+        return true;
+    }
+
+    private boolean isLoopback(final InetSocketAddress address) {
+        java.net.InetAddress resolved = address.getAddress();
+        return resolved != null && resolved.isLoopbackAddress();
     }
 }

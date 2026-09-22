@@ -164,7 +164,7 @@ registry.record(new MetricSample(
 - `PrometheusExporter` 按定义中的标签顺序确定性输出，正确转义 HELP/label，并显式输出 `NaN`、`+Inf`、`-Inf`；非法样本不会被静默跳过。
 - `MonitorRuntime.collectOnce()` 返回 `MonitorCollectionResult`。单个系统探针失败通过 `SystemMetricCollectionReport` 显式报告，只保留受控探针枚举和异常类型名，不持有 Throwable 或原异常消息。
 
-`PrometheusExporter` 只生成文本；`PrometheusHttpEndpoint` 在显式 bind 地址上提供同步 JDK `HttpServer` 的 `/metrics` 和 `/health`，并由调用方显式 `start/stop` 管理。它不创建隐式线程池、不连接外部系统，默认只适合受控网络边界，明确不含认证、TLS、限流或代理策略。`MonitorRuntime` 也不创建后台线程；调度必须由 Starter 的统一线程管理提供。
+`PrometheusExporter` 只生成文本；`PrometheusHttpEndpoint` 在显式 bind 地址上提供 JDK `HttpServer` 的 `/metrics` 和 `/health`，并由调用方显式 `start/stop` 管理。构造时必须传入外部管理的异步执行器，不能使用 `Runnable::run`。第四参数为可选 Bearer token；非回环绑定必须配置，两个端点均受保护。端点不拥有执行器生命周期。TLS、限流和代理策略由部署入口提供。`MonitorRuntime` 不创建后台线程；调度由 Starter 统一管理。
 
 ## 6. GM 安全审计归因
 

@@ -2,6 +2,11 @@
 
 本文给出 zeroServer 当前公开模块的职责、依赖方向、核心入口、常见修改位置、禁止依赖与风险边界。模块、包结构、核心入口或依赖方向发生变化时，应同步更新本文和对应测试。
 
+2026-09-22 常见修改入口：`zero-rpc-kafka/KafkaRpcConsumerBatch` 在 consumer 线程管理批次异步确认与重平衡；
+`zero-runtime-kafka/KafkaRuntime.module(properties, verifier)` 注入应用安全验证器；
+`NettyHttpServer` 使用请求级验证身份；`PrometheusHttpEndpoint` 接收外部异步执行器和可选 token。
+依赖方向不变，安全验证材料由应用持有。RPC 重投与鉴权配置风险见[迁移说明](migrations/20260922-security-storage-concurrency.md)。
+
 ## 1. 总体分层与依赖方向
 
 zeroServer 的基本形态是“游戏专用运行时内核 + Starter / Adapter 生态”。依赖只能从上层指向下层抽象，核心模块不感知具体中间件。

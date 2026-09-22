@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.LinkedHashSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,6 +30,16 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
      * 缓存条目表。
      */
     private final ConcurrentMap<K, CacheEntry<V>> entries = new ConcurrentHashMap<>();
+
+    /**
+     * 条目插入序列，用于确定最老条目。
+     */
+    private final LinkedHashSet<K> insertionOrder = new LinkedHashSet<>();
+
+    /**
+     * 淘汰锁，保证并发写入后容量不超过上限。
+     */
+    private final Object evictionLock = new Object();
 
     /**
      * 单飞加载表。
@@ -138,7 +149,7 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
     @Override
     public CompletionStage<Void> invalidate(final K key) {
         Objects.requireNonNull(key, "key");
-        entries.compute(key, (ignored, previous) -> {
+        updateEntry(key, previous -> {
             loading.remove(key);
             return null;
         });
@@ -166,8 +177,16 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
         if (existing != null) {
             return existing;
         }
+        CompletableFuture<Optional<V>> boundedLoad = new CompletableFuture<>();
+        future.whenComplete((ignored, failure) -> {
+            if (future.isCancelled()) {
+                loading.remove(key, future);
+                boundedLoad.cancel(false);
+            }
+        });
         try {
-            loader.load(key).whenComplete((loaded, throwable) -> {
+            boundedLoad.orTimeout(policy.loadTimeout().toNanos(), java.util.concurrent.TimeUnit.NANOSECONDS)
+                    .whenComplete((loaded, throwable) -> {
                 try {
                     if (throwable != null) {
                         completeLoadFailure(future, key, throwable);
@@ -182,8 +201,15 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
                     completeLoadFailure(future, key, ex);
                 }
             });
+            loader.load(key).whenComplete((loaded, failure) -> {
+                if (failure == null) {
+                    boundedLoad.complete(loaded);
+                } else {
+                    boundedLoad.completeExceptionally(failure);
+                }
+            });
         } catch (RuntimeException ex) {
-            completeLoadFailure(future, key, ex);
+            boundedLoad.completeExceptionally(ex);
         }
         return future;
     }
@@ -244,12 +270,11 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
     public CompletionStage<Void> putVersioned(final K key, final V value, final long version) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(value, "value");
-        entries.compute(key, (ignored, previous) -> {
+        updateEntry(key, previous -> {
             loading.remove(key);
             return new CacheEntry<>(value, version < 0L ? nextVersion(previous) : version,
                     Instant.now().plus(effectiveTtl(policy.ttl())), false);
         });
-        evictIfNeeded();
         putCount.incrementAndGet();
         return CompletableFuture.completedFuture(null);
     }
@@ -262,12 +287,11 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
      */
     public CompletionStage<Void> putNegative(final K key) {
         Objects.requireNonNull(key, "key");
-        entries.compute(key, (ignored, previous) -> {
+        updateEntry(key, previous -> {
             loading.remove(key);
             return new CacheEntry<>(null, nextVersion(previous),
                     Instant.now().plus(effectiveTtl(policy.negativeTtl())), true);
         });
-        evictIfNeeded();
         putCount.incrementAndGet();
         return CompletableFuture.completedFuture(null);
     }
@@ -282,11 +306,10 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
     public CompletionStage<Void> putEntry(final K key, final CacheEntry<V> entry) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(entry, "entry");
-        entries.compute(key, (ignored, previous) -> {
+        updateEntry(key, previous -> {
             loading.remove(key);
             return entry;
         });
-        evictIfNeeded();
         putCount.incrementAndGet();
         return CompletableFuture.completedFuture(null);
     }
@@ -298,7 +321,11 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
             return null;
         }
         if (entry.expired(Instant.now())) {
-            entries.remove(key, entry);
+            synchronized (evictionLock) {
+                if (entries.remove(key, entry)) {
+                    insertionOrder.remove(key);
+                }
+            }
             return null;
         }
         return entry;
@@ -306,7 +333,7 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
 
     private void storeLoadedValue(final K key, final Optional<V> value,
             final CompletableFuture<Optional<V>> owner) {
-        entries.compute(key, (ignored, previous) -> {
+        updateEntry(key, previous -> {
             if (loading.get(key) != owner || previous != null && !previous.expired(Instant.now())) {
                 return previous;
             }
@@ -322,7 +349,6 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
                         Instant.now().plus(effectiveTtl(policy.negativeTtl())),
                         true));
         });
-        evictIfNeeded();
     }
 
     /**
@@ -332,15 +358,36 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
      * @return 合并后条目；不可为空；不可变。
      */
     CacheEntry<V> mergeEntry(final K key, final CacheEntry<V> candidate) {
-        CacheEntry<V> selected = entries.compute(key, (ignored, previous) -> {
-            if (previous != null && !previous.expired(Instant.now()) && previous.version() >= candidate.version()) {
-                return previous;
+        return updateEntry(key, previous -> {
+            if (previous != null && !previous.expired(Instant.now())) {
+                boolean bothVersioned = previous.entityVersion() > 0 && candidate.entityVersion() > 0;
+                if (bothVersioned && previous.entityVersion() > candidate.entityVersion()
+                        || (!bothVersioned || previous.entityVersion() == candidate.entityVersion())
+                        && previous.version() >= candidate.version()) {
+                    return previous;
+                }
             }
             loading.remove(key);
             return candidate;
         });
-        evictIfNeeded();
-        return selected;
+    }
+
+    /** 同一锁内校验条目身份与实体版本，异步 L2 操作不得删除期间更新的条目。 */
+    boolean invalidateEntry(final K key, final CacheEntry<V> expected, final long entityVersion) {
+        synchronized (evictionLock) {
+            CacheEntry<V> current = entries.get(Objects.requireNonNull(key, "key"));
+            if (current != null && current.entityVersion() > entityVersion) {
+                return false;
+            }
+            if (current != expected) {
+                return current == null;
+            }
+            entries.remove(key);
+            insertionOrder.remove(key);
+            loading.remove(key);
+            invalidateCount.incrementAndGet();
+            return true;
+        }
     }
 
     private void completeLoadFailure(final CompletableFuture<Optional<V>> loadFuture, final K key, final Throwable throwable) {
@@ -369,13 +416,25 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
         return baseTtl.plusMillis(extraMillis);
     }
 
-    private void evictIfNeeded() {
-        while (entries.size() > policy.maxLocalEntries()) {
-            K oldest = entries.keySet().stream().findFirst().orElse(null);
-            if (oldest == null) {
-                return;
+    /** 原子维护条目和有序索引；读命中保持无锁，容量淘汰为 O(1)。 */
+    private CacheEntry<V> updateEntry(final K key,
+            final java.util.function.UnaryOperator<CacheEntry<V>> update) {
+        synchronized (evictionLock) {
+            CacheEntry<V> previous = entries.get(key);
+            CacheEntry<V> next = update.apply(previous);
+            if (next == null) {
+                entries.remove(key);
+                insertionOrder.remove(key);
+            } else if (next != previous) {
+                entries.put(key, next);
+                insertionOrder.remove(key);
+                insertionOrder.add(key);
             }
-            entries.remove(oldest);
+            while (entries.size() > policy.maxLocalEntries()) {
+                K oldest = insertionOrder.removeFirst();
+                entries.remove(oldest);
+            }
+            return next;
         }
     }
 }

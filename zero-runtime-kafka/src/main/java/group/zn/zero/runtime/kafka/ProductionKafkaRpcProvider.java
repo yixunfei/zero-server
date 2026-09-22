@@ -3,6 +3,7 @@ package group.zn.zero.runtime.kafka;
 import group.zn.zero.log.LogAppender;
 import group.zn.zero.rpc.kafka.KafkaRpcSettings;
 import group.zn.zero.rpc.observer.RpcTransportObserver;
+import group.zn.zero.security.SecurityMetadataVerifier;
 import group.zn.zero.runtime.api.ComponentId;
 import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
 import group.zn.zero.runtime.config.ComponentConfig;
@@ -96,22 +97,35 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
     private final ProductionStartupBudget startupBudget;
     private final Map<String, Object> clientProperties;
     private final List<ConfigSource> configSources;
+    /** 请求订阅前安装的应用验证器。 */
+    private final SecurityMetadataVerifier verifier;
 
     private ProductionKafkaRpcProvider(
             final ProductionAdapterDiagnostic diagnostic,
             final ProductionStartupBudget startupBudget,
             final Map<String, Object> clientProperties,
-            final List<ConfigSource> configSources) {
+            final List<ConfigSource> configSources,
+            final SecurityMetadataVerifier verifier) {
         this.diagnostic = Objects.requireNonNull(diagnostic, "diagnostic");
         this.startupBudget = Objects.requireNonNull(startupBudget, "startupBudget");
         this.clientProperties = Map.copyOf(Objects.requireNonNull(clientProperties, "clientProperties"));
         this.configSources = List.copyOf(Objects.requireNonNull(configSources, "configSources"));
+        this.verifier = Objects.requireNonNull(verifier, "verifier");
     }
 
     static Resolution resolve(
             final ProductionConfigResolver resolver,
             final ProductionStartupBudget startupBudget,
             final Map<String, Object> clientProperties) {
+        return resolve(resolver, startupBudget, clientProperties, SecurityMetadataVerifier.failClosed());
+    }
+
+    /** 解析含安全验证器的 provider；仅创建配置，不连接 broker。 */
+    static Resolution resolve(
+            final ProductionConfigResolver resolver,
+            final ProductionStartupBudget startupBudget,
+            final Map<String, Object> clientProperties,
+            final SecurityMetadataVerifier verifier) {
         Objects.requireNonNull(resolver, "resolver");
         ProductionStartupBudget checkedBudget = Objects.requireNonNull(startupBudget, "startupBudget");
         Map<String, Object> checkedProperties = Map.copyOf(
@@ -132,7 +146,7 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
                 diagnostic,
                 checkedBudget,
                 checkedProperties,
-                ProductionConfigSources.from(ID, typedSettings));
+                ProductionConfigSources.from(ID, typedSettings), verifier);
         return Resolution.enabled(diagnostic, provider);
     }
 
@@ -164,7 +178,8 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
             LogAppender logAppender = checked.require(LogRuntime.LOG_APPENDER);
             KafkaRpcSettings settings = settings(checked.config());
             RpcTransportObserver observer = new KafkaProductionTelemetryObserver(logAppender);
-            KafkaRpcLifecycleAdapter adapter = new KafkaRpcLifecycleAdapter(settings, observer);
+            KafkaRpcLifecycleAdapter adapter = new KafkaRpcLifecycleAdapter(
+                    settings, observer, KafkaRpcAdapterResourceFactory.production(verifier));
             ProductionStartupHealthProbe healthProbe = new ProductionStartupHealthProbe(
                     diagnostic,
                     new KafkaClusterHealthCheck(settings),
