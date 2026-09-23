@@ -28,7 +28,7 @@
         <kafka.clients.version>4.2.0</kafka.clients.version>
         <mongodb.driver.version>5.9.2</mongodb.driver.version>
         <jedis.version>7.2.0</jedis.version>
-        <nacos.client.version>3.2.2</nacos.client.version>
+        <nacos.client.version>3.2.3</nacos.client.version>
         <postgresql.jdbc.version>42.7.13</postgresql.jdbc.version>
         <bouncycastle.version>1.80</bouncycastle.version>
         <hikari.version>7.1.0</hikari.version>
