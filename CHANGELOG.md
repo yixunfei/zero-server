@@ -6,6 +6,11 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 2026-09-23 依赖升级候选
+
+- 合入已通过完整本机门禁的 MongoDB Driver 5.9.2、Netty 4.2.17.Final、Nacos Client 3.2.3、Jedis 8.0.0，以及 Actions setup-java v6 / upload-artifact v7。
+- SpotBugs Maven Plugin 4.10.3.0 因 zero-protocol 的 11 个 `UNS_UNSAFE_CALL` 质量告警保留 4.9.3.0；未使用 suppression 绕过门禁。
+- 调度器测试增加有界线程退出等待以消除关闭尾部竞态。完整验证、外部 Docker 限制和回滚方式见[迁移说明](docs/migrations/20260923-dependency-upgrades.md)。
 ### 2026-09-23 公开检出 CI 入口
 
 - 能力台账与发布材料检查使用已跟踪的公开证据，移除对维护者私有脚本、任务档案和本机规则的依赖，仍严格拒绝必需材料缺失。

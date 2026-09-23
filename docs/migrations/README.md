@@ -7,6 +7,7 @@
 | 日期 / 主题 | 适用范围 |
 | --- | --- |
 | [公开检出 CI 入口（2026-09-23）](20260923-public-ci-gates.md) | 能力/发布材料严格检查、平台事务依赖构建及 Windows Path 继承 |
+| [依赖升级与候选合并（2026-09-23）](20260923-dependency-upgrades.md) | MongoDB、Netty、Nacos、Jedis 与 Actions 升级；SpotBugs 4.10 拒绝原因及外部测试边界 |
 | [第三轮性能与 IO 资源治理（2026-09-23）](20260923-performance-third.md) | 单帧出站、只读成功 stage、IO 组拥有权与 runtime 可选装配 |
 | [codegen 对接（2026-09-23）](20260923-codegen-integration.md) | 只读完整 payload 分发、业务实现保护、四语言增量写入与工具升级步骤 |
 | [性能增量（2026-09-23）](20260923-performance-incremental.md) | EventBus/AOI 内部优化、只读输入及生成分发、精确 TopN 缓存 |
