@@ -1,0 +1,682 @@
+public <T> T require(group.zn.zero.runtime.api.ComponentKey<T>);
+public <T> T require(group.zn.zero.runtime.api.ComponentKey<T>);
+public <T> T require(group.zn.zero.runtime.config.ConfigKey<T>);
+public <T> group.zn.zero.runtime.assembly.RuntimeAssembler$Builder contribute(group.zn.zero.runtime.api.ComponentSetKey<T>, group.zn.zero.runtime.api.ComponentId, java.lang.String);
+public <T> group.zn.zero.runtime.assembly.RuntimeAssembler$Builder overrideSelection(group.zn.zero.runtime.api.ComponentKey<T>, group.zn.zero.runtime.api.ComponentId, java.lang.String);
+public <T> group.zn.zero.runtime.assembly.RuntimeAssembler$Builder select(group.zn.zero.runtime.api.ComponentKey<T>, group.zn.zero.runtime.api.ComponentId, java.lang.String);
+public <T> group.zn.zero.runtime.assembly.RuntimeComposition contribute(group.zn.zero.runtime.api.ComponentSetKey<T>, group.zn.zero.runtime.api.ComponentId);
+public <T> group.zn.zero.runtime.assembly.RuntimeComposition override(group.zn.zero.runtime.api.ComponentKey<T>, group.zn.zero.runtime.api.ComponentId);
+public <T> group.zn.zero.runtime.assembly.RuntimeComposition replace(group.zn.zero.runtime.api.ComponentId, group.zn.zero.runtime.api.ComponentKey<T>, T);
+public <T> group.zn.zero.runtime.assembly.RuntimeComposition replace(group.zn.zero.runtime.api.ComponentKey<T>, T);
+public <T> group.zn.zero.runtime.assembly.RuntimePreset$Builder contribute(group.zn.zero.runtime.api.ComponentSetKey<T>, group.zn.zero.runtime.api.ComponentId);
+public <T> group.zn.zero.runtime.assembly.RuntimePreset$Builder select(group.zn.zero.runtime.api.ComponentKey<T>, group.zn.zero.runtime.api.ComponentId);
+public <T> group.zn.zero.runtime.assembly.RuntimeSelection$Builder contribute(group.zn.zero.runtime.api.ComponentSetKey<T>, group.zn.zero.runtime.api.ComponentId, group.zn.zero.runtime.assembly.SelectionSource);
+public <T> group.zn.zero.runtime.assembly.RuntimeSelection$Builder override(group.zn.zero.runtime.api.ComponentKey<T>, group.zn.zero.runtime.api.ComponentId, java.lang.String);
+public <T> group.zn.zero.runtime.assembly.RuntimeSelection$Builder select(group.zn.zero.runtime.api.ComponentKey<T>, group.zn.zero.runtime.api.ComponentId, group.zn.zero.runtime.assembly.SelectionSource);
+public <T> group.zn.zero.runtime.spi.ComponentContribution$Builder bind(group.zn.zero.runtime.api.ComponentKey<T>, T);
+public <T> group.zn.zero.runtime.spi.ComponentContribution$Builder contribute(group.zn.zero.runtime.api.ComponentSetKey<T>, T);
+public <T> java.util.List<T> requireAll(group.zn.zero.runtime.api.ComponentSetKey<T>);
+public <T> java.util.List<T> requireAll(group.zn.zero.runtime.api.ComponentSetKey<T>);
+public <T> java.util.Optional<T> optional(group.zn.zero.runtime.api.ComponentKey<T>);
+public <T> java.util.Optional<T> optional(group.zn.zero.runtime.api.ComponentKey<T>);
+public <T> java.util.Optional<T> optional(group.zn.zero.runtime.config.ConfigKey<T>);
+public abstract <T extends java.lang.AutoCloseable> T register(T);
+public abstract <T> T require(group.zn.zero.runtime.api.ComponentKey<T>);
+public abstract <T> T require(group.zn.zero.runtime.api.ComponentKey<T>);
+public abstract <T> java.util.List<T> requireAll(group.zn.zero.runtime.api.ComponentSetKey<T>);
+public abstract <T> java.util.List<T> requireAll(group.zn.zero.runtime.api.ComponentSetKey<T>);
+public abstract <T> java.util.Optional<T> optional(group.zn.zero.runtime.api.ComponentKey<T>);
+public abstract <T> java.util.Optional<T> optional(group.zn.zero.runtime.api.ComponentKey<T>);
+public abstract T decode(java.lang.String) throws java.lang.Exception;
+public abstract group.zn.zero.runtime.api.BindingCardinality cardinality();
+public abstract group.zn.zero.runtime.api.RuntimeState runtimeState();
+public abstract group.zn.zero.runtime.config.ComponentConfig config();
+public abstract group.zn.zero.runtime.config.ConfigSourceKind kind();
+public abstract group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan plan();
+public abstract group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport report();
+public abstract group.zn.zero.runtime.health.RuntimeHealthSnapshot healthSnapshot();
+public abstract group.zn.zero.runtime.spi.ComponentContribution create(group.zn.zero.runtime.spi.ComponentCreationContext) throws java.lang.Exception;
+public abstract group.zn.zero.runtime.spi.ComponentContribution create(group.zn.zero.runtime.spi.ComponentCreationContext) throws java.lang.Exception;
+public abstract group.zn.zero.runtime.spi.ComponentDescriptor descriptor();
+public abstract group.zn.zero.runtime.spi.ResourceRegistrar resources();
+public abstract group.zn.zero.runtime.spi.RuntimeDeadline assemblyDeadline();
+public abstract java.lang.Class<T> type();
+public abstract java.lang.String id();
+public abstract java.lang.String id();
+public abstract java.util.Optional<java.lang.String> value(java.lang.String);
+public abstract java.util.concurrent.CompletionStage<group.zn.zero.runtime.health.HealthResult> check(group.zn.zero.runtime.health.HealthRequest);
+public abstract void close();
+public boolean equals(java.lang.Object);
+public boolean expired();
+public boolean invalid();
+public boolean required();
+public boolean sensitive();
+public boolean sensitive();
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final class group.zn.zero.runtime.api.BindingCardinality extends java.lang.Enum<group.zn.zero.runtime.api.BindingCardinality> {
+public final class group.zn.zero.runtime.api.ComponentId extends java.lang.Record implements java.lang.Comparable<group.zn.zero.runtime.api.ComponentId> {
+public final class group.zn.zero.runtime.api.ComponentKey<T> extends java.lang.Record implements group.zn.zero.runtime.api.BindingKey<T> {
+public final class group.zn.zero.runtime.api.ComponentSetKey<T> extends java.lang.Record implements group.zn.zero.runtime.api.BindingKey<T> {
+public final class group.zn.zero.runtime.api.RuntimeLifecycleCapabilities {
+public final class group.zn.zero.runtime.api.RuntimeState extends java.lang.Enum<group.zn.zero.runtime.api.RuntimeState> {
+public final class group.zn.zero.runtime.assembly.ComponentCatalog {
+public final class group.zn.zero.runtime.assembly.ComponentCatalog$Builder {
+public final class group.zn.zero.runtime.assembly.RuntimeAssembler {
+public final class group.zn.zero.runtime.assembly.RuntimeAssembler$Builder {
+public final class group.zn.zero.runtime.assembly.RuntimeComposition {
+public final class group.zn.zero.runtime.assembly.RuntimeModule extends java.lang.Record {
+public final class group.zn.zero.runtime.assembly.RuntimePreset {
+public final class group.zn.zero.runtime.assembly.RuntimePreset$Builder {
+public final class group.zn.zero.runtime.assembly.RuntimeProfile {
+public final class group.zn.zero.runtime.assembly.RuntimeProfile$Builder {
+public final class group.zn.zero.runtime.assembly.RuntimeSelection {
+public final class group.zn.zero.runtime.assembly.RuntimeSelection$Builder {
+public final class group.zn.zero.runtime.assembly.SelectionSource extends java.lang.Record {
+public final class group.zn.zero.runtime.assembly.SelectionSourceKind extends java.lang.Enum<group.zn.zero.runtime.assembly.SelectionSourceKind> {
+public final class group.zn.zero.runtime.capability.MavenCoordinate extends java.lang.Record implements java.lang.Comparable<group.zn.zero.runtime.capability.MavenCoordinate> {
+public final class group.zn.zero.runtime.capability.RuntimeCapability extends java.lang.Record {
+public final class group.zn.zero.runtime.capability.RuntimeCapabilityModel {
+public final class group.zn.zero.runtime.capability.RuntimeCapabilityModel$Builder {
+public final class group.zn.zero.runtime.capability.RuntimeProviderCapability extends java.lang.Record {
+public final class group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel {
+public final class group.zn.zero.runtime.config.ComponentConfig {
+public final class group.zn.zero.runtime.config.ConfigKey$Builder<T> {
+public final class group.zn.zero.runtime.config.ConfigKey<T> {
+public final class group.zn.zero.runtime.config.ConfigReloadability extends java.lang.Enum<group.zn.zero.runtime.config.ConfigReloadability> {
+public final class group.zn.zero.runtime.config.ConfigSchema {
+public final class group.zn.zero.runtime.config.ConfigSchema$Builder {
+public final class group.zn.zero.runtime.config.ConfigSourceKind extends java.lang.Enum<group.zn.zero.runtime.config.ConfigSourceKind> {
+public final class group.zn.zero.runtime.config.ConfigValidationStatus extends java.lang.Enum<group.zn.zero.runtime.config.ConfigValidationStatus> {
+public final class group.zn.zero.runtime.config.MapConfigSource implements group.zn.zero.runtime.config.ConfigSource {
+public final class group.zn.zero.runtime.config.ResolvedConfigMetadata extends java.lang.Record {
+public final class group.zn.zero.runtime.config.ResolvedRuntimeConfig {
+public final class group.zn.zero.runtime.config.RuntimeConfigResolver {
+public final class group.zn.zero.runtime.config.ZeroConfigSource implements group.zn.zero.runtime.config.ConfigSource {
+public final class group.zn.zero.runtime.diagnostics.RuntimeAssemblyException extends group.zn.zero.core.error.ZeroException {
+public final class group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan extends java.lang.Record {
+public final class group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$ComponentPlan extends java.lang.Record {
+public final class group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdge extends java.lang.Record {
+public final class group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdgeKind extends java.lang.Enum<group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdgeKind> {
+public final class group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$SelectionReason extends java.lang.Record {
+public final class group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport extends java.lang.Record {
+public final class group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport$ComponentStatus extends java.lang.Record {
+public final class group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport$FailureSummary extends java.lang.Record {
+public final class group.zn.zero.runtime.diagnostics.RuntimeErrorCode extends java.lang.Enum<group.zn.zero.runtime.diagnostics.RuntimeErrorCode> implements group.zn.zero.core.error.ErrorCode {
+public final class group.zn.zero.runtime.diagnostics.RuntimeFailurePhase extends java.lang.Enum<group.zn.zero.runtime.diagnostics.RuntimeFailurePhase> {
+public final class group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome extends java.lang.Enum<group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome> {
+public final class group.zn.zero.runtime.health.HealthPhase extends java.lang.Enum<group.zn.zero.runtime.health.HealthPhase> {
+public final class group.zn.zero.runtime.health.HealthRequest extends java.lang.Record {
+public final class group.zn.zero.runtime.health.HealthResult extends java.lang.Record {
+public final class group.zn.zero.runtime.health.HealthStatus extends java.lang.Enum<group.zn.zero.runtime.health.HealthStatus> {
+public final class group.zn.zero.runtime.health.RuntimeHealthSnapshot extends java.lang.Record {
+public final class group.zn.zero.runtime.health.RuntimeHealthSnapshot$ComponentHealth extends java.lang.Record {
+public final class group.zn.zero.runtime.internal.RuntimeIdentifiers {
+public final class group.zn.zero.runtime.spi.ComponentContribution {
+public final class group.zn.zero.runtime.spi.ComponentContribution$Builder {
+public final class group.zn.zero.runtime.spi.ComponentDescriptor {
+public final class group.zn.zero.runtime.spi.ComponentDescriptor$Builder {
+public final class group.zn.zero.runtime.spi.ComponentKind extends java.lang.Enum<group.zn.zero.runtime.spi.ComponentKind> {
+public final class group.zn.zero.runtime.spi.RuntimeDeadline {
+public final class group.zn.zero.runtime.spi.RuntimeProviders {
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public group.zn.zero.core.error.ErrorCategory category();
+public group.zn.zero.core.lifecycle.LifecycleState state();
+public group.zn.zero.runtime.api.BindingCardinality cardinality();
+public group.zn.zero.runtime.api.BindingCardinality cardinality();
+public group.zn.zero.runtime.api.BindingCardinality cardinality();
+public group.zn.zero.runtime.api.ComponentId componentId();
+public group.zn.zero.runtime.api.ComponentId componentId();
+public group.zn.zero.runtime.api.ComponentId componentId();
+public group.zn.zero.runtime.api.ComponentId componentId();
+public group.zn.zero.runtime.api.ComponentId from();
+public group.zn.zero.runtime.api.ComponentId id();
+public group.zn.zero.runtime.api.ComponentId owner();
+public group.zn.zero.runtime.api.ComponentId owner();
+public group.zn.zero.runtime.api.ComponentId owner();
+public group.zn.zero.runtime.api.ComponentId owner();
+public group.zn.zero.runtime.api.ComponentId previousProviderId();
+public group.zn.zero.runtime.api.ComponentId providerId();
+public group.zn.zero.runtime.api.ComponentId providerId();
+public group.zn.zero.runtime.api.ComponentId providerId();
+public group.zn.zero.runtime.api.ComponentId to();
+public group.zn.zero.runtime.api.ComponentId(java.lang.String);
+public group.zn.zero.runtime.api.ComponentKey(java.lang.String, java.lang.Class<T>);
+public group.zn.zero.runtime.api.ComponentSetKey(java.lang.String, java.lang.Class<T>);
+public group.zn.zero.runtime.api.GameRuntime build();
+public group.zn.zero.runtime.api.GameRuntime build();
+public group.zn.zero.runtime.api.RuntimeState runtimeState();
+public group.zn.zero.runtime.api.RuntimeState runtimeState();
+public group.zn.zero.runtime.api.RuntimeState state();
+public group.zn.zero.runtime.assembly.ComponentCatalog build();
+public group.zn.zero.runtime.assembly.ComponentCatalog catalog();
+public group.zn.zero.runtime.assembly.ComponentCatalog$Builder register(java.lang.String, group.zn.zero.runtime.spi.RuntimeComponentProvider);
+public group.zn.zero.runtime.assembly.RuntimeAssembler$Builder assemblyTimeout(java.time.Duration);
+public group.zn.zero.runtime.assembly.RuntimeAssembler$Builder configSource(group.zn.zero.runtime.config.ConfigSource);
+public group.zn.zero.runtime.assembly.RuntimeAssembler$Builder preset(group.zn.zero.runtime.assembly.RuntimePreset);
+public group.zn.zero.runtime.assembly.RuntimeAssembler$Builder require(group.zn.zero.runtime.api.BindingKey<?>);
+public group.zn.zero.runtime.assembly.RuntimeAssembler$Builder selection(group.zn.zero.runtime.assembly.RuntimeSelection);
+public group.zn.zero.runtime.assembly.RuntimeAssembler$Builder startupTimeout(java.time.Duration);
+public group.zn.zero.runtime.assembly.RuntimeComposition assemblyTimeout(java.time.Duration);
+public group.zn.zero.runtime.assembly.RuntimeComposition configSource(group.zn.zero.runtime.config.ConfigSource);
+public group.zn.zero.runtime.assembly.RuntimeComposition install(group.zn.zero.runtime.assembly.RuntimeModule);
+public group.zn.zero.runtime.assembly.RuntimeComposition preset(group.zn.zero.runtime.assembly.RuntimePreset, group.zn.zero.runtime.assembly.RuntimeProfile);
+public group.zn.zero.runtime.assembly.RuntimeComposition register(group.zn.zero.runtime.spi.RuntimeComponentProvider);
+public group.zn.zero.runtime.assembly.RuntimeComposition require(group.zn.zero.runtime.api.BindingKey<?>);
+public group.zn.zero.runtime.assembly.RuntimeComposition startupTimeout(java.time.Duration);
+public group.zn.zero.runtime.assembly.RuntimeModule(java.lang.String, java.util.List<group.zn.zero.runtime.spi.RuntimeComponentProvider>, group.zn.zero.runtime.assembly.RuntimePreset, java.util.List<group.zn.zero.runtime.config.ConfigSource>);
+public group.zn.zero.runtime.assembly.RuntimePreset build();
+public group.zn.zero.runtime.assembly.RuntimePreset preset();
+public group.zn.zero.runtime.assembly.RuntimePreset$Builder require(group.zn.zero.runtime.api.BindingKey<?>);
+public group.zn.zero.runtime.assembly.RuntimeProfile build();
+public group.zn.zero.runtime.assembly.RuntimeProfile profile();
+public group.zn.zero.runtime.assembly.RuntimeProfile$Builder forbidKind(group.zn.zero.runtime.spi.ComponentKind);
+public group.zn.zero.runtime.assembly.RuntimeProfile$Builder forbidKindFor(group.zn.zero.runtime.api.BindingKey<?>, group.zn.zero.runtime.spi.ComponentKind);
+public group.zn.zero.runtime.assembly.RuntimeProfile$Builder requireStartupHealth(group.zn.zero.runtime.spi.ComponentKind);
+public group.zn.zero.runtime.assembly.RuntimeSelection build();
+public group.zn.zero.runtime.assembly.RuntimeSelection selection();
+public group.zn.zero.runtime.assembly.RuntimeSelection selection();
+public group.zn.zero.runtime.assembly.RuntimeSelection$Builder merge(group.zn.zero.runtime.assembly.RuntimeSelection);
+public group.zn.zero.runtime.assembly.SelectionSource source();
+public group.zn.zero.runtime.assembly.SelectionSource(group.zn.zero.runtime.assembly.SelectionSourceKind, java.lang.String);
+public group.zn.zero.runtime.assembly.SelectionSourceKind kind();
+public group.zn.zero.runtime.assembly.SelectionSourceKind sourceKind();
+public group.zn.zero.runtime.capability.MavenCoordinate(java.lang.String, java.lang.String);
+public group.zn.zero.runtime.capability.RuntimeCapability(java.lang.String, group.zn.zero.runtime.api.BindingCardinality, java.util.List<java.lang.String>, java.util.List<java.lang.String>, java.util.List<group.zn.zero.runtime.capability.MavenCoordinate>);
+public group.zn.zero.runtime.capability.RuntimeCapabilityModel build();
+public group.zn.zero.runtime.capability.RuntimeCapabilityModel$Builder capability(group.zn.zero.runtime.capability.RuntimeCapability);
+public group.zn.zero.runtime.capability.RuntimeCapabilityModel$Builder provider(group.zn.zero.runtime.capability.RuntimeProviderCapability);
+public group.zn.zero.runtime.capability.RuntimeProviderCapability(group.zn.zero.runtime.api.ComponentId, java.util.List<java.lang.String>, java.util.List<java.lang.String>, java.util.List<java.lang.String>, java.util.List<group.zn.zero.runtime.capability.MavenCoordinate>);
+public group.zn.zero.runtime.config.ComponentConfig component(group.zn.zero.runtime.api.ComponentId);
+public group.zn.zero.runtime.config.ComponentConfig config();
+public group.zn.zero.runtime.config.ConfigKey$Builder<T> acceptedSources(java.util.Set<group.zn.zero.runtime.config.ConfigSourceKind>);
+public group.zn.zero.runtime.config.ConfigKey$Builder<T> alias(group.zn.zero.runtime.config.ConfigSourceKind, java.lang.String);
+public group.zn.zero.runtime.config.ConfigKey$Builder<T> defaultValue(T);
+public group.zn.zero.runtime.config.ConfigKey$Builder<T> optional();
+public group.zn.zero.runtime.config.ConfigKey$Builder<T> reloadable();
+public group.zn.zero.runtime.config.ConfigKey$Builder<T> sensitive();
+public group.zn.zero.runtime.config.ConfigKey$Builder<T> validate(java.util.function.Predicate<T>, java.lang.String);
+public group.zn.zero.runtime.config.ConfigKey<T> build();
+public group.zn.zero.runtime.config.ConfigReloadability reloadability();
+public group.zn.zero.runtime.config.ConfigReloadability reloadability();
+public group.zn.zero.runtime.config.ConfigSchema build();
+public group.zn.zero.runtime.config.ConfigSchema configSchema();
+public group.zn.zero.runtime.config.ConfigSchema$Builder add(group.zn.zero.runtime.config.ConfigKey<?>);
+public group.zn.zero.runtime.config.ConfigSourceKind kind();
+public group.zn.zero.runtime.config.ConfigSourceKind kind();
+public group.zn.zero.runtime.config.ConfigSourceKind kind();
+public group.zn.zero.runtime.config.ConfigSourceKind sourceKind();
+public group.zn.zero.runtime.config.ConfigValidationStatus validationStatus();
+public group.zn.zero.runtime.config.MapConfigSource(group.zn.zero.runtime.config.ConfigSourceKind, java.lang.String, java.util.Map<java.lang.String, java.lang.String>);
+public group.zn.zero.runtime.config.ResolvedConfigMetadata(group.zn.zero.runtime.api.ComponentId, java.lang.String, group.zn.zero.runtime.config.ConfigSourceKind, java.lang.String, java.lang.String, boolean, group.zn.zero.runtime.config.ConfigValidationStatus, group.zn.zero.runtime.config.ConfigReloadability);
+public group.zn.zero.runtime.config.ResolvedRuntimeConfig config();
+public group.zn.zero.runtime.config.ZeroConfigSource(java.lang.String, group.zn.zero.core.config.ZeroConfig);
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyException(group.zn.zero.runtime.diagnostics.RuntimeErrorCode, group.zn.zero.runtime.diagnostics.RuntimeFailurePhase, group.zn.zero.runtime.api.ComponentId, java.lang.String);
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan diagnose();
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan diagnose();
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan plan();
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan plan();
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan plan();
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$ComponentPlan(group.zn.zero.runtime.api.ComponentId, group.zn.zero.runtime.spi.ComponentKind, java.lang.String, java.lang.String, java.util.List<group.zn.zero.runtime.api.BindingKey<?>>, java.util.List<group.zn.zero.runtime.api.BindingKey<?>>, java.util.List<group.zn.zero.runtime.api.BindingKey<?>>, java.util.List<group.zn.zero.runtime.api.ComponentId>, java.util.List<group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$SelectionReason>);
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdge(group.zn.zero.runtime.api.ComponentId, group.zn.zero.runtime.api.ComponentId, group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdgeKind, java.lang.String);
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdgeKind kind();
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$SelectionReason(java.lang.String, group.zn.zero.runtime.api.ComponentId, group.zn.zero.runtime.assembly.SelectionSourceKind, java.lang.String, java.util.Optional<group.zn.zero.runtime.api.ComponentId>);
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan(java.lang.String, java.util.Optional<java.lang.String>, java.util.List<java.lang.String>, java.util.List<group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$ComponentPlan>, java.util.List<group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdge>, java.util.List<group.zn.zero.runtime.config.ResolvedConfigMetadata>);
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport report();
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport$ComponentStatus(group.zn.zero.runtime.api.ComponentId, group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome, long, group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome, long, group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome, long, group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome, long, java.util.Optional<group.zn.zero.runtime.health.HealthResult>);
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport$FailureSummary(java.lang.String, group.zn.zero.runtime.diagnostics.RuntimeFailurePhase, java.util.Optional<group.zn.zero.runtime.api.ComponentId>);
+public group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport(group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan, group.zn.zero.runtime.api.RuntimeState, java.util.List<group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport$ComponentStatus>, int, int, java.util.Optional<group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport$FailureSummary>);
+public group.zn.zero.runtime.diagnostics.RuntimeFailurePhase phase();
+public group.zn.zero.runtime.diagnostics.RuntimeFailurePhase phase();
+public group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome create();
+public group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome start();
+public group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome startupHealth();
+public group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome stop();
+public group.zn.zero.runtime.health.HealthPhase phase();
+public group.zn.zero.runtime.health.HealthPhase phase();
+public group.zn.zero.runtime.health.HealthRequest(group.zn.zero.runtime.health.HealthPhase, java.time.Duration, java.time.Instant);
+public group.zn.zero.runtime.health.HealthResult result();
+public group.zn.zero.runtime.health.HealthResult(group.zn.zero.runtime.health.HealthStatus, java.lang.String);
+public group.zn.zero.runtime.health.HealthStatus status();
+public group.zn.zero.runtime.health.RuntimeHealthSnapshot healthSnapshot();
+public group.zn.zero.runtime.health.RuntimeHealthSnapshot$ComponentHealth(group.zn.zero.runtime.api.ComponentId, group.zn.zero.runtime.health.HealthPhase, group.zn.zero.runtime.health.HealthResult);
+public group.zn.zero.runtime.health.RuntimeHealthSnapshot(group.zn.zero.runtime.api.RuntimeState, java.time.Instant, java.util.List<group.zn.zero.runtime.health.RuntimeHealthSnapshot$ComponentHealth>);
+public group.zn.zero.runtime.spi.ComponentContribution build();
+public group.zn.zero.runtime.spi.ComponentContribution contribution();
+public group.zn.zero.runtime.spi.ComponentContribution create(group.zn.zero.runtime.spi.ComponentCreationContext) throws java.lang.Exception;
+public group.zn.zero.runtime.spi.ComponentContribution$Builder healthProbe(group.zn.zero.runtime.health.HealthPhase, group.zn.zero.runtime.health.HealthProbe);
+public group.zn.zero.runtime.spi.ComponentContribution$Builder lifecycle(group.zn.zero.core.lifecycle.Lifecycle);
+public group.zn.zero.runtime.spi.ComponentDescriptor build();
+public group.zn.zero.runtime.spi.ComponentDescriptor descriptor();
+public group.zn.zero.runtime.spi.ComponentDescriptor descriptor();
+public group.zn.zero.runtime.spi.ComponentDescriptor$Builder configSchema(group.zn.zero.runtime.config.ConfigSchema);
+public group.zn.zero.runtime.spi.ComponentDescriptor$Builder conflictWith(group.zn.zero.runtime.api.ComponentId);
+public group.zn.zero.runtime.spi.ComponentDescriptor$Builder health(group.zn.zero.runtime.health.HealthPhase);
+public group.zn.zero.runtime.spi.ComponentDescriptor$Builder kind(group.zn.zero.runtime.spi.ComponentKind);
+public group.zn.zero.runtime.spi.ComponentDescriptor$Builder optional(group.zn.zero.runtime.api.BindingKey<?>);
+public group.zn.zero.runtime.spi.ComponentDescriptor$Builder provide(group.zn.zero.runtime.api.BindingKey<?>);
+public group.zn.zero.runtime.spi.ComponentDescriptor$Builder require(group.zn.zero.runtime.api.BindingKey<?>);
+public group.zn.zero.runtime.spi.ComponentDescriptor$Builder startAfter(group.zn.zero.runtime.api.ComponentId);
+public group.zn.zero.runtime.spi.ComponentKind kind();
+public group.zn.zero.runtime.spi.ComponentKind kind();
+public group.zn.zero.runtime.spi.ResourceRegistrar resources();
+public group.zn.zero.runtime.spi.RuntimeComponentProvider provider();
+public group.zn.zero.runtime.spi.RuntimeDeadline assemblyDeadline();
+public group.zn.zero.runtime.spi.RuntimeProviders$Factory factory();
+public int buildResourceCount();
+public int compareTo(group.zn.zero.runtime.api.ComponentId);
+public int compareTo(group.zn.zero.runtime.capability.MavenCoordinate);
+public int compareTo(java.lang.Object);
+public int compareTo(java.lang.Object);
+public int hashCode();
+public int pendingResourceCloseCount();
+public int size();
+public interface group.zn.zero.runtime.api.BindingKey<T> {
+public interface group.zn.zero.runtime.api.GameRuntime extends group.zn.zero.core.lifecycle.Lifecycle,java.lang.AutoCloseable {
+public interface group.zn.zero.runtime.config.ConfigDecoder<T> {
+public interface group.zn.zero.runtime.config.ConfigSource {
+public interface group.zn.zero.runtime.health.HealthProbe {
+public interface group.zn.zero.runtime.spi.ComponentCreationContext {
+public interface group.zn.zero.runtime.spi.ResourceRegistrar {
+public interface group.zn.zero.runtime.spi.RuntimeComponentProvider {
+public interface group.zn.zero.runtime.spi.RuntimeProviders$Factory {
+public java.lang.Class<T> type();
+public java.lang.Class<T> type();
+public java.lang.Class<T> type();
+public java.lang.String aliasFor(group.zn.zero.runtime.config.ConfigSourceKind);
+public java.lang.String artifactId();
+public java.lang.String bindingId();
+public java.lang.String catalogSource();
+public java.lang.String catalogSource();
+public java.lang.String code();
+public java.lang.String code();
+public java.lang.String errorCode();
+public java.lang.String groupId();
+public java.lang.String id();
+public java.lang.String id();
+public java.lang.String id();
+public java.lang.String id();
+public java.lang.String id();
+public java.lang.String id();
+public java.lang.String id();
+public java.lang.String id();
+public java.lang.String id();
+public java.lang.String logicalKey();
+public java.lang.String logicalKey();
+public java.lang.String logicalName();
+public java.lang.String message();
+public java.lang.String name();
+public java.lang.String name();
+public java.lang.String profile();
+public java.lang.String providerType();
+public java.lang.String providerType();
+public java.lang.String reason();
+public java.lang.String sourceAlias();
+public java.lang.String sourceId();
+public java.lang.String sourceId();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String toString();
+public java.lang.String value();
+public java.time.Duration remaining();
+public java.time.Duration timeout();
+public java.time.Duration timeout();
+public java.time.Instant capturedAt();
+public java.time.Instant requestedAt();
+public java.util.List<group.zn.zero.runtime.api.BindingKey<?>> optional();
+public java.util.List<group.zn.zero.runtime.api.BindingKey<?>> provides();
+public java.util.List<group.zn.zero.runtime.api.BindingKey<?>> requires();
+public java.util.List<group.zn.zero.runtime.api.ComponentId> componentIds();
+public java.util.List<group.zn.zero.runtime.api.ComponentId> startAfter();
+public java.util.List<group.zn.zero.runtime.assembly.ComponentCatalog$RegisteredProvider> orderedProviders();
+public java.util.List<group.zn.zero.runtime.capability.MavenCoordinate> artifacts();
+public java.util.List<group.zn.zero.runtime.capability.MavenCoordinate> artifacts();
+public java.util.List<group.zn.zero.runtime.capability.MavenCoordinate> artifactsFor(java.util.Collection<java.lang.String>);
+public java.util.List<group.zn.zero.runtime.capability.MavenCoordinate> artifactsForProviders(java.util.Collection<group.zn.zero.runtime.api.ComponentId>);
+public java.util.List<group.zn.zero.runtime.capability.RuntimeCapability> capabilities();
+public java.util.List<group.zn.zero.runtime.capability.RuntimeCapability> closure(java.util.Collection<java.lang.String>);
+public java.util.List<group.zn.zero.runtime.capability.RuntimeProviderCapability> providers();
+public java.util.List<group.zn.zero.runtime.config.ConfigKey<?>> keys();
+public java.util.List<group.zn.zero.runtime.config.ConfigSource> configSources();
+public java.util.List<group.zn.zero.runtime.config.ConfigSource> configSources();
+public java.util.List<group.zn.zero.runtime.config.ResolvedConfigMetadata> config();
+public java.util.List<group.zn.zero.runtime.config.ResolvedConfigMetadata> metadata();
+public java.util.List<group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$ComponentPlan> components();
+public java.util.List<group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdge> edges();
+public java.util.List<group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$SelectionReason> selectionReasons();
+public java.util.List<group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport$ComponentStatus> components();
+public java.util.List<group.zn.zero.runtime.health.RuntimeHealthSnapshot$ComponentHealth> components();
+public java.util.List<group.zn.zero.runtime.spi.RuntimeComponentProvider> providers();
+public java.util.List<java.lang.String> logicalKeys();
+public java.util.List<java.lang.String> profiles();
+public java.util.List<java.lang.String> profiles();
+public java.util.List<java.lang.String> provides();
+public java.util.List<java.lang.String> requires();
+public java.util.List<java.lang.String> requires();
+public java.util.List<java.lang.String> rootRequirements();
+public java.util.Map<group.zn.zero.runtime.api.BindingKey<?>, java.lang.Object> bindings();
+public java.util.Map<group.zn.zero.runtime.api.ComponentId, group.zn.zero.runtime.assembly.ComponentCatalog$RegisteredProvider> active();
+public java.util.Map<group.zn.zero.runtime.api.ComponentId, java.util.List<group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$SelectionReason>> reasons();
+public java.util.Map<group.zn.zero.runtime.health.HealthPhase, group.zn.zero.runtime.health.HealthProbe> healthProbes();
+public java.util.Optional<T> defaultValue();
+public java.util.Optional<group.zn.zero.core.lifecycle.Lifecycle> lifecycle();
+public java.util.Optional<group.zn.zero.runtime.api.ComponentId> componentId();
+public java.util.Optional<group.zn.zero.runtime.api.ComponentId> componentId();
+public java.util.Optional<group.zn.zero.runtime.api.ComponentId> previousProviderId();
+public java.util.Optional<group.zn.zero.runtime.capability.RuntimeCapability> capability(java.lang.String);
+public java.util.Optional<group.zn.zero.runtime.capability.RuntimeProviderCapability> provider(group.zn.zero.runtime.api.ComponentId);
+public java.util.Optional<group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport$FailureSummary> failure();
+public java.util.Optional<group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport> report();
+public java.util.Optional<group.zn.zero.runtime.health.HealthResult> healthResult();
+public java.util.Optional<java.lang.String> preset();
+public java.util.Optional<java.lang.String> presetName();
+public java.util.Optional<java.lang.String> value(java.lang.String);
+public java.util.Optional<java.lang.String> value(java.lang.String);
+public java.util.Optional<java.lang.String> value(java.lang.String);
+public java.util.Set<group.zn.zero.runtime.api.BindingKey<?>> optional();
+public java.util.Set<group.zn.zero.runtime.api.BindingKey<?>> provides();
+public java.util.Set<group.zn.zero.runtime.api.BindingKey<?>> requirements();
+public java.util.Set<group.zn.zero.runtime.api.BindingKey<?>> requirements();
+public java.util.Set<group.zn.zero.runtime.api.BindingKey<?>> requires();
+public java.util.Set<group.zn.zero.runtime.api.ComponentId> conflictsWith();
+public java.util.Set<group.zn.zero.runtime.api.ComponentId> startAfter();
+public java.util.Set<group.zn.zero.runtime.config.ConfigSourceKind> acceptedSources();
+public java.util.Set<group.zn.zero.runtime.health.HealthPhase> healthPhases();
+public long createDurationNanos();
+public long healthDurationNanos();
+public long startDurationNanos();
+public long stopDurationNanos();
+public static <T> group.zn.zero.runtime.api.ComponentKey<T> single(java.lang.String, java.lang.Class<T>);
+public static <T> group.zn.zero.runtime.api.ComponentSetKey<T> multiple(java.lang.String, java.lang.Class<T>);
+public static <T> group.zn.zero.runtime.config.ConfigKey$Builder<T> builder(group.zn.zero.runtime.api.ComponentId, java.lang.String, java.lang.Class<T>, group.zn.zero.runtime.config.ConfigDecoder<T>);
+public static <T> group.zn.zero.runtime.spi.RuntimeComponentProvider value(group.zn.zero.runtime.api.ComponentId, group.zn.zero.runtime.api.ComponentKey<T>, T, group.zn.zero.runtime.spi.ComponentKind);
+public static final group.zn.zero.runtime.api.BindingCardinality MULTIPLE;
+public static final group.zn.zero.runtime.api.BindingCardinality SINGLE;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_ACTOR;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_CACHE;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_CONFIG;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_DEAD_LETTER;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_EVENT_BUS;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_EXECUTORS;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_LOG_APPENDER;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_LOG_SINK;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_MONITOR;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_PERSISTENCE;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_PROTOCOL;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_REPOSITORIES;
+public static final group.zn.zero.runtime.api.ComponentId LOCAL_RPC;
+public static final group.zn.zero.runtime.api.ComponentId PRODUCTION_KAFKA_RPC;
+public static final group.zn.zero.runtime.api.ComponentId PRODUCTION_MONGO_DATA;
+public static final group.zn.zero.runtime.api.ComponentId PRODUCTION_NACOS_DISCOVERY;
+public static final group.zn.zero.runtime.api.ComponentId PRODUCTION_NACOS_RPC_RESOLVER;
+public static final group.zn.zero.runtime.api.ComponentId PRODUCTION_NETWORK_LIFECYCLE;
+public static final group.zn.zero.runtime.api.ComponentId PRODUCTION_POSTGRESQL_DATA;
+public static final group.zn.zero.runtime.api.ComponentId PRODUCTION_REDIS_CACHE;
+public static final group.zn.zero.runtime.api.ComponentId PRODUCTION_REDIS_DATA;
+public static final group.zn.zero.runtime.api.ComponentId PRODUCTION_REDIS_RESOURCE;
+public static final group.zn.zero.runtime.api.ComponentSetKey<group.zn.zero.core.lifecycle.Lifecycle> APPLICATION_LIFECYCLES;
+public static final group.zn.zero.runtime.api.ComponentSetKey<group.zn.zero.core.lifecycle.Lifecycle> INFRASTRUCTURE_LIFECYCLES;
+public static final group.zn.zero.runtime.api.RuntimeState BUILT;
+public static final group.zn.zero.runtime.api.RuntimeState CLOSED;
+public static final group.zn.zero.runtime.api.RuntimeState FAILED;
+public static final group.zn.zero.runtime.api.RuntimeState PLANNED;
+public static final group.zn.zero.runtime.api.RuntimeState RUNNING;
+public static final group.zn.zero.runtime.api.RuntimeState STARTING;
+public static final group.zn.zero.runtime.api.RuntimeState STOPPED;
+public static final group.zn.zero.runtime.api.RuntimeState STOPPING;
+public static final group.zn.zero.runtime.assembly.RuntimePlanner$VisitState ACTIVE;
+public static final group.zn.zero.runtime.assembly.RuntimePlanner$VisitState DONE;
+public static final group.zn.zero.runtime.assembly.SelectionSourceKind DEPLOYMENT;
+public static final group.zn.zero.runtime.assembly.SelectionSourceKind OVERRIDE;
+public static final group.zn.zero.runtime.assembly.SelectionSourceKind PRESET;
+public static final group.zn.zero.runtime.assembly.SelectionSourceKind PROGRAMMATIC;
+public static final group.zn.zero.runtime.capability.RuntimeCapabilityModel$VisitState VISITED;
+public static final group.zn.zero.runtime.capability.RuntimeCapabilityModel$VisitState VISITING;
+public static final group.zn.zero.runtime.config.ConfigReloadability RELOADABLE;
+public static final group.zn.zero.runtime.config.ConfigReloadability STARTUP_ONLY;
+public static final group.zn.zero.runtime.config.ConfigSourceKind DEFAULT;
+public static final group.zn.zero.runtime.config.ConfigSourceKind ENVIRONMENT;
+public static final group.zn.zero.runtime.config.ConfigSourceKind FILE;
+public static final group.zn.zero.runtime.config.ConfigSourceKind PROGRAMMATIC;
+public static final group.zn.zero.runtime.config.ConfigSourceKind REMOTE;
+public static final group.zn.zero.runtime.config.ConfigSourceKind SYSTEM_PROPERTY;
+public static final group.zn.zero.runtime.config.ConfigValidationStatus ABSENT;
+public static final group.zn.zero.runtime.config.ConfigValidationStatus DEFAULTED;
+public static final group.zn.zero.runtime.config.ConfigValidationStatus RESOLVED;
+public static final group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdgeKind OPTIONAL;
+public static final group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdgeKind REQUIRED;
+public static final group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdgeKind START_AFTER;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_AMBIGUOUS_CAPABILITY;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_COMPONENT_CONFLICT;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_COMPONENT_CREATE_FAILED;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_COMPONENT_HEALTH_FAILED;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_COMPONENT_START_FAILED;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_COMPONENT_STOP_FAILED;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_CONFIG_INVALID;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_CONFIG_MISSING;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_CONTRIBUTION_INVALID;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_DEPENDENCY_CYCLE;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_DUPLICATE_BINDING;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_DUPLICATE_CONFIG_KEY;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_DUPLICATE_PROVIDER;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_MISSING_CAPABILITY;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_POLICY_REJECTED;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_RESOURCE_CLOSE_FAILED;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_REUSE_REJECTED;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_STARTUP_TIMEOUT;
+public static final group.zn.zero.runtime.diagnostics.RuntimeErrorCode RUNTIME_UNKNOWN_PROVIDER;
+public static final group.zn.zero.runtime.diagnostics.RuntimeFailurePhase CLOSE;
+public static final group.zn.zero.runtime.diagnostics.RuntimeFailurePhase CONFIGURATION;
+public static final group.zn.zero.runtime.diagnostics.RuntimeFailurePhase CREATE;
+public static final group.zn.zero.runtime.diagnostics.RuntimeFailurePhase HEALTH;
+public static final group.zn.zero.runtime.diagnostics.RuntimeFailurePhase PLANNING;
+public static final group.zn.zero.runtime.diagnostics.RuntimeFailurePhase POLICY;
+public static final group.zn.zero.runtime.diagnostics.RuntimeFailurePhase REGISTRATION;
+public static final group.zn.zero.runtime.diagnostics.RuntimeFailurePhase START;
+public static final group.zn.zero.runtime.diagnostics.RuntimeFailurePhase STOP;
+public static final group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome FAILED;
+public static final group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome NOT_APPLICABLE;
+public static final group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome NOT_RUN;
+public static final group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome SUCCEEDED;
+public static final group.zn.zero.runtime.health.HealthPhase LIVENESS;
+public static final group.zn.zero.runtime.health.HealthPhase READINESS;
+public static final group.zn.zero.runtime.health.HealthPhase STARTUP;
+public static final group.zn.zero.runtime.health.HealthStatus DEGRADED;
+public static final group.zn.zero.runtime.health.HealthStatus HEALTHY;
+public static final group.zn.zero.runtime.health.HealthStatus UNHEALTHY;
+public static final group.zn.zero.runtime.health.HealthStatus UNKNOWN;
+public static final group.zn.zero.runtime.spi.ComponentKind BUSINESS;
+public static final group.zn.zero.runtime.spi.ComponentKind EXTERNAL;
+public static final group.zn.zero.runtime.spi.ComponentKind FOUNDATION;
+public static final group.zn.zero.runtime.spi.ComponentKind LOCAL;
+public static final group.zn.zero.runtime.spi.ComponentKind OPERATIONS;
+public static final java.lang.String ACTOR_SCHEDULER;
+public static final java.lang.String APPLICATION_LIFECYCLES;
+public static final java.lang.String CACHE_SERVICE;
+public static final java.lang.String CONFIG;
+public static final java.lang.String DATA_SERVICES;
+public static final java.lang.String DEAD_LETTER_SINK;
+public static final java.lang.String EVENT_BUS;
+public static final java.lang.String EXECUTORS;
+public static final java.lang.String INFRASTRUCTURE_LIFECYCLES;
+public static final java.lang.String LOG_APPENDER;
+public static final java.lang.String MONITOR_RUNTIME;
+public static final java.lang.String NETWORK_LIFECYCLE;
+public static final java.lang.String PERSISTENCE_MANAGER;
+public static final java.lang.String PROFILE_EXTERNAL_TEST;
+public static final java.lang.String PROFILE_LOCAL;
+public static final java.lang.String PROFILE_MINIMAL;
+public static final java.lang.String PROFILE_PRODUCTION;
+public static final java.lang.String PROFILE_STANDALONE;
+public static final java.lang.String PROTOCOL_REGISTRY;
+public static final java.lang.String REDIS_RESOURCE;
+public static final java.lang.String REPOSITORIES;
+public static final java.lang.String REPOSITORY_SOURCES;
+public static final java.lang.String RPC_HANDLER_REGISTRY;
+public static final java.lang.String RPC_SERVICE_RESOLVER;
+public static final java.lang.String RPC_TRANSPORT;
+public static final java.lang.String SERVICE_DISCOVERY;
+public static final java.lang.String TERMINAL_LOG_SINK;
+public static group.zn.zero.runtime.api.BindingCardinality valueOf(java.lang.String);
+public static group.zn.zero.runtime.api.BindingCardinality[] values();
+public static group.zn.zero.runtime.api.ComponentId of(java.lang.String);
+public static group.zn.zero.runtime.api.RuntimeState valueOf(java.lang.String);
+public static group.zn.zero.runtime.api.RuntimeState[] values();
+public static group.zn.zero.runtime.assembly.ComponentCatalog$Builder builder();
+public static group.zn.zero.runtime.assembly.RuntimeAssembler$Builder builder(group.zn.zero.runtime.assembly.ComponentCatalog, group.zn.zero.runtime.assembly.RuntimeProfile);
+public static group.zn.zero.runtime.assembly.RuntimeComposition builder(group.zn.zero.runtime.assembly.RuntimeProfile);
+public static group.zn.zero.runtime.assembly.RuntimeModule of(java.lang.String, java.util.List<group.zn.zero.runtime.spi.RuntimeComponentProvider>, group.zn.zero.runtime.api.BindingKey<?>...);
+public static group.zn.zero.runtime.assembly.RuntimePlanner$VisitState valueOf(java.lang.String);
+public static group.zn.zero.runtime.assembly.RuntimePlanner$VisitState[] values();
+public static group.zn.zero.runtime.assembly.RuntimePreset$Builder builder(java.lang.String);
+public static group.zn.zero.runtime.assembly.RuntimeProfile externalTest();
+public static group.zn.zero.runtime.assembly.RuntimeProfile local();
+public static group.zn.zero.runtime.assembly.RuntimeProfile minimal();
+public static group.zn.zero.runtime.assembly.RuntimeProfile permissive(java.lang.String);
+public static group.zn.zero.runtime.assembly.RuntimeProfile production(java.util.Set<? extends group.zn.zero.runtime.api.BindingKey<?>>);
+public static group.zn.zero.runtime.assembly.RuntimeProfile standalone();
+public static group.zn.zero.runtime.assembly.RuntimeProfile$Builder builder(java.lang.String);
+public static group.zn.zero.runtime.assembly.RuntimeSelection empty();
+public static group.zn.zero.runtime.assembly.RuntimeSelection$Builder builder();
+public static group.zn.zero.runtime.assembly.SelectionSource deployment(java.lang.String);
+public static group.zn.zero.runtime.assembly.SelectionSource programmatic(java.lang.String);
+public static group.zn.zero.runtime.assembly.SelectionSourceKind valueOf(java.lang.String);
+public static group.zn.zero.runtime.assembly.SelectionSourceKind[] values();
+public static group.zn.zero.runtime.capability.MavenCoordinate zero(java.lang.String);
+public static group.zn.zero.runtime.capability.RuntimeCapabilityModel instance();
+public static group.zn.zero.runtime.capability.RuntimeCapabilityModel$Builder builder(java.lang.String);
+public static group.zn.zero.runtime.capability.RuntimeCapabilityModel$VisitState valueOf(java.lang.String);
+public static group.zn.zero.runtime.capability.RuntimeCapabilityModel$VisitState[] values();
+public static group.zn.zero.runtime.config.ConfigKey$Builder<java.lang.Integer> integer(group.zn.zero.runtime.api.ComponentId, java.lang.String);
+public static group.zn.zero.runtime.config.ConfigKey$Builder<java.lang.String> string(group.zn.zero.runtime.api.ComponentId, java.lang.String);
+public static group.zn.zero.runtime.config.ConfigKey$Builder<java.time.Duration> duration(group.zn.zero.runtime.api.ComponentId, java.lang.String);
+public static group.zn.zero.runtime.config.ConfigReloadability valueOf(java.lang.String);
+public static group.zn.zero.runtime.config.ConfigReloadability[] values();
+public static group.zn.zero.runtime.config.ConfigSchema empty(group.zn.zero.runtime.api.ComponentId);
+public static group.zn.zero.runtime.config.ConfigSchema$Builder builder(group.zn.zero.runtime.api.ComponentId);
+public static group.zn.zero.runtime.config.ConfigSourceKind valueOf(java.lang.String);
+public static group.zn.zero.runtime.config.ConfigSourceKind[] values();
+public static group.zn.zero.runtime.config.ConfigValidationStatus valueOf(java.lang.String);
+public static group.zn.zero.runtime.config.ConfigValidationStatus[] values();
+public static group.zn.zero.runtime.config.ResolvedRuntimeConfig resolve(java.util.Collection<group.zn.zero.runtime.config.ConfigSchema>, java.util.List<group.zn.zero.runtime.config.ConfigSource>);
+public static group.zn.zero.runtime.diagnostics.RuntimeAssemblyException failure(group.zn.zero.runtime.diagnostics.RuntimeErrorCode, group.zn.zero.runtime.diagnostics.RuntimeFailurePhase, group.zn.zero.runtime.api.ComponentId, java.lang.String);
+public static group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdgeKind valueOf(java.lang.String);
+public static group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan$DependencyEdgeKind[] values();
+public static group.zn.zero.runtime.diagnostics.RuntimeErrorCode valueOf(java.lang.String);
+public static group.zn.zero.runtime.diagnostics.RuntimeErrorCode[] values();
+public static group.zn.zero.runtime.diagnostics.RuntimeFailurePhase valueOf(java.lang.String);
+public static group.zn.zero.runtime.diagnostics.RuntimeFailurePhase[] values();
+public static group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome valueOf(java.lang.String);
+public static group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome[] values();
+public static group.zn.zero.runtime.health.HealthPhase valueOf(java.lang.String);
+public static group.zn.zero.runtime.health.HealthPhase[] values();
+public static group.zn.zero.runtime.health.HealthResult healthy(java.lang.String);
+public static group.zn.zero.runtime.health.HealthResult unknown();
+public static group.zn.zero.runtime.health.HealthStatus valueOf(java.lang.String);
+public static group.zn.zero.runtime.health.HealthStatus[] values();
+public static group.zn.zero.runtime.spi.ComponentContribution$Builder builder();
+public static group.zn.zero.runtime.spi.ComponentDescriptor$Builder builder(group.zn.zero.runtime.api.ComponentId);
+public static group.zn.zero.runtime.spi.ComponentKind valueOf(java.lang.String);
+public static group.zn.zero.runtime.spi.ComponentKind[] values();
+public static group.zn.zero.runtime.spi.RuntimeComponentProvider create(group.zn.zero.runtime.spi.ComponentDescriptor, group.zn.zero.runtime.spi.RuntimeProviders$Factory);
+public static group.zn.zero.runtime.spi.RuntimeDeadline after(java.time.Duration);
+public static group.zn.zero.runtime.spi.RuntimeDeadline using(java.time.Duration, java.util.function.LongSupplier);
+public static java.lang.String requireSafeAlias(java.lang.String, java.lang.String);
+public static java.lang.String requireStableId(java.lang.String, java.lang.String);
+public synchronized <T extends java.lang.AutoCloseable> T register(T);
+public synchronized group.zn.zero.runtime.diagnostics.RuntimeAssemblyException withReport(group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport);
+public synchronized void close();
+public synchronized void start();
+public synchronized void stop();
+public void validateDescriptor(group.zn.zero.runtime.spi.ComponentDescriptor, java.lang.String);
+public void validateDescriptors(java.util.Collection<? extends group.zn.zero.runtime.spi.ComponentDescriptor>, java.lang.String);

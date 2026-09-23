@@ -1,16 +1,18 @@
 package group.zn.zero.net.http;
 
+import group.zn.zero.security.SecurityMetadataHttpCodec;
+import group.zn.zero.security.SecurityMetadataSnapshot;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Objects;
 
 /**
- * 最小 HTTP 请求。
+ * Minimal HTTP request.
  *
- * @param method HTTP 方法。
- * @param uri 请求 URI。
- * @param headers 请求头快照。
- * @param body 请求体字节。
+ * @param method HTTP method.
+ * @param uri request URI.
+ * @param headers request header snapshot.
+ * @param body request body bytes.
  * @author zn
  */
 public record HttpRequest(
@@ -19,11 +21,7 @@ public record HttpRequest(
         Map<String, String> headers,
         byte[] body) {
 
-    /**
-     * 创建 HTTP 请求。
-     *
-     * @throws NullPointerException 当方法、URI、请求头或请求体为空时抛出。
-     */
+    /** Creates an HTTP request. */
     public HttpRequest {
         Objects.requireNonNull(method, "method");
         Objects.requireNonNull(uri, "uri");
@@ -31,22 +29,20 @@ public record HttpRequest(
         body = Objects.requireNonNull(body, "body").clone();
     }
 
-    /**
-     * 返回请求体副本。
-     *
-     * @return 请求体字节；不可为空；有序；可能为空；线程安全。
-     */
     @Override
     public byte[] body() {
         return body.clone();
     }
 
-    /**
-     * 返回 UTF-8 文本请求体。
-     *
-     * @return 文本请求体；不可为空；线程安全。
-     */
+    /** Returns the UTF-8 text body. */
     public String bodyText() {
         return new String(body, StandardCharsets.UTF_8);
+    }
+
+    /** Returns a copy with an explicit security metadata header. */
+    public HttpRequest withSecurityMetadata(final String encodedMetadata) {
+        Map<String, String> updated = new java.util.LinkedHashMap<>(headers);
+        updated.put(SecurityMetadataHttpCodec.HEADER, Objects.requireNonNull(encodedMetadata, "encodedMetadata"));
+        return new HttpRequest(method, uri, updated, body);
     }
 }

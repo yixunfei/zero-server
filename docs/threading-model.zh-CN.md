@@ -22,6 +22,12 @@ zeroServer 的线程模型必须同时满足极致性能、状态安全、业务
 - Actor 线程不允许执行不可控远程 IO。
 - 线程安全 API 与非线程安全 API 必须在注释中明确标明。
 
+## 2.1 Local scaffold 异步业务契约
+
+`local-game-scaffold` 生成工程将 composition root、协议业务适配器、流程编排、服务 fixture 和观测 facade 分离。`LocalGameBO` 只把生成 DTO 转换为注入的 player/scene 业务端口调用，并通过 `CompletionStage.whenComplete` 传播成功或异常；它不调用 `join()`/`get()`、不创建线程池，也不关闭框架执行器。
+
+`LocalGameFixture` 只负责服务订阅的装配和释放；执行域仍由 `RuntimeAssembly`/starter 注入。`LocalGameFlow` 负责协议 dispatch，`LocalGameObservation` 只记录完成/失败计数。生成的 `Application` 仅可在最外层 `runDemo` smoke 边界等待最终 stage；该单次等待不代表 handler、Actor 或 Netty IO 路径可以阻塞。超时、取消、重复请求和远程错误必须由业务端口显式定义，框架不隐式重试或改变幂等语义。
+
 ## 3. Actor 绑定
 
 默认 lane key 包括：
@@ -54,7 +60,16 @@ zeroServer 的线程模型必须同时满足极致性能、状态安全、业务
 - 调度器本身不创建线程池，只使用外部传入的 `Executor`。
 - 同一 `LaneKey` 内消息按提交顺序串行执行。
 - handler 返回异步 `CompletionStage` 时，后续同 lane 消息必须等待前一条完成后再执行。
+- 未完成 stage 通过 completion continuation 恢复 lane drain；Actor 执行线程不得使用 `join()`/`get()` 等待远程或用户异步操作。`ExecutorActorScheduler` 只在 stage 已完成时读取结果。
+- handler 的异常、取消和超时必须让当前 dispatch stage 结束并带有统一错误码；lane 不能因失败留下不可回收的 pending 队列。
+- executor 拒绝新任务时，当前 lane 的排队消息必须失败并释放；关闭由外部执行器/运行时统一负责。
 - 该实现用于阶段 3 原型执行域探索，不替代后续生产级 Actor 集群、背压、限流和队列监控设计。
+
+WP-02 的 focused 契约测试覆盖 direct 调用线程归属、异步成功/异常/取消/超时、未完成 stage 的阻塞检测、executor 拒绝和受管执行器关闭。该测试证明的是本地执行边界，不代表生产容量、跨进程恢复或第三方 provider 的阻塞行为已验证。
+
+`ExecutorActorScheduler` 使用 64 个固定锁段：同一 lane 的入队、出队、空闲回收和拒绝清理在所属段锁内完成，不同段独立推进。处理器使用写时复制的有序快照，精确类型优先，其次按注册顺序匹配父类型；已经入队的消息保留提交时选中的处理器。旧注销句柄不能移除后续重新注册的处理器，即使使用相同 handler 对象。
+
+handler、Executor 提交和 completion 回调均在段锁外执行。异步完成与回调注册交错时通过执行权交接避免 direct executor 递归续调。同一段的不同 lane 仍可并行业务执行；哈希碰撞只影响短临界区竞争。默认每 Lane/全局未完成预算为 4096/65536，包含执行及异步挂起；每批 64 条后续调。超限明确失败，同 Lane 仍不并行。Local 使用直接执行器复用相同注册和准入算法。测量与边界见[本地优化报告](reports/performance-feedback-20260922.zh-CN.md)。
 
 阶段 4B 新增分布式 Actor gateway 的第一版投递边界：
 
@@ -75,14 +90,14 @@ zeroServer 的线程模型必须同时满足极致性能、状态安全、业务
 - 完整本地 demo 可以显式使用 starter 管理的单线程逻辑执行器，验证业务 handler 不运行在 Netty IO 线程中。
 - `localPrototype` 可以创建 logic、actor、remote IO 和 background 执行域，供阶段 3 业务模块直接接入。
 - `singleThreaded` 为避免自等待，Actor 执行仍使用 direct executor；需要独立 actor 线程池时应使用 `localPrototype`。
-- 该装配点不替代生产级统一线程管理；Netty IO、Kafka consumer worker、Kafka pending 时间轮、Actor 队列背压、持久化 flush 调度和虚拟线程策略仍必须在后续专项中统一设计。
+- 该装配点管理业务执行域；Netty IO 由 `NettyIoResources` 管理，runtime 通过可选 `NetworkRuntime.ioModule` 登记拥有权。Kafka consumer worker、Kafka pending 时间轮和持久化 flush 调度仍保留各自生命周期。
 
 阶段 3 原型默认绑定：
 
 - `zero-player` 登录会话写入 session lane。
 - `zero-player` 玩家在线档案写入 player lane；玩家加载可通过 `CacheService` / `CrudRepository` 获取数据，真实远程实现接入前必须放入 remote IO 执行域。
 - `zero-scene` 进入场景、实体坐标、移动、离开和实体列表快照写入或读取 scene lane。
-- `docs/scene-move-loop-performance-evidence.zh-CN.md` 与 `scripts/ZeroSceneMoveLoopBenchmarkReadiness.java` 已定义基础 SceneService、Local/Executor scheduler、generated scene-sync 和未来 AOI/广播的分层性能证据口径；该入口不运行场景服务，也不批准线程模型或移动语义变更。
+- `docs/operations/evidence/scene-move-loop-performance-evidence.zh-CN.md` 已定义基础 SceneService、Local/Executor scheduler、generated scene-sync 和未来 AOI/广播的分层性能证据口径；该入口不运行场景服务，也不批准线程模型或移动语义变更。
 - GM 查询首轮只读，通过 player lane 或 scene lane 获取快照，不直接跨 lane 修改状态。
 - 远程 IO 必须先在 remote IO 执行域完成，再把结果投递回对应 actor lane。
 
@@ -99,7 +114,7 @@ zeroServer 的线程模型必须同时满足极致性能、状态安全、业务
 - 玩家、场景和实体状态仍必须把 `ScheduledTaskContext.traceId()` 显式传入 `ActorMessage`，在对应 lane 内修改。
 - 远程 IO 只提交到受管 remote IO 执行域或异步客户端并返回 stage，禁止在 scheduler worker 上 `join()` / `get()`。
 
-该实现不替换 Netty EventLoop timer、Kafka RPC pending 时间轮或 `PersistenceScheduler` 既有局部语义，也不适用于生产高频 tick、cron、持久化任务或分布式唯一执行。完整 API、配置、L1 生命周期、观测和非目标见 [本地受管定时任务运行时](managed-scheduler.zh-CN.md)。
+该实现不替换 Netty EventLoop timer、Kafka RPC pending 时间轮或 `PersistenceScheduler` 既有局部语义，也不适用于生产高频 tick、cron、持久化任务或分布式唯一执行。完整 API、配置、L1 生命周期、观测和非目标见 [本地受管定时任务运行时](guides/managed-scheduler.zh-CN.md)。
 
 ## 4. 强一致策略
 
@@ -140,4 +155,9 @@ Java 21 虚拟线程允许用于：
 - 重连若涉及玩家在线状态，只允许由 `coordinateReconnect` 实现向 player actor 发送消息，不允许网络线程或 remote IO 线程直接修改玩家状态。
 - observer、鉴权或业务完成回调必须先投递回 EventLoop，再修改连接生命周期状态或释放 in-flight 预算。
 
-该实现没有在 `zero-net` 中创建业务线程池，但 `NettyTcpServer` 当前仍自行管理 Netty IO 线程组；把 Netty EventLoop 纳入 starter 全局线程资源管理属于后续独立高风险任务。
+`zero-net` 不创建业务线程池。TCP/HTTP/UDP 共用 `NettyIoResources` 的 IO 创建/关闭实现，默认每服务独占，组合根可显式注入共享组。
+服务器停止时先停止接入，再关闭自身连接并终结在途写，最后释放自有组；借用组由 runtime/组合根关闭。
+同一共享组中的其他服务器不受单个 server.stop 影响。IO 线程发起停止不等待自身终止，外部调用者可通过资源的 `termination()` 等待。
+标准实现和可选装配的 API、关闭期限及迁移见[第三轮迁移说明](migrations/20260923-performance-third.md)。
+
+当前预算、取消/关闭释放规则、队列观察语义和内部消息 ID 的 0.x 变化见[迁移说明](migrations/20260923-performance-plan.md)。

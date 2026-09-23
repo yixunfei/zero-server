@@ -1,6 +1,6 @@
 # 日志与可观测性设计
 
-本文描述 zeroServer 当前已经实现的日志与监控公共模型。完整 API、接入示例和生产晋升边界见 [可观测性最小运行时](observability-runtime.zh-CN.md)。
+本文描述 zeroServer 当前已经实现的日志与监控公共模型。完整 API、接入示例和生产晋升边界见 [可观测性最小运行时](guides/observability-runtime.zh-CN.md)。
 
 当前状态：`minimum-slice-implemented / confirmed=true / productionReady=false`
 
@@ -96,7 +96,7 @@ processor 无法绕过终端复验；附加 `SensitiveFieldPolicy` 只能增加�
 - `MetricSample`：值、标签和值发生时间；标签必须与定义 schema 完全匹配。
 - `MetricRegistry` / `InMemoryMetricRegistry`：定义注册、样本记录和不可变快照。
 - `SystemMetricCollector`：显式采集 JVM 内存、线程、GC、CPU、磁盘和网络接口状态。
-- `PrometheusExporter`：确定性 Prometheus 文本导出，不内置 HTTP 服务。
+- `PrometheusExporter`：确定性 Prometheus 文本导出；`PrometheusHttpEndpoint`：显式 bind/stop 的 JDK HTTP `/metrics` 与 `/health`，使用外部管理的异步执行器，支持 Bearer token；非回环必须配置 token。TLS 由部署入口提供。
 - `GrafanaDashboardTemplate`：最小 dashboard JSON 模板生成。
 - `AlertRule` / `AlertEvaluator` / `AlertSink`：本地告警评估与落地扩展点。
 - `PrometheusAlertRuleExporter`：Prometheus alert rules YAML 导出。
@@ -162,4 +162,9 @@ mvn -Pbenchmarks -pl :zero-benchmarks -am -DskipTests package
 
 ## 9. 当前边界
 
-当前没有 production file/Kafka sink，没有 Prometheus HTTP endpoint，没有容量或长稳证明，没有 SLO/SLA，也没有完整 GM 安全治理。因此该切片虽然已经实现最小运行时，仍明确为 `productionReady=false`。
+当前没有 production file/Kafka sink，没有 Prometheus 认证/TLS、远程写、容量或长稳证明，没有 SLO/SLA，也没有完整 GM 安全治理。因此该切片虽然已经实现最小运行时，仍明确为 `productionReady=false`。
+
+
+## 2026-09-17 报告核实修订
+
+InMemoryMetricRegistry 是本地样本历史，默认保留最近 4096 条，支持配置 sampleCapacity；满时淘汰最早样本并增加 droppedSamples。它不提供生产计数器聚合语义，历史导出仅覆盖保留窗口。

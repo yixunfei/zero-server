@@ -1,7 +1,6 @@
 package group.zn.zero.starter;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -34,10 +33,10 @@ import group.zn.zero.discovery.nacos.NacosDiscoveryConfigKeys;
 import group.zn.zero.discovery.nacos.NacosDiscoveryFactory;
 import group.zn.zero.discovery.nacos.NacosDiscoverySettings;
 import group.zn.zero.discovery.nacos.NacosHealthUpdateMode;
-import group.zn.zero.discovery.nacos.ServiceDiscovery;
-import group.zn.zero.discovery.nacos.ServiceDiscoveryConstants;
-import group.zn.zero.discovery.nacos.ServiceInstance;
-import group.zn.zero.discovery.nacos.ServiceQuery;
+import group.zn.zero.discovery.ServiceDiscovery;
+import group.zn.zero.discovery.ServiceDiscoveryConstants;
+import group.zn.zero.discovery.ServiceInstance;
+import group.zn.zero.discovery.ServiceQuery;
 import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.log.LogAppender;
 import group.zn.zero.log.LogLevel;
@@ -49,13 +48,12 @@ import group.zn.zero.log.ZeroLogRecord;
 import group.zn.zero.monitor.MetricDefinition;
 import group.zn.zero.monitor.MetricSample;
 import group.zn.zero.monitor.MonitorRuntime;
-import group.zn.zero.protocol.ProtocolDefinition;
-import group.zn.zero.protocol.ProtocolDirection;
 import group.zn.zero.protocol.buffer.ZeroReader;
 import group.zn.zero.protocol.buffer.ZeroWriter;
 import group.zn.zero.protocol.codec.GeneratedProtocolCodec;
 import group.zn.zero.protocol.codec.ZeroPayloadCodec;
-import group.zn.zero.rpc.RpcCallOptions;
+import group.zn.zero.protocol.ProtocolDefinition;
+import group.zn.zero.protocol.ProtocolDirection;
 import group.zn.zero.rpc.client.RpcClientFactory;
 import group.zn.zero.rpc.codec.RpcCodecRegistry;
 import group.zn.zero.rpc.common.RpcMethod;
@@ -65,18 +63,22 @@ import group.zn.zero.rpc.discovery.RpcDiscoveryMetadata;
 import group.zn.zero.rpc.kafka.KafkaRpcAdapter;
 import group.zn.zero.rpc.kafka.KafkaRpcSettings;
 import group.zn.zero.rpc.kafka.KafkaRpcTopicResolver;
+import group.zn.zero.rpc.RpcCallOptions;
 import group.zn.zero.rpc.server.RpcServiceBinder;
 import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
+import group.zn.zero.runtime.log.LogRuntime;
+import group.zn.zero.runtime.monitor.MonitorRuntimeComponent;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.TimeUnit;
-import java.util.function.BooleanSupplier;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.junit.jupiter.api.Test;
 import redis.clients.jedis.RedisClient;
@@ -131,12 +133,12 @@ class SimpleBusinessFullChainExternalIT {
                         ZeroRuntimeConfigKeys.ZERO_MODE, "external-test",
                         ZeroRuntimeConfigKeys.ZERO_NAME, "docker-full-chain")),
                 baseLogSink)
-                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime)
+                .replace(MonitorRuntimeComponent.MONITOR_RUNTIME, monitorRuntime)
                 .build();
         ZeroServerApplication application = new ZeroServerApplication(components);
         try (ExternalResources resources = new ExternalResources(application)) {
             application.start();
-            components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME).registry().register(new MetricDefinition(
+            components.require(MonitorRuntimeComponent.MONITOR_RUNTIME).registry().register(new MetricDefinition(
                     LOGIN_METRIC,
                     "simple business login count",
                     "count",
@@ -146,7 +148,7 @@ class SimpleBusinessFullChainExternalIT {
             LoginResponseDTO response = client.login(new LoginRequestDTO(10086L, accountId, playerId, "zone-a"))
                     .orThrow();
             assertBusinessResult(response, data, playerId, accountId, baseLogSink,
-                    components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME));
+                    components.require(MonitorRuntimeComponent.MONITOR_RUNTIME));
         }
     }
 
@@ -229,8 +231,8 @@ class SimpleBusinessFullChainExternalIT {
                         data.playerRepository(),
                         data.accountRepository(),
                         data.cacheService(),
-                        components.require(LocalRuntimeCapabilities.LOG_APPENDER),
-                        components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME)));
+                        components.require(LogRuntime.LOG_APPENDER),
+                        components.require(MonitorRuntimeComponent.MONITOR_RUNTIME)));
         resources.discovery.register(new ServiceInstance(
                 serviceName,
                 instanceId,

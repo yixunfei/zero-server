@@ -23,7 +23,35 @@
     <dependencies>
         <dependency>
             <groupId>group.zn.zero</groupId>
+            <artifactId>zero-protocol</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
             <artifactId>zero-log</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-ranking</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-actor</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-cache</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-aoi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-frame-sync</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-scene</artifactId>
         </dependency>
         <dependency>
             <groupId>group.zn.zero</groupId>
@@ -100,4 +128,29 @@
             </plugin>
         </plugins>
     </build>
+    <profiles>
+        <profile>
+            <id>performance-gate</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>run-protocol-codec-gate</id>
+                                <phase>verify</phase>
+                                <goals><goal>java</goal></goals>
+                                <configuration>
+                                    <mainClass>group.zn.zero.benchmark.ProtocolCodecGate</mainClass>
+                                    <classpathScope>runtime</classpathScope>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

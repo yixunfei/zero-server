@@ -1,6 +1,7 @@
 package group.zn.zero.data.mongo;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -18,6 +19,7 @@ import group.zn.zero.protocol.buffer.ZeroReader;
 import group.zn.zero.protocol.buffer.ZeroWriter;
 import group.zn.zero.protocol.codec.ZeroPayloadCodec;
 import java.util.concurrent.CompletionException;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -37,8 +39,6 @@ class MongoDataAdapterExternalIT {
         try (MongoClient client = adapter.createClient(settings)) {
             MongoDataHealthCheck healthCheck = new MongoDataHealthCheck(client, settings.databaseName());
             assumeTrue(healthCheck.check(), "MongoDB external service is unavailable");
-            client.getDatabase(settings.databaseName()).getCollection("player_external").drop();
-            client.getDatabase(settings.databaseName()).getCollection("game__player_external").drop();
             ZeroDataEnvelopeCrudRepository<String, PlayerArchive> repository = adapter.registerDriverRepository(
                     "player_external",
                     client,
@@ -47,21 +47,22 @@ class MongoDataAdapterExternalIT {
                     new PlayerArchiveCodec(),
                     1);
 
-            repository.save(new PlayerArchive("mongo-player-1", 0L, "created")).toCompletableFuture().join();
-            PlayerArchive saved = repository.findById("mongo-player-1").toCompletableFuture().join().orElseThrow();
-            repository.save(new PlayerArchive(saved.id(), saved.version(), "updated")).toCompletableFuture().join();
-            PlayerArchive updated = repository.findById("mongo-player-1").toCompletableFuture().join().orElseThrow();
-            CompletionException exception = assertThrows(CompletionException.class, () ->
-                    repository.save(new PlayerArchive("mongo-player-1", saved.version(), "stale"))
-                            .toCompletableFuture()
-                            .join());
-            repository.deleteById("mongo-player-1").toCompletableFuture().join();
-
-            assertEquals(1L, saved.version());
-            assertEquals(2L, updated.version());
-            assertEquals("updated", updated.name());
-            assertEquals(DataErrorCode.VERSION_CONFLICT, ((ZeroException) exception.getCause()).errorCode());
-            assertEquals(0L, repository.count().toCompletableFuture().join());
+            String id = "mongo-player-" + UUID.randomUUID();
+            try {
+                repository.save(new PlayerArchive(id, 0L, "created")).toCompletableFuture().join();
+                PlayerArchive saved = repository.findById(id).toCompletableFuture().join().orElseThrow();
+                repository.save(new PlayerArchive(saved.id(), saved.version(), "updated")).toCompletableFuture().join();
+                PlayerArchive updated = repository.findById(id).toCompletableFuture().join().orElseThrow();
+                CompletionException exception = assertThrows(CompletionException.class, () ->
+                        repository.save(new PlayerArchive(id, saved.version(), "stale")).toCompletableFuture().join());
+                assertEquals(1L, saved.version());
+                assertEquals(2L, updated.version());
+                assertEquals("updated", updated.name());
+                assertEquals(DataErrorCode.VERSION_CONFLICT, ((ZeroException) exception.getCause()).errorCode());
+            } finally {
+                repository.deleteById(id).toCompletableFuture().join();
+            }
+            assertFalse(repository.existsById(id).toCompletableFuture().join());
         }
     }
 

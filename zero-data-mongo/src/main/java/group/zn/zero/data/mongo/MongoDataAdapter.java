@@ -7,6 +7,7 @@ import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
 import group.zn.zero.data.adapter.AbstractRepositoryAdapter;
 import group.zn.zero.data.envelope.ZeroDataEntityCodec;
+import group.zn.zero.data.envelope.EnvelopeRepositoryFactory;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeCrudRepository;
 import group.zn.zero.data.mapping.ZeroDataObjectMetadata;
 import group.zn.zero.data.model.VersionedEntity;
@@ -27,6 +28,14 @@ public final class MongoDataAdapter extends AbstractRepositoryAdapter {
      */
     public MongoDataAdapter() {
         super("mongo");
+    }
+
+    /** The caller owns the client and must close this factory before releasing that client. */
+    public EnvelopeRepositoryFactory repositoryFactory(final MongoClient client, final String databaseName) {
+        Objects.requireNonNull(client, "client");
+        Objects.requireNonNull(databaseName, "databaseName");
+        return new EnvelopeRepositoryFactory(metadata -> new MongoDriverEnvelopeStore(
+                client.getDatabase(databaseName), metadata.namespace(), metadata.collection()));
     }
 
     /**

@@ -67,9 +67,13 @@ public final class GeneratedProtocolCodec<T> implements ProtocolCodec<T> {
                     "message type does not match payload codec: " + message.getClass().getName(),
                     null);
         }
-        ZeroWriter writer = new ZeroWriter(payloadCodec.estimatedSize(message));
-        payloadCodec.write(writer, message);
-        return writer.toByteArray();
+        ZeroWriter writer = EncodingWriters.acquire(payloadCodec.estimatedSize(message));
+        try {
+            payloadCodec.write(writer, message);
+            return writer.toByteArray();
+        } finally {
+            EncodingWriters.release(writer);
+        }
     }
 
     /**
@@ -85,8 +89,25 @@ public final class GeneratedProtocolCodec<T> implements ProtocolCodec<T> {
             final ProtocolDefinition definition,
             final byte[] payload,
             final Class<T> messageType) {
+        return decodeReader(definition, new ZeroReader(payload), messageType);
+    }
+
+    /**
+     * 直接解码稳定只读视图；不复制整个 payload，不改变输入游标，线程安全。
+     * @param definition 协议定义，不可为空。
+     * @param payload 自持有或调用期间保持稳定的视图，不可为空。
+     * @param messageType 目标类型，不可为空。
+     * @return 自持有 DTO，可变性由类型定义。
+     * @throws NullPointerException 必填参数为空。
+     * @throws ZeroException 类型不符、输入畸形或存在尾随数据。
+     */
+    @Override public T decodeView(final ProtocolDefinition definition, final java.nio.ByteBuffer payload,
+            final Class<T> messageType) {
+        return decodeReader(definition, new ZeroReader(payload), messageType);
+    }
+
+    private T decodeReader(final ProtocolDefinition definition, final ZeroReader reader, final Class<T> messageType) {
         Objects.requireNonNull(definition, "definition");
-        Objects.requireNonNull(payload, "payload");
         Objects.requireNonNull(messageType, "messageType");
         if (!messageType.equals(payloadCodec.messageType())) {
             throw ZeroException.of(
@@ -94,7 +115,6 @@ public final class GeneratedProtocolCodec<T> implements ProtocolCodec<T> {
                     "message type does not match payload codec: " + messageType.getName(),
                     null);
         }
-        ZeroReader reader = new ZeroReader(payload);
         T message = payloadCodec.read(reader);
         if (reader.isReadable()) {
             throw ZeroException.of(

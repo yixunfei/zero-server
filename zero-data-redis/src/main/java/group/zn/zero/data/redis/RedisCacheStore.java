@@ -44,7 +44,7 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
      */
     private static final byte[] PUT_IF_VERSION_SCRIPT = """
             local current = redis.call('GET', KEYS[2])
-            if current and tonumber(current) > tonumber(ARGV[1]) then
+            if current and tonumber(current) >= tonumber(ARGV[1]) then
               return 0
             end
             redis.call('PSETEX', KEYS[1], ARGV[2], ARGV[3])

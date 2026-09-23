@@ -2,7 +2,11 @@
 
 本文档描述 `zero-codegen` 在 S1-05 阶段支持的标准 `.si` 协议 DSL。`.si` 是当前推荐入口，旧块式 DSL 暂时保留用于兼容测试和历史生成链路。
 
+随工具打包的简明语法说明见[DSL 标准格式资源](../src/main/resources/codegen/dsl/standard-format.zh-CN.md)。该资源用于脱离源码仓库时查阅；语法变更时须与本指南同步。
+
 ## 1. 设计目标
+
+当前工具的更新与运行时接入见[使用指南](user-guide.zh-CN.md#10-更新工具与接入当前运行时)：BOImp 仅首次创建，其他工具管理产物按内容更新；Java 分发器支持直接读取 ProtocolFrame 并在业务执行前验证完整 payload。
 
 - 面向 zeroServer 自研二进制协议生成 DTO、协议号、业务接口和默认实现模板。
 - 协议标准只描述通用结构、类型和方向，不绑定登录、RPC、TraceId、鉴权、房间或场景同步等业务字段。
@@ -239,7 +243,7 @@ group.zn.zero.codegen.ProtocolCodegenCli
 示例：
 
 ```powershell
-java -cp target/classes group.zn.zero.codegen.ProtocolCodegenCli `
+java -jar zero-codegen/target/zero-codegen-0.1.0-SNAPSHOT-all.jar `
   --input zero-codegen/src/test/resources/protocol-dsl/sample `
   --protoId zero-codegen/src/test/resources/protocol-dsl/sample/protoId.txt `
   --out target/generated-sources/zero-codegen `

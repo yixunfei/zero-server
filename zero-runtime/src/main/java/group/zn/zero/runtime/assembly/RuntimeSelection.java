@@ -175,7 +175,8 @@ public final class RuntimeSelection {
                 ordered.sort((left, right) -> left.providerId().compareTo(right.providerId()));
                 Map<ComponentId, Decision> result = new LinkedHashMap<>();
                 ordered.forEach(decision -> result.put(decision.providerId(), decision));
-                multiples.put(entry.getKey(), Collections.unmodifiableMap(result));
+                // 不可变副本由 RuntimeSelection 构造器创建，Builder 仍允许追加贡献者。
+                multiples.put(entry.getKey(), result);
             });
         }
     }

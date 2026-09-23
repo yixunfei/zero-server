@@ -1,0 +1,9 @@
+# Generated DTO used only by explicit performance experiments.
+struct BenchNode {
+  long id;
+  String text;
+  List<Integer> values;
+  Optional<BenchNode> next;
+}
+client_to_server:
+  submit(BenchNode node);

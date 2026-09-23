@@ -59,6 +59,8 @@ class KafkaRpcAdapterSafetyTest {
     void unregisterFailureShouldPreserveRegistrationForRetry() {
         SafetyGateway gateway = new SafetyGateway(true);
         KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings(), gateway);
+        adapter.securityMetadataVerifier(group.zn.zero.security.SecurityMetadataAssertion.verifier(
+                group.zn.zero.security.SecurityMetadataAssertion.digest(new byte[] {1})));
         AtomicInteger handlerCalls = new AtomicInteger();
         adapter.register("service", "method", "request-topic", "request-group", request -> {
             handlerCalls.incrementAndGet();
@@ -126,8 +128,12 @@ class KafkaRpcAdapterSafetyTest {
                 methodName,
                 "trace",
                 Instant.now().plusSeconds(30),
-                RpcMode.ONEWAY,
-                new byte[0]);
+                RpcMode.ONEWAY, "", "", "",
+                group.zn.zero.security.SecurityMetadataAssertion.signed(
+                        new group.zn.zero.security.SecurityContext("test", Instant.now(),
+                                Instant.now().plusSeconds(60), "kafka", "peer", "trusted", "trace", correlationId,
+                                java.util.Set.of("rpc.invoke"), Map.of()), "test-assertion",
+                        group.zn.zero.security.SecurityMetadataAssertion.digest(new byte[] {1})), new byte[0]);
     }
 
     /**

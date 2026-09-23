@@ -1,9 +1,10 @@
 package group.zn.zero.data.redis;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import group.zn.zero.data.envelope.ZeroDataEnvelope;
+import group.zn.zero.core.error.ZeroException;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -23,7 +24,7 @@ class RedisDriverEnvelopeStoreTest {
     private Path tempDir;
 
     /**
-     * 验证 Redis 不可用时，本地 zlog 可以承担降级写入。
+     * 验证 Redis 不可用时，本地 zlog 只保留故障现场，不能使条件写报告成功。
      */
     @Test
     void storeShouldAppendLocalJournalWhenRedisUnavailable() {
@@ -45,9 +46,7 @@ class RedisDriverEnvelopeStoreTest {
                     1000L,
                     new byte[] {1, 2});
 
-            boolean saved = store.saveIfVersion(envelope, 0L);
-
-            assertTrue(saved);
+            assertThrows(ZeroException.class, () -> store.saveIfVersion(envelope, 0L));
             assertEquals(1, localJournal.readAll("game", "player").size());
         }
     }

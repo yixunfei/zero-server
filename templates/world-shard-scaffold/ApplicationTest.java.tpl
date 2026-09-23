@@ -19,7 +19,7 @@ class __TEST_CLASS__ {
         String summary = result.summaryLine();
 
         assertAll("local world shard scaffold result",
-                () -> assertEquals("local", result.mode()),
+                () -> assertEquals("__RUNTIME_PROFILE__", result.mode()),
                 () -> assertEquals("__PROJECT_NAME__", result.name()),
                 () -> assertEquals("world=world-1,shards=2,entities=2,entity=1001,shard=shard-b,"
                                 + "position=54,4,migrations=1,lastAction=query:1001@shard-b",
@@ -27,7 +27,7 @@ class __TEST_CLASS__ {
                 () -> assertEquals(7, result.logCount()),
                 () -> assertEquals(6, result.metricCount()),
                 () -> assertEquals(96107, result.maxProtocolId()),
-                () -> assertTrue(summary.startsWith("world-shard=ok|mode=local|name=__PROJECT_NAME__")),
+                () -> assertTrue(summary.startsWith("world-shard=ok|mode=__RUNTIME_PROFILE__|name=__PROJECT_NAME__")),
                 () -> assertTrue(summary.endsWith("|maxProtocolId=96107")));
     }
 }

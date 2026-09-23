@@ -86,7 +86,7 @@ public final class ProtocolCodegenGui {
     /**
      * 是否生成 BO 默认实现。
      */
-    private final JCheckBox boImplBox = new JCheckBox("生成 BOImp");
+    private final JCheckBox boImplBox = new JCheckBox("创建 BOImp（保留已有实现）");
 
     /**
      * 是否生成 Java。

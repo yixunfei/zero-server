@@ -52,10 +52,11 @@ final class RuntimeBuildTransaction {
             final Map<Lifecycle, ComponentId> lifecycleOwners,
             final ComponentCatalog.RegisteredProvider provider) {
         ComponentDescriptor descriptor = provider.descriptor();
-        ensureBudget(assemblyDeadline, descriptor.id());
         ResourceRegistrar registrar = resources.registrar(descriptor.id());
         long startedAt = System.nanoTime();
         try {
+            // 两个 provider 之间耗尽预算也必须回滚此前已取得的资源。
+            ensureBudget(assemblyDeadline, descriptor.id());
             ComponentContribution contribution = createContribution(
                     planned, assemblyDeadline, bindings, registrar, provider);
             validateContribution(descriptor, contribution, lifecycleOwners);

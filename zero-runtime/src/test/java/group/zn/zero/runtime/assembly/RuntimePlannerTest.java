@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import group.zn.zero.runtime.api.ComponentId;
 import group.zn.zero.runtime.api.ComponentKey;
+import group.zn.zero.runtime.api.ComponentSetKey;
 import group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan;
 import group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan.DependencyEdgeKind;
 import group.zn.zero.runtime.spi.ComponentContribution;
@@ -78,6 +79,25 @@ class RuntimePlannerTest {
                 .diagnose();
 
         assertEquals(forward, reversed);
+    }
+
+    @Test
+    void diagnoseMustNotFreezeFurtherContributionsOrChangeEarlierPlans() {
+        ComponentSetKey<String> services = ComponentSetKey.multiple("test.services", String.class);
+        var alpha = new FakeRuntimeProvider(descriptor(ALPHA_ID).provide(services).build(),
+                context -> ComponentContribution.builder().contribute(services, "a").build());
+        var beta = new FakeRuntimeProvider(descriptor(BETA_ID).provide(services).build(),
+                context -> ComponentContribution.builder().contribute(services, "b").build());
+        var builder = RuntimeAssembler.builder(catalog(alpha, beta), RuntimeProfile.local())
+                .require(services).contribute(services, ALPHA_ID, "test");
+        RuntimeAssemblyPlan first = builder.diagnose();
+
+        builder.contribute(services, BETA_ID, "test");
+        assertEquals(List.of(ALPHA_ID, BETA_ID), componentIds(builder.diagnose()));
+        assertEquals(List.of(ALPHA_ID), componentIds(first));
+        try (var runtime = builder.build()) {
+            assertEquals(List.of("a", "b"), runtime.requireAll(services));
+        }
     }
 
     @Test

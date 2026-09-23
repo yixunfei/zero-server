@@ -119,6 +119,37 @@ class GeneratedProtocolCodecTest {
         assertThrows(ZeroException.class, () -> codec.decode(definition, dirtyPayload, SampleMessage.class));
     }
 
+    /** 只读视图与数组入口共享类型/截断/尾随校验，来源游标保持不变。 */
+    @Test void readOnlyViewMatchesArrayAndRejectsMalformedInput() {
+        var definition = new ProtocolDefinition(1001, "sample", ProtocolDirection.CLIENT_TO_SERVER, 1);
+        var codec = new GeneratedProtocolCodec<>(new SampleMessageCodec());
+        byte[] payload = codec.encode(definition, new SampleMessage(7, "中文😀"));
+        var frame = new group.zn.zero.protocol.ProtocolFrame(1001, 1, 0, null, payload);
+        var view = frame.payloadView();
+        assertEquals(new SampleMessage(7, "中文😀"), codec.decodeView(definition, view, SampleMessage.class));
+        assertEquals(0, view.position());
+        assertThrows(ZeroException.class, () -> codec.decodeView(definition,
+                view.slice(0, payload.length - 1), SampleMessage.class));
+        assertThrows(ZeroException.class, () -> codec.decodeView(definition,
+                java.nio.ByteBuffer.wrap(java.util.Arrays.copyOf(payload, payload.length + 1)), SampleMessage.class));
+    }
+
+    /** 自定义 codec 只实现既有数组方法，默认视图适配仍可用且不能篡改帧。 */
+    @Test void customCodecKeepsArrayFallback() {
+        var definition = new ProtocolDefinition(1, "custom", ProtocolDirection.CLIENT_TO_SERVER, 1);
+        ProtocolCodec<byte[]> custom = new ProtocolCodec<>() {
+            @Override public String name() { return "custom"; }
+            @Override public byte[] encode(final ProtocolDefinition type, final byte[] message) { return message.clone(); }
+            @Override public byte[] decode(final ProtocolDefinition type, final byte[] payload, final Class<byte[]> target) {
+                payload[0] = 9;
+                return payload;
+            }
+        };
+        var frame = new group.zn.zero.protocol.ProtocolFrame(1, 1, 0, null, new byte[] {1, 2});
+        assertArrayEquals(new byte[] {9, 2}, custom.decodeView(definition, frame.payloadView(), byte[].class));
+        assertArrayEquals(new byte[] {1, 2}, frame.payload());
+    }
+
     /**
      * 测试消息。
      *

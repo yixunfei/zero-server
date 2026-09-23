@@ -15,6 +15,9 @@ import group.zn.zero.rpc.spi.RpcHandler;
 import group.zn.zero.rpc.spi.RpcHandlerRegistry;
 import group.zn.zero.rpc.spi.RpcRoute;
 import group.zn.zero.rpc.spi.RpcTransport;
+import group.zn.zero.security.SecurityContext;
+import group.zn.zero.security.SecurityMetadataSnapshot;
+import group.zn.zero.security.SecurityMetadataVerifier;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -54,6 +57,8 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
      * RPC 传输观测器。
      */
     private final RpcTransportObserver observer;
+    /** 接收端验证器；未配置时拒绝请求。 */
+    private volatile SecurityMetadataVerifier securityMetadataVerifier = SecurityMetadataVerifier.failClosed();
 
     /**
      * topic 解析器。
@@ -143,7 +148,17 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
     /**
      * request topic 消息监听器。
      */
-    private final KafkaRpcMessageListener requestListener = this::onRequestMessage;
+    private final KafkaRpcMessageListener requestListener = new KafkaRpcMessageListener() {
+        @Override
+        public void onMessage(final KafkaRpcMessage message) {
+            onRequestMessage(message);
+        }
+
+        @Override
+        public CompletionStage<Void> onMessageAsync(final KafkaRpcMessage message) {
+            return onRequestMessageAsync(message);
+        }
+    };
 
     /**
      * reply topic 消息监听器。
@@ -216,9 +231,12 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
         }
     }
 
+    /** Configures the application-owned receiver verifier. */
+    public void securityMetadataVerifier(final SecurityMetadataVerifier verifier) {
+        this.securityMetadataVerifier = Objects.requireNonNull(verifier, "verifier");
+    }
+
     /**
-     * 返回提供者名称。
-     *
      * @return 提供者名称；不可为空；线程安全。
      */
     @Override
@@ -421,9 +439,13 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
     }
 
     private void onRequestMessage(final KafkaRpcMessage message) {
+        onRequestMessageAsync(message);
+    }
+
+    private CompletionStage<Void> onRequestMessageAsync(final KafkaRpcMessage message) {
         KafkaRpcEnvelope envelope = envelopeCodec.decode(message.value());
         if (envelope.kind() != KafkaRpcEnvelopeKind.REQUEST) {
-            return;
+            return CompletableFuture.completedFuture(null);
         }
         RpcRequest request = envelope.request();
         observe(RpcTransportEventType.REQUEST_RECEIVED, request, message.topic(), request.group(),
@@ -431,21 +453,39 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
         if (request.timeoutAt().isBefore(Instant.now())) {
             observe(RpcTransportEventType.REQUEST_REJECTED, request, message.topic(), request.group(),
                     RpcErrorCode.REQUEST_TIMEOUT, "kafka rpc request already timed out");
-            reject(request, RpcErrorCode.REQUEST_TIMEOUT, "kafka rpc request already timed out");
-            return;
+            return reject(request, RpcErrorCode.REQUEST_TIMEOUT, "rpc request already timed out");
         }
         RpcHandler handler = handlers.get(new RpcRoute(request.serviceName(), request.methodName()));
         if (handler == null) {
             observe(RpcTransportEventType.REQUEST_REJECTED, request, message.topic(), request.group(),
                     RpcErrorCode.SERVICE_NOT_FOUND, "rpc handler not found");
-            reject(request, RpcErrorCode.SERVICE_NOT_FOUND,
+            return reject(request, RpcErrorCode.SERVICE_NOT_FOUND,
                     "rpc handler not found: " + request.serviceName() + "#" + request.methodName());
-            return;
         }
-        handle(request, handler);
+        if (request.securityMetadata() == null || request.securityMetadata().expired(Instant.now())
+                || request.securityMetadata().issuedAt().isAfter(Instant.now())) {
+            return reject(request, RpcErrorCode.INVALID_REQUEST, "rpc security metadata is required");
+        }
+        CompletionStage<SecurityContext> verified;
+        try {
+            verified = securityMetadataVerifier.verify(request.securityMetadata(), Instant.now());
+        } catch (RuntimeException exception) {
+            return reject(request, RpcErrorCode.INVALID_REQUEST, "rpc security metadata rejected");
+        }
+        if (verified == null) {
+            return reject(request, RpcErrorCode.INVALID_REQUEST, "rpc security metadata rejected");
+        }
+        return verified.handle((securityContext, failure) -> failure == null ? securityContext : null)
+                .thenCompose(securityContext -> {
+            if (securityContext == null || securityContext.expired(Instant.now())) {
+                return reject(request, RpcErrorCode.INVALID_REQUEST, "rpc security metadata rejected");
+            }
+            return group.zn.zero.security.SecurityContextBridge.with(securityContext,
+                    () -> handle(request, handler));
+        });
     }
 
-    private void handle(final RpcRequest request, final RpcHandler handler) {
+    private CompletionStage<Void> handle(final RpcRequest request, final RpcHandler handler) {
         CompletionStage<RpcResponse> stage;
         try {
             observe(RpcTransportEventType.HANDLER_STARTED, request, topicResolver.requestTopic(request),
@@ -454,41 +494,47 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
         } catch (RuntimeException ex) {
             observe(RpcTransportEventType.HANDLER_FAILED, request, topicResolver.requestTopic(request),
                     request.group(), RpcErrorCode.HANDLER_FAILED, messageOf(ex));
-            reject(request, RpcErrorCode.HANDLER_FAILED, messageOf(ex));
-            return;
+            if (request.mode() == RpcMode.ONEWAY) {
+                return CompletableFuture.failedFuture(ex);
+            }
+            return reject(request, RpcErrorCode.HANDLER_FAILED, messageOf(ex));
         }
-        stage.whenComplete((response, throwable) -> {
+        CompletionStage<CompletionStage<Void>> completion = stage.handle((response, throwable) -> {
             if (throwable != null) {
                 observe(RpcTransportEventType.HANDLER_FAILED, request, topicResolver.requestTopic(request),
                         request.group(), RpcErrorCode.HANDLER_FAILED, messageOf(unwrap(throwable)));
-                reject(request, RpcErrorCode.HANDLER_FAILED, messageOf(unwrap(throwable)));
-                return;
+                if (request.mode() == RpcMode.ONEWAY) {
+                    return CompletableFuture.failedFuture(throwable);
+                }
+                return reject(request, RpcErrorCode.HANDLER_FAILED, messageOf(unwrap(throwable)));
             }
             observe(RpcTransportEventType.HANDLER_SUCCEEDED, request, topicResolver.requestTopic(request),
                     request.group(), null, "kafka rpc handler succeeded");
             if (request.mode() == RpcMode.ONEWAY) {
-                return;
+                return CompletableFuture.completedFuture(null);
             }
             RpcResponse current = response == null
                     ? errorResponse(request, RpcErrorCode.HANDLER_FAILED, "rpc handler returned null response")
                     : response;
-            sendResponse(request.replyTopic(), current);
+            return sendResponse(request.replyTopic(), current);
         });
+        return completion.thenCompose(stageResult -> stageResult);
     }
 
-    private void reject(final RpcRequest request, final ErrorCode errorCode, final String message) {
+    private CompletionStage<Void> reject(final RpcRequest request, final ErrorCode errorCode, final String message) {
         if (request.mode() == RpcMode.ONEWAY) {
-            return;
+            return CompletableFuture.completedFuture(null);
         }
-        sendResponse(request.replyTopic(), errorResponse(request, errorCode, message));
+        return sendResponse(request.replyTopic(), errorResponse(request, errorCode, message));
     }
 
-    private void sendResponse(final String replyTopic, final RpcResponse response) {
+    private CompletionStage<Void> sendResponse(final String replyTopic, final RpcResponse response) {
         KafkaRpcMessage message = new KafkaRpcMessage(
                 replyTopic,
                 response.correlationId(),
                 envelopeCodec.encodeResponse(response));
-        gateway.send(message).whenComplete((ignored, throwable) -> {
+        CompletionStage<Void> sendStage = gateway.send(message);
+        sendStage.whenComplete((ignored, throwable) -> {
             if (throwable != null) {
                 lastSendFailure = unwrap(throwable);
                 observe(RpcTransportEventType.SEND_FAILED, response, replyTopic, "",
@@ -501,6 +547,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
                         null, "kafka rpc response sent");
             }
         });
+        return sendStage;
     }
 
     private RpcResponse errorResponse(

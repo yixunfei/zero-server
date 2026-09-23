@@ -3,8 +3,8 @@ package group.zn.zero.starter;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.cache.InMemoryCacheService;
+import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.data.repository.InMemoryCrudRepository;
 import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.player.LocalPlayerService;
@@ -12,7 +12,10 @@ import group.zn.zero.player.PlayerLoadRequest;
 import group.zn.zero.player.PlayerLoginRequest;
 import group.zn.zero.player.PlayerLoginResult;
 import group.zn.zero.player.PlayerProfile;
+import group.zn.zero.runtime.actor.ActorRuntime;
 import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
 import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
 import group.zn.zero.scene.LocalSceneService;
 import group.zn.zero.scene.SceneEnterRequest;
@@ -52,12 +55,12 @@ class Stage3FoundationRuntimeTest {
         InMemoryCacheService<Long, PlayerProfile> playerCache = new InMemoryCacheService<>();
         application.start();
         try (LocalPlayerService playerService = new LocalPlayerService(
-                components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER),
+                components.require(ActorRuntime.ACTOR_SCHEDULER),
                 request -> 1001L,
                 playerRepository,
                 playerCache);
                 LocalSceneService sceneService = new LocalSceneService(
-                        components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER))) {
+                        components.require(ActorRuntime.ACTOR_SCHEDULER))) {
             PlayerLoginResult loginResult = playerService
                     .login(new PlayerLoginRequest("guest-1001", "token-local", "trace-login"))
                     .toCompletableFuture()

@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
  * 启动网络端口、连接外部中间件或创建线程池。适合克隆仓库后的首次自检。
  *
  * @author zn
+ * zero-local-doctor=ok
  */
 public final class ZeroLocalDoctor {
 
@@ -56,7 +57,11 @@ public final class ZeroLocalDoctor {
             path("scaffold-runner", "scripts/RunLocalScaffold.java"),
             path("scaffold-verifier", "scripts/VerifyLocalScaffolds.java"),
             path("stage0-acceptance", "scripts/ZeroStage0Acceptance.java"),
-            path("architecture-guard", "scripts/ZeroArchitectureGuard.java"));
+            path("architecture-guard", "scripts/ZeroArchitectureGuard.java"),
+            path("framework-boundary-guard", "scripts/ZeroFrameworkBoundaryGuard.java"),
+            path("unified-entry-posix", "scripts/zero.sh"),
+            path("unified-entry-powershell", "scripts/zero.ps1"),
+            path("unified-entry-verifier", "scripts/ZeroUnifiedEntryVerifier.java"));
 
     /** 禁止实例化。 */
     private ZeroLocalDoctor() {
@@ -101,10 +106,14 @@ public final class ZeroLocalDoctor {
      */
     private static void checkJava(final List<CheckResult> results) {
         int feature = Runtime.version().feature();
+        String detail = "required=" + MINIMUM_JAVA_FEATURE + "+|actual=" + Runtime.version();
+        if (feature < MINIMUM_JAVA_FEATURE) {
+            detail += "|action=select JDK " + MINIMUM_JAVA_FEATURE + "+ via JAVA_HOME and PATH";
+        }
         results.add(new CheckResult(
                 "java",
                 feature >= MINIMUM_JAVA_FEATURE,
-                "required=" + MINIMUM_JAVA_FEATURE + "+|actual=" + Runtime.version()));
+                detail));
     }
 
     /**
@@ -248,6 +257,7 @@ public final class ZeroLocalDoctor {
         System.out.println("  java scripts/ZeroLocalDoctor.java --help");
         System.out.println();
         System.out.println("Checks Java 21+, Maven 3.9+, Git and public repository entry points.");
+        System.out.println("If Java is below 21, set JAVA_HOME and put its bin directory first on PATH.");
     }
 
     /**

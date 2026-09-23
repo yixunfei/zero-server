@@ -1,5 +1,6 @@
 package group.zn.zero.net.lifecycle;
 
+import group.zn.zero.security.SecurityChain;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 
@@ -18,6 +19,8 @@ public final class ProductionNetworkLifecycle {
     private final ProductionNetworkConfig config;
     /** 握手、鉴权、心跳和重连策略。 */
     private final ProductionNetworkPolicy policy;
+    /** Explicit transport-neutral security chain. */
+    private final SecurityChain securityChain;
     /** 连接与 frame 限流器。 */
     private final NetworkRateLimiter rateLimiter;
     /** 生命周期 observer。 */
@@ -41,6 +44,7 @@ public final class ProductionNetworkLifecycle {
         this(
                 config,
                 policy,
+                SecurityChain.failClosed(),
                 NetworkRateLimiter.permitAll(),
                 ConnectionLifecycleObserver.noOp(),
                 authenticationExecutor,
@@ -61,19 +65,31 @@ public final class ProductionNetworkLifecycle {
     public ProductionNetworkLifecycle(
             final ProductionNetworkConfig config,
             final ProductionNetworkPolicy policy,
+            final SecurityChain securityChain,
             final NetworkRateLimiter rateLimiter,
             final ConnectionLifecycleObserver observer,
             final Executor authenticationExecutor,
             final Executor observerExecutor) {
         this.config = Objects.requireNonNull(config, "config");
         this.policy = Objects.requireNonNull(policy, "policy");
+        this.securityChain = Objects.requireNonNull(securityChain, "securityChain");
         this.rateLimiter = Objects.requireNonNull(rateLimiter, "rateLimiter");
         this.observer = Objects.requireNonNull(observer, "observer");
         this.authenticationExecutor = Objects.requireNonNull(authenticationExecutor, "authenticationExecutor");
         this.observerExecutor = Objects.requireNonNull(observerExecutor, "observerExecutor");
     }
 
-    /** @return 生产网络配置；不可为空；线程安全。 */
+    public ProductionNetworkLifecycle(
+            final ProductionNetworkConfig config,
+            final ProductionNetworkPolicy policy,
+            final NetworkRateLimiter rateLimiter,
+            final ConnectionLifecycleObserver observer,
+            final Executor authenticationExecutor,
+            final Executor observerExecutor) {
+        this(config, policy, SecurityChain.failClosed(), rateLimiter, observer, authenticationExecutor, observerExecutor);
+    }
+
+
     public ProductionNetworkConfig config() {
         return config;
     }
@@ -83,7 +99,11 @@ public final class ProductionNetworkLifecycle {
         return policy;
     }
 
-    /** @return 网络限流器；不可为空；线程安全。 */
+    public SecurityChain securityChain() {
+        return securityChain;
+    }
+
+
     public NetworkRateLimiter rateLimiter() {
         return rateLimiter;
     }

@@ -13,7 +13,7 @@ This file explains how to move from this generated local/prototype scaffold towa
 
 - The `.si` protocol can generate DTO, codec, BO and dispatcher code.
 - The handwritten BO implementation is wired to the generated dispatcher.
-- The local starter path runs without Docker or external middleware.
+- The default local composition runs without Docker or external middleware.
 - The smoke test and `RunLocalScaffold` verify the local/prototype flow.
 
 ## Production Gap

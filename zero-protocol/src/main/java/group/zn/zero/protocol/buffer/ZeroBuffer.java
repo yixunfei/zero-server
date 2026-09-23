@@ -77,6 +77,21 @@ public interface ZeroBuffer extends AutoCloseable {
     void putBytes(int index, byte[] source, int sourceOffset, int length);
 
     /**
+     * 写入 ByteBuffer 剩余字节，不修改源游标；默认实现不分配中转数组，线程不安全。
+     * @param index 目标位置。
+     * @param source 来源，允许只读视图，不可为空。
+     * @throws IndexOutOfBoundsException 目标范围不足。
+     */
+    default void putBytes(final int index, final ByteBuffer source) {
+        java.util.Objects.checkFromIndexSize(index, source.remaining(), capacity());
+        if (hasArray()) {
+            source.get(source.position(), array(), arrayOffset() + index, source.remaining());
+        } else {
+            for (int i = 0; i < source.remaining(); i++) putByte(index + i, source.get(source.position() + i));
+        }
+    }
+
+    /**
      * 在同一缓冲区内部移动字节，必须正确处理重叠区域。
      *
      * @param sourceIndex 来源起始位置。

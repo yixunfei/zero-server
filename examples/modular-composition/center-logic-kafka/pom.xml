@@ -1,0 +1,14 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+ <modelVersion>4.0.0</modelVersion>
+ <groupId>group.zn.zero.examples</groupId><artifactId>center-logic-kafka</artifactId><version>0.1.0-SNAPSHOT</version><packaging>pom</packaging>
+ <properties><maven.compiler.release>21</maven.compiler.release><zero.version>0.1.0-SNAPSHOT</zero.version></properties>
+ <modules><module>common-contract</module><module>center</module><module>logic</module></modules>
+ <dependencyManagement><dependencies>
+  <dependency><groupId>group.zn.zero</groupId><artifactId>zero-bom</artifactId><version>${zero.version}</version><type>pom</type><scope>import</scope></dependency>
+ </dependencies></dependencyManagement>
+ <build><plugins>
+  <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.15.0</version></plugin>
+  <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.2.5</version></plugin>
+ </plugins></build>
+</project>

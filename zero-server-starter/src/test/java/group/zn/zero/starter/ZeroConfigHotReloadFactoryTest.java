@@ -9,30 +9,33 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.core.config.ZeroConfig;
 import group.zn.zero.core.error.ZeroException;
-import group.zn.zero.hotupdate.HotUpdateLevel;
-import group.zn.zero.hotupdate.HotUpdateRequest;
 import group.zn.zero.hotupdate.config.ConfigReloadErrorCode;
 import group.zn.zero.hotupdate.config.ConfigReloadResult;
 import group.zn.zero.hotupdate.config.ConfigReloadStatus;
 import group.zn.zero.hotupdate.config.ConfigTable;
 import group.zn.zero.hotupdate.config.ConfigTableDefinition;
 import group.zn.zero.hotupdate.config.LocalConfigHotReloadService;
+import group.zn.zero.hotupdate.HotUpdateLevel;
+import group.zn.zero.hotupdate.HotUpdateRequest;
 import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.log.LogType;
 import group.zn.zero.log.ZeroLogRecord;
 import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.api.RuntimeLifecycleCapabilities;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.Test;
 
 /**
  * Starter CSV 配置热重载 opt-in、线程边界和审计 focused tests。
@@ -62,7 +65,7 @@ class ZeroConfigHotReloadFactoryTest {
 
         assertTrue(service.isEmpty());
         GameRuntime components = builder.build();
-        assertTrue(components.requireAll(LocalRuntimeCapabilities.APPLICATION_LIFECYCLES).isEmpty());
+        assertTrue(components.requireAll(RuntimeLifecycleCapabilities.APPLICATION_LIFECYCLES).isEmpty());
         components.start();
         components.stop();
     }

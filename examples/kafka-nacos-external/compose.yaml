@@ -1,0 +1,44 @@
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://127.0.0.1:${ZERO_KAFKA_PORT}
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "127.0.0.1:${ZERO_KAFKA_PORT}:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 3s
+      timeout: 10s
+      retries: 30
+
+  nacos:
+    image: nacos/nacos-server:v3.2.2
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"
+      NACOS_AUTH_TOKEN: "ZmFrZS10ZXN0LXRva2VuLWtleS1mb3ItaW50ZXJuYWwtdGVzdA=="
+      NACOS_AUTH_IDENTITY_KEY: "zero-external-test"
+      NACOS_AUTH_IDENTITY_VALUE: "zero-external-test"
+      JVM_XMS: 256m
+      JVM_XMX: 256m
+    ports:
+      - "127.0.0.1:${ZERO_NACOS_HTTP_PORT}:8848"
+      - "127.0.0.1:${ZERO_NACOS_GRPC_PORT}:9848"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8848/nacos/ >/dev/null"]
+      interval: 5s
+      timeout: 10s
+      retries: 36

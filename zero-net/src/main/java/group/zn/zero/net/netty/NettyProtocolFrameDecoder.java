@@ -3,7 +3,6 @@ package group.zn.zero.net.netty;
 import group.zn.zero.protocol.ProtocolFrame;
 import group.zn.zero.protocol.codec.ProtocolFrameCodec;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.MessageToMessageDecoder;
 import java.util.List;
@@ -42,8 +41,9 @@ final class NettyProtocolFrameDecoder extends MessageToMessageDecoder<ByteBuf> {
             final ChannelHandlerContext context,
             final ByteBuf message,
             final List<Object> out) {
-        byte[] bytes = ByteBufUtil.getBytes(message);
-        ProtocolFrame frame = frameCodec.decode(bytes);
+        var reader = new group.zn.zero.protocol.buffer.ZeroReader(
+                new NettyZeroBuffer(message, message.capacity()), message.readerIndex(), message.readableBytes());
+        ProtocolFrame frame = frameCodec.decodeFrom(reader);
         out.add(frame);
     }
 }

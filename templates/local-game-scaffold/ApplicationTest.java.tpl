@@ -19,7 +19,7 @@ class __TEST_CLASS__ {
         String summary = result.summaryLine();
 
         assertAll("local game scaffold result",
-                () -> assertEquals("local", result.mode()),
+                () -> assertEquals("__RUNTIME_PROFILE__", result.mode()),
                 () -> assertEquals("__PROJECT_NAME__", result.name()),
                 () -> assertEquals(1001L, result.uid()),
                 () -> assertEquals(3, result.position().x()),
@@ -27,7 +27,7 @@ class __TEST_CLASS__ {
                 () -> assertEquals(4, result.logCount()),
                 () -> assertEquals(2, result.metricCount()),
                 () -> assertEquals(90105, result.maxProtocolId()),
-                () -> assertTrue(summary.startsWith("local-game=ok|mode=local|name=__PROJECT_NAME__")),
+                () -> assertTrue(summary.startsWith("local-game=ok|mode=__RUNTIME_PROFILE__|name=__PROJECT_NAME__")),
                 () -> assertTrue(summary.endsWith("|maxProtocolId=90105")));
     }
 }

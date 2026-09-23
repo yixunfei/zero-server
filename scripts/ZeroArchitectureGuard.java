@@ -40,14 +40,41 @@ public final class ZeroArchitectureGuard {
             "zero-bom",
             "zero-core",
             "zero-runtime",
+            "zero-runtime-bootstrap",
+            "zero-runtime-event",
+            "zero-runtime-actor",
+            "zero-runtime-protocol",
+            "zero-runtime-rpc",
+            "zero-runtime-data",
+            "zero-runtime-cache",
+            "zero-runtime-log",
+            "zero-runtime-monitor",
+            "zero-discovery",
+            "zero-rpc-discovery",
+            "zero-runtime-discovery",
+            "zero-runtime-production",
+            "zero-runtime-kafka",
+            "zero-runtime-mongo",
+            "zero-runtime-redis",
+            "zero-runtime-postgresql",
+            "zero-runtime-nacos",
+            "zero-runtime-net",
             "zero-event",
             "zero-protocol",
             "zero-codegen",
             "zero-actor",
+            "zero-world",
+            "zero-npc",
+            "zero-ranking",
+            "zero-room",
             "zero-game",
             "zero-player",
             "zero-scene",
+            "zero-aoi",
+            "zero-state-sync",
+            "zero-frame-sync",
             "zero-logic",
+            "zero-security",
             "zero-net",
             "zero-rpc-common",
             "zero-rpc",
@@ -61,6 +88,7 @@ public final class ZeroArchitectureGuard {
             "zero-log",
             "zero-monitor",
             "zero-gm",
+            "zero-gm-rest",
             "zero-hot-update",
             "zero-server-starter",
             "zero-server-starter-production");
@@ -80,14 +108,17 @@ public final class ZeroArchitectureGuard {
      */
     private static final Set<String> PRODUCTION_REQUIRED_MODULES = Set.of(
             "zero-server-starter",
-            "zero-rpc-kafka",
-            "zero-data-mongo",
-            "zero-data-redis",
-            "zero-data-postgresql",
-            "zero-discovery-nacos");
+            "zero-runtime-production",
+            "zero-runtime-kafka",
+            "zero-runtime-mongo",
+            "zero-runtime-redis",
+            "zero-runtime-postgresql",
+            "zero-runtime-nacos",
+            "zero-runtime-net");
 
     /** benchmark 允许直接依赖的框架运行时模块。 */
     private static final Set<String> BENCHMARK_RUNTIME_MODULES = Set.of(
+            "zero-protocol", "zero-ranking", "zero-actor", "zero-cache", "zero-aoi", "zero-frame-sync", "zero-scene",
             "zero-log",
             "zero-monitor",
             "zero-net",
@@ -100,6 +131,7 @@ public final class ZeroArchitectureGuard {
 
     /** 允许直接持有 terminal LogSink 的顶层装配源码。 */
     private static final Set<String> TERMINAL_LOG_SINK_ASSEMBLY_FILES = Set.of(
+            "zero-runtime-log/src/main/java/group/zn/zero/runtime/log/LogRuntime.java",
             "zero-server-starter/src/main/java/group/zn/zero/starter/LocalRuntime.java",
             "zero-server-starter/src/main/java/group/zn/zero/starter/LocalRuntimeBuilder.java",
             "zero-server-starter/src/main/java/group/zn/zero/starter/LocalRuntimeCapabilities.java",
@@ -119,9 +151,6 @@ public final class ZeroArchitectureGuard {
             "kafka",
             "nacos");
 
-    /**
-     * Actor 模块禁止直接绑定的上层或中间件关键词。
-     */
     private static final Set<String> ACTOR_FORBIDDEN_KEYWORDS = Set.of(
             "zero-rpc",
             "kafka",
@@ -130,6 +159,19 @@ public final class ZeroArchitectureGuard {
             "mongo",
             "postgres",
             "netty");
+
+    /**
+     * Room 模块必须保持的直接依赖集合。
+     */
+    private static final Set<String> ROOM_ALLOWED_MODULES = Set.of("zero-actor");
+
+
+    /**
+     * Room 模块禁止直接绑定的中间件或上层模块关键词。
+     */
+    private static final Set<String> ROOM_FORBIDDEN_KEYWORDS = Set.of(
+            "zero-rpc", "zero-data", "zero-cache", "zero-discovery", "zero-server-starter",
+            "kafka", "nacos", "redis", "mongo", "postgres", "netty");
 
     /**
      * 需要在 module-map 文档中持续可定位的关键文本。
@@ -141,6 +183,8 @@ public final class ZeroArchitectureGuard {
             "zero-server-starter-production",
             "zero-rpc",
             "zero-actor",
+            "zero-world",
+            "zero-room",
             "zero-data",
             "zero-rpc-kafka",
             "zero-discovery-nacos",
@@ -180,9 +224,11 @@ public final class ZeroArchitectureGuard {
         checkModulePoms(report);
         checkZeroCoreBoundary(report);
         checkRuntimeBoundary(report);
+        checkIntegrationBoundaries(report);
         checkFoundationBoundaries(report);
         checkRpcBoundary(report);
         checkActorBoundary(report);
+        checkRoomBoundary(report);
         checkDataBoundary(report);
         checkStarterBoundary(report);
         checkProductionStarterBoundary(report);
@@ -192,7 +238,22 @@ public final class ZeroArchitectureGuard {
         checkBenchmarkProfile(report, rootModules, rootProfiles);
         checkBenchmarkModuleBoundary(report);
         checkModuleMap(report);
+        checkFrameworkBoundary(report);
         return report;
+    }
+
+    private static void checkFrameworkBoundary(final GuardReport report) throws IOException {
+        Path script = Path.of("scripts", "ZeroFrameworkBoundaryGuard.java");
+        if (!Files.isRegularFile(script)) {
+            report.fail("framework-boundary-guard", "Missing framework boundary guard: " + script);
+            return;
+        }
+        String source = Files.readString(script, StandardCharsets.UTF_8);
+        if (!source.contains("prototype") || !source.contains("connectsExternalMiddleware")) {
+            report.fail("framework-boundary-guard", "Boundary guard must check scaffold prototype and middleware metadata.");
+        } else {
+            report.pass("framework-boundary-guard", "Framework/template boundary guard is present and checks non-production scaffolds.");
+        }
     }
 
     private static void checkRepositoryRoot(final GuardReport report) {
@@ -277,8 +338,8 @@ public final class ZeroArchitectureGuard {
                 .filter(dependency -> !dependency.isTestOnly())
                 .toList();
         boolean onlyDependsOnCore = nonTestDependencies.size() == 1
-                && "group.zn.zero".equals(nonTestDependencies.getFirst().groupId())
-                && "zero-core".equals(nonTestDependencies.getFirst().artifactId());
+                && "group.zn.zero".equals(nonTestDependencies.get(0).groupId())
+                && "zero-core".equals(nonTestDependencies.get(0).artifactId());
         if (onlyDependsOnCore) {
             report.pass("zero-runtime-boundary", "zero-runtime directly depends only on zero-core at runtime.");
         } else {
@@ -330,6 +391,24 @@ public final class ZeroArchitectureGuard {
         }
     }
 
+    private static void checkRoomBoundary(final GuardReport report) throws IOException {
+        List<Dependency> dependencies = dependenciesOf(report, "zero-room").stream()
+                .filter(dependency -> !dependency.isTestOnly())
+                .toList();
+        List<Dependency> unexpected = dependencies.stream()
+                .filter(dependency -> !ROOM_ALLOWED_MODULES.contains(dependency.artifactId()))
+                .toList();
+        List<Dependency> forbidden = dependencies.stream()
+                .filter(ZeroArchitectureGuard::matchesRoomForbidden)
+                .toList();
+        if (unexpected.isEmpty() && forbidden.isEmpty()) {
+            report.pass("zero-room-boundary", "zero-room depends only on zero-actor and stays middleware-free.");
+        } else {
+            report.fail("zero-room-boundary", "zero-room has forbidden direct dependencies: "
+                    + dependencyNames(unexpected.isEmpty() ? forbidden : unexpected));
+        }
+    }
+
     private static void checkDataBoundary(final GuardReport report) throws IOException {
         List<Dependency> forbidden = dependenciesOf(report, "zero-data").stream()
                 .filter(dependency -> "zero-actor".equals(dependency.artifactId()))
@@ -368,10 +447,56 @@ public final class ZeroArchitectureGuard {
                 .toList();
         if (missing.isEmpty()) {
             report.pass("production-starter-boundary", "zero-server-starter-production explicitly depends on starter "
-                    + "and required real adapter modules.");
+                    + "and independently consumable integration modules.");
         } else {
             report.fail("production-starter-boundary", "zero-server-starter-production missing dependencies: "
                     + String.join(", ", missing));
+        }
+    }
+
+    private static void checkIntegrationBoundaries(final GuardReport report) throws IOException {
+        List<String> violations = new ArrayList<>();
+        for (String module : EXPECTED_MODULES) {
+            if (!module.startsWith("zero-runtime-") && !"zero-discovery".equals(module)
+                    && !"zero-rpc-discovery".equals(module)) {
+                continue;
+            }
+            Set<String> closure = new HashSet<>();
+            collectRuntimeClosure(report, module, closure);
+            if (closure.stream().anyMatch(dependency -> dependency.startsWith("zero-server-starter"))) {
+                violations.add(module + " depends on a Starter");
+            }
+            Set<String> adapters = new HashSet<>(closure);
+            adapters.retainAll(REAL_ADAPTER_MODULES);
+            String allowed = switch (module) {
+                case "zero-runtime-kafka" -> "zero-rpc-kafka";
+                case "zero-runtime-mongo" -> "zero-data-mongo";
+                case "zero-runtime-redis" -> "zero-data-redis";
+                case "zero-runtime-postgresql" -> "zero-data-postgresql";
+                case "zero-runtime-nacos" -> "zero-discovery-nacos";
+                default -> "";
+            };
+            adapters.remove(allowed);
+            if (!adapters.isEmpty()) {
+                violations.add(module + " pulls unrelated adapters " + adapters.stream().sorted().toList());
+            }
+        }
+        if (violations.isEmpty()) {
+            report.pass("integration-boundaries", "Integration runtime closures exclude Starters and unrelated adapters.");
+        } else {
+            report.fail("integration-boundaries", String.join("; ", violations));
+        }
+    }
+
+    private static void collectRuntimeClosure(
+            final GuardReport report, final String module, final Set<String> visited) throws IOException {
+        if (!visited.add(module)) {
+            return;
+        }
+        for (Dependency dependency : dependenciesOf(report, module)) {
+            if (!dependency.isTestOnly() && "group.zn.zero".equals(dependency.groupId())) {
+                collectRuntimeClosure(report, dependency.artifactId(), visited);
+            }
         }
     }
 
@@ -498,9 +623,9 @@ public final class ZeroArchitectureGuard {
                 .toList();
         boolean defaultReactorClean = !rootModules.contains(BENCHMARK_MODULE);
         boolean singleFrozenProfile = owners.size() == 1
-                && "benchmarks".equals(owners.getFirst().id())
-                && owners.getFirst().modules().equals(List.of(BENCHMARK_MODULE))
-                && !owners.getFirst().activationConfigured();
+                && "benchmarks".equals(owners.get(0).id())
+                && owners.get(0).modules().equals(List.of(BENCHMARK_MODULE))
+                && !owners.get(0).activationConfigured();
         if (defaultReactorClean && singleFrozenProfile) {
             report.pass("benchmark-profile", "zero-benchmarks is enabled only by the root benchmarks profile.");
         } else {
@@ -529,9 +654,11 @@ public final class ZeroArchitectureGuard {
             }
         }
         BenchmarkJmhMetadata metadata = readBenchmarkJmhMetadata(report);
+        // 精确的基准依赖 + jmh-core；注解处理器只出现在 plugin 中。
+        int expectedDependencies = BENCHMARK_RUNTIME_MODULES.size() + 1;
         boolean frozen = runtimeModules.equals(BENCHMARK_RUNTIME_MODULES)
                 && jmhCorePresent
-                && dependencies.size() == BENCHMARK_RUNTIME_MODULES.size() + 1
+                && dependencies.size() == expectedDependencies
                 && unexpected.isEmpty()
                 && JMH_VERSION.equals(metadata.propertyVersion())
                 && metadata.artifacts().equals(BENCHMARK_JMH_ARTIFACTS)
@@ -594,6 +721,16 @@ public final class ZeroArchitectureGuard {
     private static boolean matchesActorForbidden(final Dependency dependency) {
         String value = dependency.searchText();
         for (String keyword : ACTOR_FORBIDDEN_KEYWORDS) {
+            if (value.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean matchesRoomForbidden(final Dependency dependency) {
+        String value = dependency.searchText();
+        for (String keyword : ROOM_FORBIDDEN_KEYWORDS) {
             if (value.contains(keyword)) {
                 return true;
             }
@@ -856,12 +993,14 @@ public final class ZeroArchitectureGuard {
         System.out.println("  zero-core dependency-free boundary");
         System.out.println("  zero-runtime single zero-core dependency boundary");
         System.out.println("  zero-event / zero-protocol / zero-actor foundational dependencies");
+        System.out.println("  zero-room local room dependency and middleware-free boundary");
         System.out.println("  zero-rpc, zero-actor and zero-data forbidden dependency boundaries");
         System.out.println("  zero-server-starter local/default adapter boundary");
         System.out.println("  zero-server-starter-production explicit adapter opt-in boundary");
         System.out.println("  observability dependency direction and terminal LogSink source boundary");
         System.out.println("  opt-in zero-benchmarks profile, dependency set and JMH 1.37 boundary");
         System.out.println("  docs/module-map.md guarded anchors");
+        System.out.println("  framework/template boundary and non-production scaffold markers");
         System.out.println();
         System.out.println("This tool is read-only. It does not modify POM/source files, create modules, run Docker "
                 + "or prove production readiness.");

@@ -1,7 +1,7 @@
 package group.zn.zero.monitor;
 
 import group.zn.zero.core.error.ZeroException;
-import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,7 +30,12 @@ public final class InMemoryMetricRegistry implements MetricRegistry {
     /**
      * 指标样本列表。
      */
-    private final List<MetricSample> samples = new ArrayList<>();
+    private final ArrayDeque<MetricSample> samples = new ArrayDeque<>();
+
+    /** 样本历史容量。 */
+    private final int sampleCapacity;
+    /** 因容量淘汰的样本数。 */
+    private long droppedSamples;
 
     /**
      * 业务附加标签策略。
@@ -53,6 +58,18 @@ public final class InMemoryMetricRegistry implements MetricRegistry {
      * @throws NullPointerException 当策略为空时抛出。
      */
     public InMemoryMetricRegistry(final MetricLabelPolicy labelPolicy) {
+        this(labelPolicy, 4096);
+    }
+
+    /**
+     * 创建有界的本地样本历史；满时淘汰最早样本，不作为生产聚合器。
+     * @param labelPolicy 附加标签策略；不可为空。
+     * @param sampleCapacity 历史容量；必须为正。
+     * @throws IllegalArgumentException 容量非法时抛出。
+     */
+    public InMemoryMetricRegistry(final MetricLabelPolicy labelPolicy, final int sampleCapacity) {
+        if (sampleCapacity <= 0) throw new IllegalArgumentException("sampleCapacity must be positive");
+        this.sampleCapacity = sampleCapacity;
         this.labelPolicy = Objects.requireNonNull(labelPolicy, "labelPolicy");
     }
 
@@ -99,7 +116,11 @@ public final class InMemoryMetricRegistry implements MetricRegistry {
         }
         MetricContract.requireMatchingSchema(definition, current);
         validateSamplePolicy(definition, current);
-        samples.add(current);
+        if (samples.size() == sampleCapacity) {
+            samples.removeFirst();
+            droppedSamples++;
+        }
+        samples.addLast(current);
     }
 
     /**
@@ -129,14 +150,17 @@ public final class InMemoryMetricRegistry implements MetricRegistry {
      */
     public synchronized String exportText() {
         StringBuilder builder = new StringBuilder(samples.size() * 64);
-        for (int index = 0; index < samples.size(); index++) {
-            if (index > 0) {
+        for (MetricSample sample : samples) {
+            if (!builder.isEmpty()) {
                 builder.append(System.lineSeparator());
             }
-            appendSample(builder, samples.get(index));
+            appendSample(builder, sample);
         }
         return builder.toString();
     }
+
+    /** @return 累计淘汰样本数量；线程安全，不修改数据。 */
+    public synchronized long droppedSamples() { return droppedSamples; }
 
     /**
      * 清空样本，不清空指标定义。

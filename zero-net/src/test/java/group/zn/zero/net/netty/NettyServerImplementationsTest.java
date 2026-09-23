@@ -15,6 +15,8 @@ import group.zn.zero.net.ServerType;
 import group.zn.zero.net.error.NetErrorCode;
 import group.zn.zero.net.http.HttpResponse;
 import group.zn.zero.net.kcp.UnsupportedKcpServer;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.util.SelfSignedCertificate;
 import group.zn.zero.protocol.ProtocolFrame;
 import group.zn.zero.protocol.codec.ProtocolFrameCodec;
 import group.zn.zero.protocol.codec.ZeroBinaryFrameCodec;
@@ -29,6 +31,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -103,9 +107,46 @@ class NettyServerImplementationsTest {
         }
     }
 
-    /**
-     * 验证 UDP 服务端可以收发协议帧。
-     */
+    /** 验证显式 Netty TLS pipeline 可完成真实 socket 握手并传输 frame。 */
+    @Test
+    void tlsTcpServerShouldHandshakeAndExchangeFrame() throws Exception {
+        SelfSignedCertificate certificate = new SelfSignedCertificate();
+        io.netty.handler.ssl.SslContext serverContext = SslContextBuilder.forServer(certificate.certificate(), certificate.privateKey()).build();
+        javax.net.ssl.SSLContext clientSslContext = javax.net.ssl.SSLContext.getInstance("TLS");
+        clientSslContext.init(null, new javax.net.ssl.TrustManager[] {
+                new javax.net.ssl.X509TrustManager() {
+                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                    public void checkClientTrusted(final X509Certificate[] chain, final String authType) { }
+                    public void checkServerTrusted(final X509Certificate[] chain, final String authType) { }
+                }
+        }, new SecureRandom());
+        ProtocolFrameCodec frameCodec = new ZeroBinaryFrameCodec();
+        ExecutorService executor = newHandlerExecutor("zero-net-tls-handler");
+        NettyTcpServer server = new NettyTcpServer(ServerOptions.tcp("127.0.0.1", 0).withIoThreads(1, 1),
+                frameCodec, (connection, frame) -> CompletableFuture.completedFuture(List.of(
+                        new ProtocolFrame(frame.protocolId(), frame.protocolVersion(), frame.flags(), frame.extension(),
+                                ("tls:" + text(frame)).getBytes(StandardCharsets.UTF_8)))), new ConnectionListener() { },
+                executor, null, serverContext);
+        try {
+            server.start();
+            try (javax.net.ssl.SSLSocket socket = (javax.net.ssl.SSLSocket) clientSslContext
+                    .getSocketFactory().createSocket("127.0.0.1", server.boundPort())) {
+                socket.startHandshake();
+                socket.setSoTimeout(3000);
+                DataOutputStream output = new DataOutputStream(socket.getOutputStream());
+                byte[] encoded = frameCodec.encode(frame("ping"));
+                output.writeInt(encoded.length); output.write(encoded); output.flush();
+                DataInputStream input = new DataInputStream(socket.getInputStream());
+                byte[] response = input.readNBytes(input.readInt());
+                assertEquals("tls:ping", text(frameCodec.decode(response)));
+            }
+        } finally {
+            server.stop();
+            shutdown(executor);
+            certificate.delete();
+        }
+    }
+
     @Test
     void udpServerShouldExchangeDatagramFrame() throws Exception {
         ProtocolFrameCodec frameCodec = new ZeroBinaryFrameCodec();

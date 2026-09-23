@@ -2,6 +2,9 @@ package group.zn.zero.discovery.nacos;
 
 import group.zn.zero.core.config.ZeroConfig;
 import group.zn.zero.core.error.ZeroException;
+import group.zn.zero.discovery.DiscoveryErrorCode;
+import group.zn.zero.discovery.InMemoryServiceDiscovery;
+import group.zn.zero.discovery.ServiceDiscovery;
 import java.util.Locale;
 import java.util.Objects;
 

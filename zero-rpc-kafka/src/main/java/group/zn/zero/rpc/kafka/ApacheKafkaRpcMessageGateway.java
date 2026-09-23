@@ -361,9 +361,11 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
         properties.put(ConsumerConfig.GROUP_ID_CONFIG, subscription.group());
         properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
-        properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
-        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
+        properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         append(properties, settings.consumerProperties());
+        // 处理确认是网关契约，扩展属性不得重新打开自动提交。
+        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         return properties;
     }
 
@@ -767,10 +769,14 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
             KafkaRpcResourceException failure = null;
             consumer = current;
             try {
-                current.subscribe(List.of(subscription.topic()));
+                KafkaRpcConsumerBatch batch = new KafkaRpcConsumerBatch(current);
+                current.subscribe(List.of(subscription.topic()), batch);
                 while (running.get()) {
+                    batch.commitCompleted();
                     ConsumerRecords<String, byte[]> records = current.poll(settings.pollTimeout());
-                    dispatch(records);
+                    if (!records.isEmpty()) {
+                        batch.track(records, dispatch(records));
+                    }
                 }
             } catch (WakeupException ex) {
                 if (running.get()) {
@@ -804,19 +810,26 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
             }
         }
 
-        private void dispatch(final ConsumerRecords<String, byte[]> records) {
+        private CompletionStage<Void> dispatch(final ConsumerRecords<String, byte[]> records) {
+            if (listeners.isEmpty()) {
+                return CompletableFuture.failedFuture(KafkaRpcResourceException.create("no kafka rpc listener"));
+            }
+            List<CompletableFuture<Void>> completions = new ArrayList<>();
             for (ConsumerRecord<String, byte[]> record : records) {
                 KafkaRpcMessage message = new KafkaRpcMessage(record.topic(), record.key(), record.value());
                 for (KafkaRpcMessageListener listener : listeners) {
                     try {
-                        listener.onMessage(message);
+                        completions.add(Objects.requireNonNull(listener.onMessageAsync(message),
+                                "listener stage").toCompletableFuture());
                     } catch (RuntimeException ex) {
                         lastListenerException = KafkaRpcResourceException.create(
                                 "kafka rpc listener failed");
                         LOGGER.log(System.Logger.Level.ERROR, "kafka rpc listener failed");
+                        completions.add(CompletableFuture.failedFuture(lastListenerException));
                     }
                 }
             }
+            return CompletableFuture.allOf(completions.toArray(CompletableFuture[]::new));
         }
 
         private Duration consumerCloseTimeout() {

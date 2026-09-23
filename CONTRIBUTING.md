@@ -74,3 +74,5 @@ java scripts/VerifyLocalScaffolds.java --outputDir target/scaffold-verify
 ## License
 
 提交贡献即表示你有权提供该内容，并同意其按本项目 [MIT License](LICENSE) 分发。
+
+<!-- zero-contributing-quality=required -->

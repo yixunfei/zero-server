@@ -5,15 +5,16 @@ import group.zn.zero.core.config.ZeroConfig;
 import group.zn.zero.core.lifecycle.LifecycleState;
 import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.monitor.MonitorRuntime;
+import group.zn.zero.runtime.actor.ActorRuntime;
 import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
+import group.zn.zero.runtime.monitor.MonitorRuntimeComponent;
 import group.zn.zero.starter.LocalRuntime;
 import group.zn.zero.starter.LocalRuntimeBuilder;
-import group.zn.zero.starter.LocalRuntimeCapabilities;
-import group.zn.zero.starter.ZeroManagedSchedulerFactory;
-import group.zn.zero.starter.ZeroRuntimeConfigKeys;
-import group.zn.zero.starter.ZeroRuntimeExecutors;
 import group.zn.zero.starter.scheduler.LocalManagedScheduler;
 import group.zn.zero.starter.scheduler.LoggingScheduledTaskObserver;
+import group.zn.zero.starter.ZeroManagedSchedulerFactory;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -76,7 +77,7 @@ public final class ManagedSchedulerLocalApplication {
             runtime.start();
             ManagedSchedulerDemoTasks.TaskSuiteResult tasks = new ManagedSchedulerDemoTasks(
                     assembly.scheduler(),
-                    runtime.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER),
+                    runtime.require(ActorRuntime.ACTOR_SCHEDULER),
                     executors.remoteIoExecutor()).run();
             runtime.stop();
             stopped = runtime.state() == LifecycleState.STOPPED;
@@ -102,7 +103,7 @@ public final class ManagedSchedulerLocalApplication {
                 ZeroRuntimeConfigKeys.SCHEDULER_THREAD_NAME_PREFIX, "managed-scheduler-example-timer"));
         LocalRuntimeBuilder builder = LocalRuntime
                 .builder(config, terminalLogSink, executors)
-                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime);
+                .replace(MonitorRuntimeComponent.MONITOR_RUNTIME, monitorRuntime);
         LocalManagedScheduler scheduler = ZeroManagedSchedulerFactory
                 .configure(builder, config, builder.logAppender(), monitorRuntime, executors)
                 .orElseThrow();

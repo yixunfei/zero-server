@@ -1,0 +1,368 @@
+public <ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> group.zn.zero.data.repository.CrudRepository<ID, T> create(group.zn.zero.data.repository.RepositoryDefinition<ID, T>);
+public <ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> group.zn.zero.data.repository.CrudRepository<ID, T> create(group.zn.zero.data.repository.RepositoryRequest<ID, T>);
+public <ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> java.util.Optional<group.zn.zero.data.repository.CrudRepository<ID, T>> repository(java.lang.String);
+public <ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> void markDirty(java.lang.String, ID, group.zn.zero.data.persistence.DataThreadBinding, java.util.function.Supplier<T>);
+public <ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> void registerRepository(java.lang.String, group.zn.zero.data.repository.CrudRepository<ID, T>);
+public <ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> void registerTarget(group.zn.zero.data.persistence.PersistenceTarget<ID, T>);
+public <T> java.util.concurrent.CompletionStage<T> capture(group.zn.zero.data.persistence.DataThreadBinding, java.util.function.Supplier<T>);
+public ID id();
+public ID idOf(T);
+public T decode(group.zn.zero.data.envelope.ZeroDataEnvelope);
+public T prepareForSave(T);
+public T withVersion(T, long);
+public abstract <ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> group.zn.zero.data.repository.CrudRepository<ID, T> create(group.zn.zero.data.repository.RepositoryDefinition<ID, T>);
+public abstract <ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> void markDirty(java.lang.String, ID, group.zn.zero.data.persistence.DataThreadBinding, java.util.function.Supplier<T>);
+public abstract <ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> void registerTarget(group.zn.zero.data.persistence.PersistenceTarget<ID, T>);
+public abstract <T> java.util.concurrent.CompletionStage<T> capture(group.zn.zero.data.persistence.DataThreadBinding, java.util.function.Supplier<T>);
+public abstract ID id();
+public abstract K decode(java.lang.String);
+public abstract K generate();
+public abstract boolean cancelled();
+public abstract boolean nullable();
+public abstract class group.zn.zero.data.adapter.AbstractRepositoryAdapter extends group.zn.zero.core.lifecycle.AbstractLifecycle implements group.zn.zero.data.DataService {
+public abstract group.zn.zero.data.model.VersionedEntity<ID> withVersion(long);
+public abstract group.zn.zero.data.persistence.PersistenceScheduleHandle scheduleAtFixedRate(java.lang.String, java.time.Duration, java.lang.Runnable);
+public abstract group.zn.zero.data.persistence.PersistenceScheduleHandle scheduleFlush(group.zn.zero.data.persistence.PersistenceScheduler, java.time.Duration);
+public abstract group.zn.zero.data.persistence.PersistenceStatistics statistics();
+public abstract int order();
+public abstract int order();
+public abstract int schemaVersion();
+public abstract java.lang.Class<? extends group.zn.zero.data.mapping.ZeroDataKeyCodec<?>> codec();
+public abstract java.lang.Class<? extends group.zn.zero.data.mapping.ZeroDataKeyGenerator<?>> generator();
+public abstract java.lang.Class<?> target();
+public abstract java.lang.Class<?> target();
+public abstract java.lang.Class<?> target();
+public abstract java.lang.String collection();
+public abstract java.lang.String collection();
+public abstract java.lang.String collection();
+public abstract java.lang.String collection();
+public abstract java.lang.String encode(K);
+public abstract java.lang.String keyPrefix();
+public abstract java.lang.String name();
+public abstract java.lang.String name();
+public abstract java.lang.String namespace();
+public abstract java.lang.String serviceName();
+public abstract java.util.List<group.zn.zero.data.envelope.ZeroDataEnvelope> findAll();
+public abstract java.util.Optional<group.zn.zero.data.envelope.ZeroDataEnvelope> findById(java.lang.String);
+public abstract java.util.concurrent.CompletionStage<group.zn.zero.data.model.PageResult<T>> findPage(group.zn.zero.data.model.PageRequest);
+public abstract java.util.concurrent.CompletionStage<group.zn.zero.data.persistence.PersistenceFlushResult> flushNow();
+public abstract java.util.concurrent.CompletionStage<group.zn.zero.data.persistence.PersistenceFlushResult> flushNow(int);
+public abstract java.util.concurrent.CompletionStage<java.lang.Boolean> existsById(ID);
+public abstract java.util.concurrent.CompletionStage<java.lang.Long> count();
+public abstract java.util.concurrent.CompletionStage<java.lang.Void> deleteAll(java.util.Collection<ID>);
+public abstract java.util.concurrent.CompletionStage<java.lang.Void> deleteById(ID);
+public abstract java.util.concurrent.CompletionStage<java.lang.Void> save(T);
+public abstract java.util.concurrent.CompletionStage<java.lang.Void> saveAll(java.util.Collection<T>);
+public abstract java.util.concurrent.CompletionStage<java.util.List<T>> findAll();
+public abstract java.util.concurrent.CompletionStage<java.util.List<T>> findByIds(java.util.Collection<ID>);
+public abstract java.util.concurrent.CompletionStage<java.util.Optional<T>> findById(ID);
+public abstract long count();
+public abstract long version();
+public abstract void cancel();
+public abstract void deleteById(java.lang.String);
+public abstract void save(group.zn.zero.data.envelope.ZeroDataEnvelope);
+public boolean cancelled();
+public boolean compositeKey();
+public boolean healthy();
+public boolean isUnbound();
+public boolean nullable();
+public boolean saveIfVersion(group.zn.zero.data.envelope.ZeroDataEnvelope, long);
+public byte[] encode(group.zn.zero.data.envelope.ZeroDataEnvelope);
+public byte[] payload();
+public default boolean saveIfVersion(group.zn.zero.data.envelope.ZeroDataEnvelope, long);
+public default group.zn.zero.data.model.VersionedEntity<ID> withId(ID);
+public default void close();
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final class group.zn.zero.data.envelope.EnvelopeRepositoryFactory implements group.zn.zero.data.repository.RepositoryFactory,java.lang.AutoCloseable {
+public final class group.zn.zero.data.envelope.InMemoryEnvelopeStore implements group.zn.zero.data.envelope.ZeroDataEnvelopeStore {
+public final class group.zn.zero.data.envelope.ZeroDataEntityCodec<ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> {
+public final class group.zn.zero.data.envelope.ZeroDataEnvelope extends java.lang.Record {
+public final class group.zn.zero.data.envelope.ZeroDataEnvelopeCodec {
+public final class group.zn.zero.data.envelope.ZeroDataEnvelopeCrudRepository<ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> implements group.zn.zero.data.repository.CrudRepository<ID, T> {
+public final class group.zn.zero.data.error.DataErrorCode extends java.lang.Enum<group.zn.zero.data.error.DataErrorCode> implements group.zn.zero.core.error.ErrorCode {
+public final class group.zn.zero.data.mapping.DefaultZeroDataKeyCodec implements group.zn.zero.data.mapping.ZeroDataKeyCodec<java.lang.Object> {
+public final class group.zn.zero.data.mapping.NoopZeroDataKeyGenerator implements group.zn.zero.data.mapping.ZeroDataKeyGenerator<java.lang.Object> {
+public final class group.zn.zero.data.mapping.UuidZeroDataKeyGenerator implements group.zn.zero.data.mapping.ZeroDataKeyGenerator<java.lang.String> {
+public final class group.zn.zero.data.mapping.ZeroDataFieldKind extends java.lang.Enum<group.zn.zero.data.mapping.ZeroDataFieldKind> {
+public final class group.zn.zero.data.mapping.ZeroDataFieldMetadata extends java.lang.Record {
+public final class group.zn.zero.data.mapping.ZeroDataMappingIntrospector {
+public final class group.zn.zero.data.mapping.ZeroDataObjectMetadata extends java.lang.Record {
+public final class group.zn.zero.data.model.PageRequest extends java.lang.Record {
+public final class group.zn.zero.data.model.PageResult<T> extends java.lang.Record {
+public final class group.zn.zero.data.persistence.DataThreadBinding extends java.lang.Record {
+public final class group.zn.zero.data.persistence.DefaultPersistenceManager extends group.zn.zero.core.lifecycle.AbstractLifecycle implements group.zn.zero.data.persistence.PersistenceManager {
+public final class group.zn.zero.data.persistence.DirectPersistenceBindingExecutor implements group.zn.zero.data.persistence.PersistenceBindingExecutor {
+public final class group.zn.zero.data.persistence.ManualPersistenceScheduler implements group.zn.zero.data.persistence.PersistenceScheduler {
+public final class group.zn.zero.data.persistence.PersistenceFlushResult extends java.lang.Record {
+public final class group.zn.zero.data.persistence.PersistenceStatistics extends java.lang.Record {
+public final class group.zn.zero.data.persistence.PersistenceTarget<ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> extends java.lang.Record {
+public final class group.zn.zero.data.repository.InMemoryCrudRepository<ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> implements group.zn.zero.data.repository.CrudRepository<ID, T> {
+public final class group.zn.zero.data.repository.RepositoryCatalog {
+public final class group.zn.zero.data.repository.RepositoryDefinition<ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> extends java.lang.Record {
+public final class group.zn.zero.data.repository.RepositoryRequest<ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> extends java.lang.Record {
+public final class group.zn.zero.data.repository.RepositorySource extends java.lang.Record {
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public group.zn.zero.core.error.ErrorCategory category();
+public group.zn.zero.data.envelope.EnvelopeRepositoryFactory(java.util.function.Function<group.zn.zero.data.mapping.ZeroDataObjectMetadata, group.zn.zero.data.envelope.ZeroDataEnvelopeStore>);
+public group.zn.zero.data.envelope.InMemoryEnvelopeStore();
+public group.zn.zero.data.envelope.ZeroDataEntityCodec(group.zn.zero.data.mapping.ZeroDataObjectMetadata, group.zn.zero.protocol.codec.ZeroPayloadCodec<T>, group.zn.zero.data.mapping.ZeroDataKeyCodec<ID>, int, java.time.Clock);
+public group.zn.zero.data.envelope.ZeroDataEntityCodec(group.zn.zero.data.mapping.ZeroDataObjectMetadata, group.zn.zero.protocol.codec.ZeroPayloadCodec<T>, int);
+public group.zn.zero.data.envelope.ZeroDataEnvelope decode(byte[]);
+public group.zn.zero.data.envelope.ZeroDataEnvelope encode(T);
+public group.zn.zero.data.envelope.ZeroDataEnvelope(java.lang.String, java.lang.String, java.lang.String, long, int, int, long, byte[]);
+public group.zn.zero.data.envelope.ZeroDataEnvelopeCodec();
+public group.zn.zero.data.envelope.ZeroDataEnvelopeCrudRepository(group.zn.zero.data.envelope.ZeroDataEntityCodec<ID, T>, group.zn.zero.data.envelope.ZeroDataEnvelopeStore);
+public group.zn.zero.data.mapping.DefaultZeroDataKeyCodec();
+public group.zn.zero.data.mapping.NoopZeroDataKeyGenerator();
+public group.zn.zero.data.mapping.UuidZeroDataKeyGenerator();
+public group.zn.zero.data.mapping.ZeroDataFieldKind kind();
+public group.zn.zero.data.mapping.ZeroDataFieldMetadata(java.lang.String, java.lang.String, int, java.lang.Class<?>, group.zn.zero.data.mapping.ZeroDataFieldKind, java.util.Optional<java.lang.Class<?>>, java.util.Optional<java.lang.String>, boolean);
+public group.zn.zero.data.mapping.ZeroDataMappingIntrospector();
+public group.zn.zero.data.mapping.ZeroDataObjectMetadata inspect(java.lang.Class<?>);
+public group.zn.zero.data.mapping.ZeroDataObjectMetadata metadata();
+public group.zn.zero.data.mapping.ZeroDataObjectMetadata metadata();
+public group.zn.zero.data.mapping.ZeroDataObjectMetadata(java.lang.Class<?>, java.lang.String, java.lang.String, int, java.lang.String, boolean, java.lang.Class<? extends group.zn.zero.data.mapping.ZeroDataKeyCodec<?>>, java.lang.Class<? extends group.zn.zero.data.mapping.ZeroDataKeyGenerator<?>>, java.util.List<group.zn.zero.data.mapping.ZeroDataFieldMetadata>, java.util.List<group.zn.zero.data.mapping.ZeroDataFieldMetadata>, java.util.Optional<group.zn.zero.data.mapping.ZeroDataFieldMetadata>, java.util.Optional<group.zn.zero.data.mapping.ZeroDataFieldMetadata>);
+public group.zn.zero.data.model.PageRequest(int, int);
+public group.zn.zero.data.model.PageResult(java.util.List<T>, java.lang.String, long);
+public group.zn.zero.data.persistence.DataThreadBinding binding();
+public group.zn.zero.data.persistence.DataThreadBinding(java.lang.String, java.lang.String);
+public group.zn.zero.data.persistence.DefaultPersistenceManager$DirtyKey key();
+public group.zn.zero.data.persistence.DefaultPersistenceManager();
+public group.zn.zero.data.persistence.DefaultPersistenceManager(group.zn.zero.data.persistence.PersistenceBindingExecutor);
+public group.zn.zero.data.persistence.DefaultPersistenceManager(java.lang.String, group.zn.zero.data.persistence.PersistenceBindingExecutor, java.time.Clock);
+public group.zn.zero.data.persistence.DirectPersistenceBindingExecutor();
+public group.zn.zero.data.persistence.ManualPersistenceScheduler();
+public group.zn.zero.data.persistence.PersistenceFlushResult(long, long, int, int, int, int);
+public group.zn.zero.data.persistence.PersistenceScheduleHandle scheduleAtFixedRate(java.lang.String, java.time.Duration, java.lang.Runnable);
+public group.zn.zero.data.persistence.PersistenceScheduleHandle scheduleFlush(group.zn.zero.data.persistence.PersistenceScheduler, java.time.Duration);
+public group.zn.zero.data.persistence.PersistenceStatistics statistics();
+public group.zn.zero.data.persistence.PersistenceStatistics(int, long, long, long, long);
+public group.zn.zero.data.persistence.PersistenceTarget(java.lang.String, group.zn.zero.data.repository.CrudRepository<ID, T>);
+public group.zn.zero.data.repository.CrudRepository<?, ?> repository();
+public group.zn.zero.data.repository.CrudRepository<ID, T> repository();
+public group.zn.zero.data.repository.InMemoryCrudRepository();
+public group.zn.zero.data.repository.RepositoryCatalog(java.util.Collection<group.zn.zero.data.repository.RepositorySource>, java.util.Map<java.lang.String, java.lang.String>);
+public group.zn.zero.data.repository.RepositoryDefinition(java.lang.String, java.lang.Class<ID>, java.lang.Class<T>, group.zn.zero.data.mapping.ZeroDataObjectMetadata, group.zn.zero.protocol.codec.ZeroPayloadCodec<T>, int);
+public group.zn.zero.data.repository.RepositoryDefinition<?, ?> definition();
+public group.zn.zero.data.repository.RepositoryDefinition<ID, T> definition();
+public group.zn.zero.data.repository.RepositoryFactory factory();
+public group.zn.zero.data.repository.RepositoryRequest(java.lang.String, group.zn.zero.data.repository.RepositoryDefinition<ID, T>);
+public group.zn.zero.data.repository.RepositorySource(java.lang.String, group.zn.zero.data.repository.RepositoryFactory);
+public group.zn.zero.protocol.codec.ZeroPayloadCodec<T> codec();
+public int codecVersion();
+public int codecVersion();
+public int codecVersion();
+public int dirtyCount();
+public int failureCount();
+public int limit();
+public int offset();
+public int order();
+public int remainingDirtyCount();
+public int schemaVersion();
+public int schemaVersion();
+public int selectedCount();
+public int successCount();
+public int triggerAll();
+public interface group.zn.zero.data.DataService extends group.zn.zero.core.lifecycle.Lifecycle {
+public interface group.zn.zero.data.envelope.ZeroDataEnvelopeStore {
+public interface group.zn.zero.data.mapping.ZeroDataCompositeKey extends java.lang.annotation.Annotation {
+public interface group.zn.zero.data.mapping.ZeroDataEmbedded extends java.lang.annotation.Annotation {
+public interface group.zn.zero.data.mapping.ZeroDataField extends java.lang.annotation.Annotation {
+public interface group.zn.zero.data.mapping.ZeroDataId extends java.lang.annotation.Annotation {
+public interface group.zn.zero.data.mapping.ZeroDataIgnore extends java.lang.annotation.Annotation {
+public interface group.zn.zero.data.mapping.ZeroDataKeyCodec<K> {
+public interface group.zn.zero.data.mapping.ZeroDataKeyGenerator<K> {
+public interface group.zn.zero.data.mapping.ZeroDataKeyPart extends java.lang.annotation.Annotation {
+public interface group.zn.zero.data.mapping.ZeroDataObject extends java.lang.annotation.Annotation {
+public interface group.zn.zero.data.mapping.ZeroDataOwnedCollection extends java.lang.annotation.Annotation {
+public interface group.zn.zero.data.mapping.ZeroDataReference extends java.lang.annotation.Annotation {
+public interface group.zn.zero.data.mapping.ZeroDataReferenceList extends java.lang.annotation.Annotation {
+public interface group.zn.zero.data.mapping.ZeroDataVersion extends java.lang.annotation.Annotation {
+public interface group.zn.zero.data.model.VersionedEntity<ID> {
+public interface group.zn.zero.data.persistence.PersistenceBindingExecutor {
+public interface group.zn.zero.data.persistence.PersistenceManager extends group.zn.zero.data.DataService {
+public interface group.zn.zero.data.persistence.PersistenceScheduleHandle extends java.lang.AutoCloseable {
+public interface group.zn.zero.data.persistence.PersistenceScheduler {
+public interface group.zn.zero.data.repository.CrudRepository<ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> extends group.zn.zero.data.repository.Repository<ID, T> {
+public interface group.zn.zero.data.repository.Repository<ID, T> {
+public interface group.zn.zero.data.repository.RepositoryFactory {
+public java.lang.Class<? extends group.zn.zero.data.mapping.ZeroDataKeyCodec<?>> keyCodecType();
+public java.lang.Class<? extends group.zn.zero.data.mapping.ZeroDataKeyGenerator<?>> idGeneratorType();
+public java.lang.Class<?> fieldType();
+public java.lang.Class<?> objectType();
+public java.lang.Class<?> type();
+public java.lang.Class<ID> idType();
+public java.lang.Class<T> entityType();
+public java.lang.Object decode(java.lang.String);
+public java.lang.Object generate();
+public java.lang.Object generate();
+public java.lang.Object id();
+public java.lang.String code();
+public java.lang.String collection();
+public java.lang.String collection();
+public java.lang.String collection();
+public java.lang.String encode(java.lang.Object);
+public java.lang.String encodeId(ID);
+public java.lang.String generate();
+public java.lang.String id();
+public java.lang.String javaName();
+public java.lang.String keyPrefix();
+public java.lang.String message();
+public java.lang.String name();
+public java.lang.String name();
+public java.lang.String name();
+public java.lang.String name();
+public java.lang.String namespace();
+public java.lang.String namespace();
+public java.lang.String namespace();
+public java.lang.String nextCursor();
+public java.lang.String role();
+public java.lang.String serviceName();
+public java.lang.String serviceName();
+public java.lang.String storageName();
+public java.lang.String targetName();
+public java.lang.String targetName();
+public java.lang.String toString();
+public java.lang.String type();
+public java.lang.String value();
+public java.lang.reflect.AnnotatedElement primary();
+public java.lang.reflect.Field field();
+public java.lang.reflect.Method accessor();
+public java.lang.reflect.Type genericType();
+public java.util.List<T> items();
+public java.util.List<group.zn.zero.data.envelope.ZeroDataEnvelope> findAll();
+public java.util.List<group.zn.zero.data.mapping.ZeroDataFieldMetadata> fields();
+public java.util.List<group.zn.zero.data.mapping.ZeroDataFieldMetadata> keyParts();
+public java.util.List<java.lang.String> repositoryNames();
+public java.util.Optional<group.zn.zero.data.envelope.ZeroDataEnvelope> findById(java.lang.String);
+public java.util.Optional<group.zn.zero.data.mapping.ZeroDataFieldMetadata> idField();
+public java.util.Optional<group.zn.zero.data.mapping.ZeroDataFieldMetadata> versionField();
+public java.util.Optional<java.lang.Class<?>> targetType();
+public java.util.Optional<java.lang.String> collection();
+public java.util.concurrent.CompletionStage save(java.lang.Object);
+public java.util.concurrent.CompletionStage save(java.lang.Object);
+public java.util.concurrent.CompletionStage<group.zn.zero.data.persistence.PersistenceFlushResult> flushNow();
+public java.util.concurrent.CompletionStage<group.zn.zero.data.persistence.PersistenceFlushResult> flushNow(int);
+public java.util.function.Supplier<T> snapshotSupplier();
+public long count();
+public long dirtyMarkCount();
+public long encodedAtEpochMillis();
+public long finishedAtEpochMillis();
+public long flushAttemptCount();
+public long flushFailureCount();
+public long flushSuccessCount();
+public long startedAtEpochMillis();
+public long total();
+public long version();
+public static <ID, T extends group.zn.zero.data.model.VersionedEntity<ID>> group.zn.zero.data.repository.RepositoryDefinition<ID, T> of(java.lang.String, java.lang.Class<ID>, java.lang.Class<T>, group.zn.zero.protocol.codec.ZeroPayloadCodec<T>, int);
+public static final group.zn.zero.data.error.DataErrorCode BACKEND_UNAVAILABLE;
+public static final group.zn.zero.data.error.DataErrorCode DELETE_FAILED;
+public static final group.zn.zero.data.error.DataErrorCode INVALID_ENTITY;
+public static final group.zn.zero.data.error.DataErrorCode MAPPING_INVALID;
+public static final group.zn.zero.data.error.DataErrorCode PERSISTENCE_FLUSH_FAILED;
+public static final group.zn.zero.data.error.DataErrorCode PERSISTENCE_TARGET_NOT_FOUND;
+public static final group.zn.zero.data.error.DataErrorCode READ_FAILED;
+public static final group.zn.zero.data.error.DataErrorCode REPOSITORY_NOT_FOUND;
+public static final group.zn.zero.data.error.DataErrorCode VERSION_CONFLICT;
+public static final group.zn.zero.data.error.DataErrorCode WRITE_FAILED;
+public static final group.zn.zero.data.mapping.ZeroDataFieldKind DATA;
+public static final group.zn.zero.data.mapping.ZeroDataFieldKind EMBEDDED;
+public static final group.zn.zero.data.mapping.ZeroDataFieldKind ID;
+public static final group.zn.zero.data.mapping.ZeroDataFieldKind KEY_PART;
+public static final group.zn.zero.data.mapping.ZeroDataFieldKind OWNED_COLLECTION;
+public static final group.zn.zero.data.mapping.ZeroDataFieldKind REFERENCE;
+public static final group.zn.zero.data.mapping.ZeroDataFieldKind REFERENCE_LIST;
+public static final group.zn.zero.data.mapping.ZeroDataFieldKind VERSION;
+public static final int DEFAULT_MAX_BATCH_SIZE;
+public static final java.lang.String UNBOUND_TYPE;
+public static final java.lang.String UNBOUND_VALUE;
+public static group.zn.zero.data.envelope.EnvelopeRepositoryFactory inMemory();
+public static group.zn.zero.data.error.DataErrorCode valueOf(java.lang.String);
+public static group.zn.zero.data.error.DataErrorCode[] values();
+public static group.zn.zero.data.mapping.ZeroDataFieldKind valueOf(java.lang.String);
+public static group.zn.zero.data.mapping.ZeroDataFieldKind[] values();
+public static group.zn.zero.data.persistence.DataThreadBinding custom(java.lang.String, java.lang.String);
+public static group.zn.zero.data.persistence.DataThreadBinding entity(java.lang.String);
+public static group.zn.zero.data.persistence.DataThreadBinding player(java.lang.String);
+public static group.zn.zero.data.persistence.DataThreadBinding scene(java.lang.String);
+public static group.zn.zero.data.persistence.DataThreadBinding unbound();
+public synchronized boolean saveIfVersion(group.zn.zero.data.envelope.ZeroDataEnvelope, long);
+public synchronized java.util.List<T> snapshot();
+public synchronized java.util.List<group.zn.zero.data.envelope.ZeroDataEnvelope> findAll();
+public synchronized java.util.Optional<group.zn.zero.data.envelope.ZeroDataEnvelope> findById(java.lang.String);
+public synchronized java.util.concurrent.CompletionStage<group.zn.zero.data.model.PageResult<T>> findPage(group.zn.zero.data.model.PageRequest);
+public synchronized java.util.concurrent.CompletionStage<group.zn.zero.data.model.PageResult<T>> findPage(group.zn.zero.data.model.PageRequest);
+public synchronized java.util.concurrent.CompletionStage<java.lang.Boolean> existsById(ID);
+public synchronized java.util.concurrent.CompletionStage<java.lang.Boolean> existsById(ID);
+public synchronized java.util.concurrent.CompletionStage<java.lang.Long> count();
+public synchronized java.util.concurrent.CompletionStage<java.lang.Long> count();
+public synchronized java.util.concurrent.CompletionStage<java.lang.Void> deleteAll(java.util.Collection<ID>);
+public synchronized java.util.concurrent.CompletionStage<java.lang.Void> deleteAll(java.util.Collection<ID>);
+public synchronized java.util.concurrent.CompletionStage<java.lang.Void> deleteById(ID);
+public synchronized java.util.concurrent.CompletionStage<java.lang.Void> deleteById(ID);
+public synchronized java.util.concurrent.CompletionStage<java.lang.Void> save(T);
+public synchronized java.util.concurrent.CompletionStage<java.lang.Void> save(T);
+public synchronized java.util.concurrent.CompletionStage<java.lang.Void> saveAll(java.util.Collection<T>);
+public synchronized java.util.concurrent.CompletionStage<java.lang.Void> saveAll(java.util.Collection<T>);
+public synchronized java.util.concurrent.CompletionStage<java.util.List<T>> findAll();
+public synchronized java.util.concurrent.CompletionStage<java.util.List<T>> findAll();
+public synchronized java.util.concurrent.CompletionStage<java.util.List<T>> findByIds(java.util.Collection<ID>);
+public synchronized java.util.concurrent.CompletionStage<java.util.List<T>> findByIds(java.util.Collection<ID>);
+public synchronized java.util.concurrent.CompletionStage<java.util.Optional<T>> findById(ID);
+public synchronized java.util.concurrent.CompletionStage<java.util.Optional<T>> findById(ID);
+public synchronized long count();
+public synchronized void deleteById(java.lang.String);
+public synchronized void save(group.zn.zero.data.envelope.ZeroDataEnvelope);
+public void cancel();
+public void close();
+public void deleteById(java.lang.String);
+public void healthy(boolean);
+public void save(group.zn.zero.data.envelope.ZeroDataEnvelope);

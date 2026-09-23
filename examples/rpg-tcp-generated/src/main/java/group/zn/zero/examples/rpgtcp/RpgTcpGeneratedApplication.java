@@ -17,6 +17,7 @@ import group.zn.zero.protocol.ProtocolFrame;
 import group.zn.zero.protocol.buffer.ZeroWriter;
 import group.zn.zero.protocol.codec.ProtocolFrameCodec;
 import group.zn.zero.protocol.codec.ZeroBinaryFrameCodec;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.net.InetSocketAddress;
@@ -26,8 +27,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -99,6 +98,12 @@ public final class RpgTcpGeneratedApplication {
      * @throws Exception 当 TCP 启动、客户端收发或资源关闭失败时抛出。
      */
     public static TcpDemoResult runDemo() throws Exception {
+        try (var executors = ZeroRuntimeExecutors.singleThreaded(HANDLER_THREAD)) {
+            return runDemo(executors);
+        }
+    }
+
+    private static TcpDemoResult runDemo(final ZeroRuntimeExecutors executors) throws Exception {
         ProtocolFrameCodec frameCodec = new ZeroBinaryFrameCodec();
         GeneratedProtocolDispatcher dispatcher = new GeneratedProtocolDispatcher();
         BusinessHandlers businessHandlers = new BusinessHandlers();
@@ -110,7 +115,6 @@ public final class RpgTcpGeneratedApplication {
         AtomicReference<String> channel = new AtomicReference<>("");
         AtomicLong requests = new AtomicLong(0L);
         AtomicReference<String> handlerThread = new AtomicReference<>("");
-        ExecutorService handlerExecutor = newHandlerExecutor();
         ConnectionListener listener = closeSessionOnDisconnect(sessionManager, closeLatch);
         ServerFrameHandler handler = createFrameHandler(
                 dispatcher,
@@ -125,7 +129,7 @@ public final class RpgTcpGeneratedApplication {
                 frameCodec,
                 handler,
                 listener,
-                handlerExecutor);
+                executors.logicExecutor());
 
         try {
             server.start();
@@ -145,20 +149,8 @@ public final class RpgTcpGeneratedApplication {
                     handlerThread.get(),
                     sessionsClosed);
         } finally {
-            try {
-                server.stop();
-            } finally {
-                shutdown(handlerExecutor);
-            }
+            server.stop();
         }
-    }
-
-    private static ExecutorService newHandlerExecutor() {
-        return Executors.newSingleThreadExecutor(runnable -> {
-            Thread thread = new Thread(runnable, HANDLER_THREAD);
-            thread.setDaemon(true);
-            return thread;
-        });
     }
 
     private static ConnectionListener closeSessionOnDisconnect(
@@ -240,13 +232,6 @@ public final class RpgTcpGeneratedApplication {
                 throw new IllegalStateException("incomplete response frame");
             }
             return frameCodec.decode(responseBytes);
-        }
-    }
-
-    private static void shutdown(final ExecutorService executor) throws InterruptedException {
-        executor.shutdownNow();
-        if (!executor.awaitTermination(Duration.ofSeconds(3).toMillis(), TimeUnit.MILLISECONDS)) {
-            throw new IllegalStateException("handler executor did not stop");
         }
     }
 

@@ -133,7 +133,14 @@ public final class RunLocalScaffold {
     }
 
     private static String mavenCommand() {
-        return isWindows() ? "mvn.cmd" : "mvn";
+        String configured = System.getenv("ZERO_MAVEN_CMD");
+        if (configured != null && !configured.isBlank()) {
+            return configured;
+        }
+        if (isWindows()) {
+            return "mvn.cmd";
+        }
+        return Files.isExecutable(Path.of("mvnw")) ? "./mvnw" : "mvn";
     }
 
     private static boolean isWindows() {

@@ -1,5 +1,9 @@
 {
   "schemaVersion": 1,
+  "ownershipSchemaVersion": 1,
+  "files": [
+__OWNERSHIP_FILES__
+  ],
   "generator": "zero-codegen/project-scaffold",
   "projectName": __PROJECT_NAME_JSON__,
   "packageName": __PACKAGE_JSON__,
@@ -10,9 +14,16 @@
   "protocolFile": __PROTOCOL_FILE_JSON__,
   "summaryPrefix": __SUMMARY_PREFIX_JSON__,
   "prototype": true,
-  "connectsExternalMiddleware": false,
+  "connectsExternalMiddleware": __EXTERNAL_COMPONENTS__,
   "opensNetworkPorts": false,
-  "runtimeProfile": "local",
+  "runtimeProfile": "__RUNTIME_PROFILE__",
+  "requiresExternalServices": __EXTERNAL_COMPONENTS__,
+  "selectedComponents": [
+__SELECTED_COMPONENTS_JSON__
+  ],
+  "selectedProviders": [
+__SELECTED_PROVIDERS_JSON__
+  ],
   "runtimeCapabilities": [
 __RUNTIME_CAPABILITIES_JSON__
   ],

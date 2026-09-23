@@ -9,6 +9,12 @@ import sun.misc.Unsafe;
  * <p>该工具只供 native memory 缓冲区使用。Unsafe 路径不是默认协议实现，必须显式选择，
  * 并在后续通过 JMH 或压测验证收益。
  *
+ * <p>FFM 迁移说明：Java 21 的 MemorySegment / Arena 属于第三次预览（JEP 442），
+ * 正式 API 从 Java 22（JEP 454）开始。当前 Java 21 基线不启用 --enable-preview，
+ * 因而暂保留这条显式选择的 Unsafe 路径。升级基线后应以 Arena 管理分配和释放，
+ * 同时定义切片存活、扩容后旧视图、线程约束及关闭行为；不能仅机械替换 allocateMemory。
+ * FFM 的安全检查与分配成本仍需实测，不应宣称所有场景零成本或绝无崩溃风险。
+ *
  * @author zn
  */
 final class ZeroUnsafe {

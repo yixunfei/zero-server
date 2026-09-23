@@ -1,6 +1,7 @@
 package group.zn.zero.protocol.buffer;
 
 import java.lang.ref.Cleaner;
+import java.lang.ref.Reference;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 import sun.misc.Unsafe;
@@ -10,6 +11,10 @@ import sun.misc.Unsafe;
  *
  * <p>该实现使用 Unsafe 分配和释放 native memory，适合作为后续极限性能实验的基础实现。
  * 它不是默认实现。调用方应优先使用 try-with-resources 或显式 close 释放内存。所有方法线程不安全。
+ * <p>FFM：Java 21 的 MemorySegment / Arena 仍是预览 API（JEP 442），Java 22 才正式定版
+ * （JEP 454）。在基线升级前使用可达性栅栏保证原始地址操作结束前 Cleaner 不会回收 owner。
+ * 该保障不允许并发 close；调用方仍须独占访问。未来迁移 Arena 时需一并确定线程约束、
+ * 扩容/关闭后的切片失效规则及 toByteBuffer 的副本语义，而非只替换底层地址读写。
  *
  * @author zn
  */
@@ -62,11 +67,16 @@ public final class NativeMemoryZeroBuffer extends AbstractZeroBuffer {
             throw new IllegalArgumentException("initialCapacity must not be negative");
         }
         int actualCapacity = Math.max(1, initialCapacity);
-        long allocatedAddress = UNSAFE.allocateMemory(actualCapacity);
-        this.address = allocatedAddress;
+        this.cleanup = new NativeMemoryCleanup(0L);
+        this.address = UNSAFE.allocateMemory(actualCapacity);
         this.capacity = actualCapacity;
-        this.cleanup = new NativeMemoryCleanup(allocatedAddress);
-        this.cleanable = CLEANER.register(this, cleanup);
+        cleanup.address = address;
+        try {
+            this.cleanable = CLEANER.register(this, cleanup);
+        } catch (RuntimeException | Error ex) {
+            cleanup.run();
+            throw ex;
+        }
     }
 
     /**
@@ -87,21 +97,25 @@ public final class NativeMemoryZeroBuffer extends AbstractZeroBuffer {
      */
     @Override
     public void ensureCapacity(final int requiredCapacity) {
-        checkOpen();
-        if (requiredCapacity < 0) {
-            throw new IllegalArgumentException("requiredCapacity must not be negative");
+        try {
+            checkOpen();
+            if (requiredCapacity < 0) {
+                throw new IllegalArgumentException("requiredCapacity must not be negative");
+            }
+            if (requiredCapacity <= capacity) {
+                return;
+            }
+            int newCapacity = expandedCapacity(capacity, requiredCapacity);
+            long newAddress = UNSAFE.allocateMemory(newCapacity);
+            UNSAFE.copyMemory(null, address, null, newAddress, capacity);
+            long oldAddress = address;
+            address = newAddress;
+            capacity = newCapacity;
+            cleanup.address = newAddress;
+            UNSAFE.freeMemory(oldAddress);
+        } finally {
+            Reference.reachabilityFence(this);
         }
-        if (requiredCapacity <= capacity) {
-            return;
-        }
-        int newCapacity = expandedCapacity(capacity, requiredCapacity);
-        long newAddress = UNSAFE.allocateMemory(newCapacity);
-        UNSAFE.copyMemory(null, address, null, newAddress, capacity);
-        long oldAddress = address;
-        address = newAddress;
-        capacity = newCapacity;
-        cleanup.address = newAddress;
-        UNSAFE.freeMemory(oldAddress);
     }
 
     /**
@@ -112,9 +126,13 @@ public final class NativeMemoryZeroBuffer extends AbstractZeroBuffer {
      */
     @Override
     public byte getByte(final int index) {
-        checkOpen();
-        Objects.checkIndex(index, capacity);
-        return UNSAFE.getByte(address + index);
+        try {
+            checkOpen();
+            Objects.checkIndex(index, capacity);
+            return UNSAFE.getByte(address + index);
+        } finally {
+            Reference.reachabilityFence(this);
+        }
     }
 
     /**
@@ -125,9 +143,13 @@ public final class NativeMemoryZeroBuffer extends AbstractZeroBuffer {
      */
     @Override
     public void putByte(final int index, final byte value) {
-        checkOpen();
-        Objects.checkIndex(index, capacity);
-        UNSAFE.putByte(address + index, value);
+        try {
+            checkOpen();
+            Objects.checkIndex(index, capacity);
+            UNSAFE.putByte(address + index, value);
+        } finally {
+            Reference.reachabilityFence(this);
+        }
     }
 
     /**
@@ -140,10 +162,14 @@ public final class NativeMemoryZeroBuffer extends AbstractZeroBuffer {
      */
     @Override
     public void getBytes(final int index, final byte[] target, final int targetOffset, final int length) {
-        checkOpen();
-        checkRange(index, length);
-        Objects.checkFromIndexSize(targetOffset, length, Objects.requireNonNull(target, "target").length);
-        UNSAFE.copyMemory(null, address + index, target, ZeroUnsafe.BYTE_ARRAY_OFFSET + targetOffset, length);
+        try {
+            checkOpen();
+            checkRange(index, length);
+            Objects.checkFromIndexSize(targetOffset, length, Objects.requireNonNull(target, "target").length);
+            UNSAFE.copyMemory(null, address + index, target, ZeroUnsafe.BYTE_ARRAY_OFFSET + targetOffset, length);
+        } finally {
+            Reference.reachabilityFence(this);
+        }
     }
 
     /**
@@ -156,10 +182,14 @@ public final class NativeMemoryZeroBuffer extends AbstractZeroBuffer {
      */
     @Override
     public void putBytes(final int index, final byte[] source, final int sourceOffset, final int length) {
-        checkOpen();
-        checkRange(index, length);
-        Objects.checkFromIndexSize(sourceOffset, length, Objects.requireNonNull(source, "source").length);
-        UNSAFE.copyMemory(source, ZeroUnsafe.BYTE_ARRAY_OFFSET + sourceOffset, null, address + index, length);
+        try {
+            checkOpen();
+            checkRange(index, length);
+            Objects.checkFromIndexSize(sourceOffset, length, Objects.requireNonNull(source, "source").length);
+            UNSAFE.copyMemory(source, ZeroUnsafe.BYTE_ARRAY_OFFSET + sourceOffset, null, address + index, length);
+        } finally {
+            Reference.reachabilityFence(this);
+        }
     }
 
     /**
@@ -171,17 +201,21 @@ public final class NativeMemoryZeroBuffer extends AbstractZeroBuffer {
      */
     @Override
     public void copy(final int sourceIndex, final int targetIndex, final int length) {
-        checkOpen();
-        checkRange(sourceIndex, length);
-        checkRange(targetIndex, length);
-        if (length <= 0 || sourceIndex == targetIndex) {
-            return;
+        try {
+            checkOpen();
+            checkRange(sourceIndex, length);
+            checkRange(targetIndex, length);
+            if (length <= 0 || sourceIndex == targetIndex) {
+                return;
+            }
+            if (sourceIndex + length <= targetIndex || targetIndex + length <= sourceIndex) {
+                UNSAFE.copyMemory(null, address + sourceIndex, null, address + targetIndex, length);
+                return;
+            }
+            super.copy(sourceIndex, targetIndex, length);
+        } finally {
+            Reference.reachabilityFence(this);
         }
-        if (sourceIndex + length <= targetIndex || targetIndex + length <= sourceIndex) {
-            UNSAFE.copyMemory(null, address + sourceIndex, null, address + targetIndex, length);
-            return;
-        }
-        super.copy(sourceIndex, targetIndex, length);
     }
 
     /**

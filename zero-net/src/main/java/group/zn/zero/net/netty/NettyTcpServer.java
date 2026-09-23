@@ -8,6 +8,7 @@ import group.zn.zero.net.ServerFrameHandler;
 import group.zn.zero.net.ServerOptions;
 import group.zn.zero.net.ServerType;
 import group.zn.zero.net.error.NetErrorCode;
+import group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
 import group.zn.zero.protocol.codec.ProtocolFrameCodec;
 import group.zn.zero.protocol.codec.ZeroBinaryFrameCodec;
@@ -15,12 +16,10 @@ import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
+import io.netty.handler.ssl.SslContext;
 import java.net.InetSocketAddress;
 import java.util.Objects;
 import java.util.Optional;
@@ -30,8 +29,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Netty TCP 网络服务器。
  *
- * <p>当前实现用于阶段 2B 本地最小闭环。Netty IO 线程由本类内部创建和释放，
- * 业务处理通过外部传入的 handler executor 执行，后续可在 starter 装配阶段迁移到统一线程管理。
+ * <p>当前实现用于阶段 2B 本地最小闭环。IO 资源由 NettyIoResources 统一创建和释放，可由 runtime 显式提供。
+ * 每个服务器拥有自己的连接；业务处理通过受管 handler executor 执行。
  *
  * @author zn
  */
@@ -57,14 +56,13 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
      */
     private final ConnectionListener connectionListener;
 
-    /**
-     * 业务执行器。
-     */
+    /** 业务执行器。 */
     private final Executor handlerExecutor;
 
-    /**
-     * 可选 production lifecycle。
-     */
+    /** 显式注入的 TLS 上下文；为空表示不由该服务器装配 TLS。 */
+    private final SslContext tlsContext;
+
+    /** 可选 production lifecycle。 */
     private final ProductionNetworkLifecycle productionLifecycle;
 
     /**
@@ -72,20 +70,10 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
      */
     private final AtomicReference<InetSocketAddress> boundAddress = new AtomicReference<>();
 
-    /**
-     * boss 线程组。
-     */
-    private EventLoopGroup bossGroup;
-
-    /**
-     * worker 线程组。
-     */
-    private EventLoopGroup workerGroup;
-
-    /**
-     * 服务端 channel。
-     */
-    private Channel serverChannel;
+    /** 组合根借用的 IO 资源；为空时每次启动创建独占组。 */
+    private final NettyIoResources borrowedResources;
+    /** 本次启动独占的监听与连接生命周期。 */
+    private NettyServerResources resources;
 
     /**
      * 创建 Netty TCP 服务端。
@@ -136,15 +124,44 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
             final ConnectionListener connectionListener,
             final Executor handlerExecutor,
             final ProductionNetworkLifecycle productionLifecycle) {
+        this(options, frameCodec, frameHandler, connectionListener, handlerExecutor, productionLifecycle, null, null);
+    }
+
+    /** 创建显式 TLS 服务；证书由组合根管理，构造不启动线程。 */
+    public NettyTcpServer(final ServerOptions options, final ProtocolFrameCodec frameCodec,
+            final ServerFrameHandler frameHandler, final ConnectionListener connectionListener,
+            final Executor handlerExecutor, final ProductionNetworkLifecycle productionLifecycle,
+            final SslContext tlsContext) {
+        this(options, frameCodec, frameHandler, connectionListener, handlerExecutor, productionLifecycle,
+                Objects.requireNonNull(tlsContext, "tlsContext"), null);
+    }
+
+    /**
+     * 创建可借用 IO 组的服务；构造不启动线程，组的拥有者负责最终关闭。
+     * @param options 服务配置，transport 必须匹配借用组。
+     * @param frameCodec 编解码器，不可为空。
+     * @param frameHandler 业务处理器，不可为空。
+     * @param connectionListener 连接监听器，不可为空。
+     * @param handlerExecutor 受管业务执行器，不可为空。
+     * @param productionLifecycle 可选连接生命周期。
+     * @param tlsContext 可选 TLS 上下文。
+     * @param ioResources 借用组；为空时创建独占组。stop 只关闭本服务连接，不关闭借用组。
+     * @throws NullPointerException 必填参数为空。
+     * @throws IllegalArgumentException 配置类型不是 TCP。
+     */
+    public NettyTcpServer(final ServerOptions options, final ProtocolFrameCodec frameCodec,
+            final ServerFrameHandler frameHandler, final ConnectionListener connectionListener,
+            final Executor handlerExecutor, final ProductionNetworkLifecycle productionLifecycle,
+            final SslContext tlsContext, final NettyIoResources ioResources) {
         this.options = Objects.requireNonNull(options, "options");
-        if (options.serverType() != ServerType.TCP) {
-            throw new IllegalArgumentException("NettyTcpServer only supports TCP options");
-        }
+        if (options.serverType() != ServerType.TCP) throw new IllegalArgumentException("TCP options required");
         this.frameCodec = Objects.requireNonNull(frameCodec, "frameCodec");
         this.frameHandler = Objects.requireNonNull(frameHandler, "frameHandler");
         this.connectionListener = Objects.requireNonNull(connectionListener, "connectionListener");
         this.handlerExecutor = Objects.requireNonNull(handlerExecutor, "handlerExecutor");
         this.productionLifecycle = productionLifecycle;
+        this.tlsContext = tlsContext;
+        this.borrowedResources = ioResources;
     }
 
     /**
@@ -206,18 +223,29 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
      */
     @Override
     protected void doStart() {
-        bossGroup = new NioEventLoopGroup(options.bossThreads());
-        workerGroup = new NioEventLoopGroup(options.workerThreads());
         try {
+            NettyServerResources current = new NettyServerResources(options, borrowedResources);
+            resources = current;
+            OutboundBudget outbound = new OutboundBudget(options.tuning().maxPendingBytesTotal());
             ServerBootstrap bootstrap = new ServerBootstrap()
-                    .group(bossGroup, workerGroup)
-                    .channel(NioServerSocketChannel.class)
-                    .option(ChannelOption.SO_BACKLOG, 128)
+                    .group(current.io().boss(), current.io().workers())
+                    .channel(NettyTransportFactory.serverChannel(options.tuning().transport()))
+                    .option(ChannelOption.SO_BACKLOG, options.tuning().backlog())
+                    .childOption(ChannelOption.WRITE_BUFFER_WATER_MARK, new io.netty.channel.WriteBufferWaterMark(
+                            options.tuning().writeLowWaterMark(), options.tuning().writeHighWaterMark()))
                     .childOption(ChannelOption.TCP_NODELAY, true)
                     .childOption(ChannelOption.SO_KEEPALIVE, true)
                     .childHandler(new ChannelInitializer<SocketChannel>() {
                         @Override
                         protected void initChannel(final SocketChannel channel) {
+                            current.track(channel);
+                            if (tlsContext != null) {
+                                channel.pipeline().addLast("ssl", tlsContext.newHandler(channel.alloc()));
+                            }
+                            if (options.tuning().flushConsolidationLimit() > 0) {
+                                channel.pipeline().addLast("flushConsolidation", new io.netty.handler.flush.FlushConsolidationHandler(
+                                        options.tuning().flushConsolidationLimit(), true));
+                            }
                             channel.pipeline()
                                     .addLast("lengthDecoder", new LengthFieldBasedFrameDecoder(
                                             options.maxFrameLength(),
@@ -227,21 +255,21 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
                                             4))
                                     .addLast("frameDecoder", new NettyProtocolFrameDecoder(frameCodec))
                                     .addLast("lengthEncoder", new LengthFieldPrepender(4))
-                                    .addLast("frameEncoder", new NettyProtocolFrameEncoder(frameCodec))
+                                    .addLast("frameEncoder", new NettyProtocolFrameEncoder(frameCodec, options.maxFrameLength() - 4))
                                     .addLast("frameHandler", new NettyFrameChannelHandler(
                                             frameHandler,
                                             connectionListener,
                                             handlerExecutor,
-                                            productionLifecycle));
+                                            productionLifecycle, options, frameCodec, outbound));
                         }
                     });
-            serverChannel = bootstrap.bind(options.host(), options.port()).sync().channel();
+            Channel serverChannel = current.bind(bootstrap.bind(options.host(), options.port()));
             boundAddress.set((InetSocketAddress) serverChannel.localAddress());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             shutdownGroups();
             throw ZeroException.of(NetErrorCode.START_FAILED, "start netty tcp server interrupted", ex);
-        } catch (RuntimeException ex) {
+        } catch (Exception ex) {
             shutdownGroups();
             throw ZeroException.of(NetErrorCode.START_FAILED, "start netty tcp server failed", ex);
         }
@@ -254,28 +282,15 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
      */
     @Override
     protected void doStop() {
-        try {
-            if (serverChannel != null) {
-                serverChannel.close().sync();
-            }
-            shutdownGroups();
-            boundAddress.set(null);
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw ZeroException.of(NetErrorCode.STOP_FAILED, "stop netty tcp server interrupted", ex);
-        } catch (RuntimeException ex) {
-            throw ZeroException.of(NetErrorCode.STOP_FAILED, "stop netty tcp server failed", ex);
-        }
+        try { shutdownGroups(); }
+        finally { boundAddress.set(null); }
     }
 
     private void shutdownGroups() {
-        if (workerGroup != null) {
-            workerGroup.shutdownGracefully().syncUninterruptibly();
-            workerGroup = null;
-        }
-        if (bossGroup != null) {
-            bossGroup.shutdownGracefully().syncUninterruptibly();
-            bossGroup = null;
+        if (resources != null) {
+            resources.close();
+            resources = null;
         }
     }
+
 }

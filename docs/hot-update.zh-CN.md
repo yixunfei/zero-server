@@ -33,7 +33,7 @@ zeroServer 热更按影响程度分级：
 - 支持显式异步 reload 和默认关闭的本地 WatchService；文件 IO 与 watcher 使用 Starter 受管非内联 remote IO executor。
 - 记录表名、脱敏来源、版本、摘要、行数、操作者、traceId、结果、耗时和 ErrorCode，不记录 CSV 行或完整路径。
 
-Starter 必须显式配置 `zero.config.hot-reload.enabled=true`；watcher 通过 `zero.config.hot-reload.watch-enabled=true` 单独启用。完整 API、配置键、线程和风险边界见 [CSV 配置加载与本地原子热重载](csv-config-hot-reload.zh-CN.md)。当前只承诺本地单表替换，不提供运行中多文件事务、Nacos/Kafka 集群同步、远程上传、签名审批或生产容量结论。
+Starter 必须显式配置 `zero.config.hot-reload.enabled=true`；watcher 通过 `zero.config.hot-reload.watch-enabled=true` 单独启用。完整 API、配置键、线程和风险边界见 [CSV 配置加载与本地原子热重载](guides/csv-config-hot-reload.zh-CN.md)。当前只承诺本地单表替换，不提供运行中多文件事务、Nacos/Kafka 集群同步、远程上传、签名审批或生产容量结论。
 
 ## 4. CGLIB 修复
 

@@ -18,11 +18,16 @@
     <dependencies>
         <dependency>
             <groupId>group.zn.zero</groupId>
-            <artifactId>zero-core</artifactId>
+            <artifactId>zero-discovery</artifactId>
         </dependency>
         <dependency>
             <groupId>group.zn.zero</groupId>
-            <artifactId>zero-rpc</artifactId>
+            <artifactId>zero-rpc-discovery</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-core</artifactId>
         </dependency>
         <dependency>
             <groupId>com.alibaba.nacos</groupId>

@@ -1,0 +1,215 @@
+public abstract boolean cancel();
+public abstract class group.zn.zero.core.lifecycle.AbstractLifecycle implements group.zn.zero.core.lifecycle.Lifecycle {
+public abstract group.zn.zero.core.error.ErrorCategory category();
+public abstract group.zn.zero.core.lifecycle.LifecycleState state();
+public abstract group.zn.zero.core.scheduler.ScheduledTaskHandle scheduleAtFixedRate(group.zn.zero.core.scheduler.ScheduledTaskDefinition, java.time.Duration, java.time.Duration, group.zn.zero.core.scheduler.ScheduledTask);
+public abstract group.zn.zero.core.scheduler.ScheduledTaskHandle scheduleOnce(group.zn.zero.core.scheduler.ScheduledTaskDefinition, java.time.Duration, group.zn.zero.core.scheduler.ScheduledTask);
+public abstract group.zn.zero.core.scheduler.ScheduledTaskHandle scheduleWithFixedDelay(group.zn.zero.core.scheduler.ScheduledTaskDefinition, java.time.Duration, java.time.Duration, group.zn.zero.core.scheduler.ScheduledTask);
+public abstract group.zn.zero.core.scheduler.ScheduledTaskSnapshot snapshot();
+public abstract java.lang.String code();
+public abstract java.lang.String message();
+public abstract java.lang.String name();
+public abstract java.lang.String taskId();
+public abstract java.lang.String taskName();
+public abstract java.util.List<group.zn.zero.core.scheduler.ScheduledTaskSnapshot> snapshots();
+public abstract java.util.Map<java.lang.String, java.lang.String> asMap();
+public abstract java.util.Optional<java.lang.String> get(java.lang.String);
+public abstract java.util.concurrent.CompletionStage<java.lang.Void> execute(group.zn.zero.core.scheduler.ScheduledTaskContext);
+public abstract void onEvent(group.zn.zero.core.scheduler.ScheduledTaskEvent);
+public abstract void start();
+public abstract void stop();
+public boolean active();
+public boolean hasExecution();
+public class group.zn.zero.core.error.ZeroException extends java.lang.RuntimeException {
+public default boolean containsKey(java.lang.String);
+public default boolean running();
+public default int priority();
+public default java.lang.String getOrDefault(java.lang.String, java.lang.String);
+public default java.lang.String require(java.lang.String);
+public default void close();
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final boolean equals(java.lang.Object);
+public final class group.zn.zero.core.config.MapZeroConfig implements group.zn.zero.core.config.ZeroConfig {
+public final class group.zn.zero.core.config.ZeroConfigLoader {
+public final class group.zn.zero.core.error.ErrorCategory extends java.lang.Enum<group.zn.zero.core.error.ErrorCategory> {
+public final class group.zn.zero.core.error.SystemErrorCode extends java.lang.Enum<group.zn.zero.core.error.SystemErrorCode> implements group.zn.zero.core.error.ErrorCode {
+public final class group.zn.zero.core.lifecycle.LifecycleState extends java.lang.Enum<group.zn.zero.core.lifecycle.LifecycleState> {
+public final class group.zn.zero.core.scheduler.ScheduleType extends java.lang.Enum<group.zn.zero.core.scheduler.ScheduleType> {
+public final class group.zn.zero.core.scheduler.ScheduledTaskContext extends java.lang.Record {
+public final class group.zn.zero.core.scheduler.ScheduledTaskDefinition extends java.lang.Record {
+public final class group.zn.zero.core.scheduler.ScheduledTaskEvent extends java.lang.Record {
+public final class group.zn.zero.core.scheduler.ScheduledTaskEventType extends java.lang.Enum<group.zn.zero.core.scheduler.ScheduledTaskEventType> {
+public final class group.zn.zero.core.scheduler.ScheduledTaskExecutionTiming extends java.lang.Record {
+public final class group.zn.zero.core.scheduler.ScheduledTaskFailurePolicy extends java.lang.Enum<group.zn.zero.core.scheduler.ScheduledTaskFailurePolicy> {
+public final class group.zn.zero.core.scheduler.ScheduledTaskSnapshot extends java.lang.Record {
+public final class group.zn.zero.core.scheduler.ScheduledTaskState extends java.lang.Enum<group.zn.zero.core.scheduler.ScheduledTaskState> {
+public final class group.zn.zero.core.scheduler.ScheduledTasks {
+public final class group.zn.zero.core.scheduler.SchedulerErrorCode extends java.lang.Enum<group.zn.zero.core.scheduler.SchedulerErrorCode> implements group.zn.zero.core.error.ErrorCode {
+public final class group.zn.zero.core.spi.ZeroProviders {
+public final group.zn.zero.core.lifecycle.LifecycleState state();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final int hashCode();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final java.lang.String toString();
+public final synchronized void start();
+public final synchronized void stop();
+public group.zn.zero.core.config.MapZeroConfig(java.util.Map<java.lang.String, java.lang.String>);
+public group.zn.zero.core.error.ErrorCategory category();
+public group.zn.zero.core.error.ErrorCategory category();
+public group.zn.zero.core.error.ErrorCategory category();
+public group.zn.zero.core.error.ErrorCode errorCode();
+public group.zn.zero.core.error.ErrorCode errorCode();
+public group.zn.zero.core.error.ZeroException(group.zn.zero.core.error.ErrorCode, java.lang.String);
+public group.zn.zero.core.error.ZeroException(group.zn.zero.core.error.ErrorCode, java.lang.String, java.lang.Throwable);
+public group.zn.zero.core.lifecycle.AbstractLifecycle();
+public group.zn.zero.core.scheduler.ScheduleType scheduleType();
+public group.zn.zero.core.scheduler.ScheduleType scheduleType();
+public group.zn.zero.core.scheduler.ScheduledTaskContext(java.lang.String, java.lang.String, java.lang.String, java.lang.String, long, java.time.Instant, java.time.Instant);
+public group.zn.zero.core.scheduler.ScheduledTaskDefinition(java.lang.String, group.zn.zero.core.scheduler.ScheduledTaskFailurePolicy);
+public group.zn.zero.core.scheduler.ScheduledTaskEvent(java.time.Instant, group.zn.zero.core.scheduler.ScheduledTaskEventType, group.zn.zero.core.scheduler.ScheduleType, java.lang.String, java.lang.String, java.lang.String, java.lang.String, long, java.util.Optional<group.zn.zero.core.scheduler.ScheduledTaskExecutionTiming>, long, java.time.Duration, group.zn.zero.core.error.ErrorCode, java.lang.String);
+public group.zn.zero.core.scheduler.ScheduledTaskEventType eventType();
+public group.zn.zero.core.scheduler.ScheduledTaskExecutionTiming(java.time.Instant, java.time.Instant);
+public group.zn.zero.core.scheduler.ScheduledTaskFailurePolicy failurePolicy();
+public group.zn.zero.core.scheduler.ScheduledTaskSnapshot(java.lang.String, java.lang.String, group.zn.zero.core.scheduler.ScheduleType, group.zn.zero.core.scheduler.ScheduledTaskState, long, long, long, long, long, long, long, java.util.Optional<java.time.Instant>, java.util.Optional<java.time.Instant>, java.util.Optional<group.zn.zero.core.error.ErrorCode>);
+public group.zn.zero.core.scheduler.ScheduledTaskState state();
+public interface group.zn.zero.core.config.ZeroConfig {
+public interface group.zn.zero.core.error.ErrorCode {
+public interface group.zn.zero.core.lifecycle.Lifecycle {
+public interface group.zn.zero.core.scheduler.ManagedScheduler extends group.zn.zero.core.lifecycle.Lifecycle {
+public interface group.zn.zero.core.scheduler.ScheduledTask {
+public interface group.zn.zero.core.scheduler.ScheduledTaskHandle extends java.lang.AutoCloseable {
+public interface group.zn.zero.core.scheduler.ScheduledTaskObserver {
+public interface group.zn.zero.core.spi.ZeroProvider {
+public java.lang.String code();
+public java.lang.String code();
+public java.lang.String code();
+public java.lang.String executionId();
+public java.lang.String executionId();
+public java.lang.String message();
+public java.lang.String message();
+public java.lang.String message();
+public java.lang.String reason();
+public java.lang.String taskId();
+public java.lang.String taskId();
+public java.lang.String taskId();
+public java.lang.String taskName();
+public java.lang.String taskName();
+public java.lang.String taskName();
+public java.lang.String taskName();
+public java.lang.String toString();
+public java.lang.String traceId();
+public java.lang.String traceId();
+public java.time.Duration elapsed();
+public java.time.Duration startDelay();
+public java.time.Instant observedAt();
+public java.time.Instant scheduledAt();
+public java.time.Instant scheduledAt();
+public java.time.Instant startedAt();
+public java.time.Instant startedAt();
+public java.util.Map<java.lang.String, java.lang.String> asMap();
+public java.util.Optional<group.zn.zero.core.error.ErrorCode> lastErrorCode();
+public java.util.Optional<group.zn.zero.core.scheduler.ScheduledTaskExecutionTiming> executionTiming();
+public java.util.Optional<java.lang.String> get(java.lang.String);
+public java.util.Optional<java.time.Instant> lastCompletedAt();
+public java.util.Optional<java.time.Instant> nextScheduledAt();
+public long executionCount();
+public long failureCount();
+public long occurrenceCount();
+public long rejectionCount();
+public long runSequence();
+public long runSequence();
+public long skippedCapacityCount();
+public long skippedLateCount();
+public long skippedRunningCount();
+public long successCount();
+public static <T extends group.zn.zero.core.spi.ZeroProvider> java.util.List<T> load(java.lang.Class<T>);
+public static <T extends group.zn.zero.core.spi.ZeroProvider> java.util.List<T> ordered(java.util.Collection<? extends T>);
+public static <T extends group.zn.zero.core.spi.ZeroProvider> java.util.Optional<T> first(java.lang.Class<T>);
+public static <T extends group.zn.zero.core.spi.ZeroProvider> java.util.Optional<T> first(java.util.Collection<? extends T>);
+public static final group.zn.zero.core.error.ErrorCategory CACHE;
+public static final group.zn.zero.core.error.ErrorCategory CLIENT_REQUEST;
+public static final group.zn.zero.core.error.ErrorCategory DATA_ACCESS;
+public static final group.zn.zero.core.error.ErrorCategory HOT_UPDATE;
+public static final group.zn.zero.core.error.ErrorCategory PERMISSION;
+public static final group.zn.zero.core.error.ErrorCategory PROTOCOL;
+public static final group.zn.zero.core.error.ErrorCategory SERVER_CALL;
+public static final group.zn.zero.core.error.ErrorCategory SYSTEM;
+public static final group.zn.zero.core.error.SystemErrorCode INVALID_ARGUMENT;
+public static final group.zn.zero.core.error.SystemErrorCode NOT_IMPLEMENTED;
+public static final group.zn.zero.core.error.SystemErrorCode OK;
+public static final group.zn.zero.core.error.SystemErrorCode SYSTEM_ERROR;
+public static final group.zn.zero.core.lifecycle.LifecycleState FAILED;
+public static final group.zn.zero.core.lifecycle.LifecycleState NEW;
+public static final group.zn.zero.core.lifecycle.LifecycleState RUNNING;
+public static final group.zn.zero.core.lifecycle.LifecycleState STARTING;
+public static final group.zn.zero.core.lifecycle.LifecycleState STOPPED;
+public static final group.zn.zero.core.lifecycle.LifecycleState STOPPING;
+public static final group.zn.zero.core.scheduler.ScheduleType FIXED_DELAY;
+public static final group.zn.zero.core.scheduler.ScheduleType FIXED_RATE;
+public static final group.zn.zero.core.scheduler.ScheduleType ONCE;
+public static final group.zn.zero.core.scheduler.ScheduledTaskEventType CANCELLED;
+public static final group.zn.zero.core.scheduler.ScheduledTaskEventType FAILED;
+public static final group.zn.zero.core.scheduler.ScheduledTaskEventType REGISTERED;
+public static final group.zn.zero.core.scheduler.ScheduledTaskEventType REJECTED;
+public static final group.zn.zero.core.scheduler.ScheduledTaskEventType SKIPPED_CAPACITY;
+public static final group.zn.zero.core.scheduler.ScheduledTaskEventType SKIPPED_LATE;
+public static final group.zn.zero.core.scheduler.ScheduledTaskEventType SKIPPED_RUNNING;
+public static final group.zn.zero.core.scheduler.ScheduledTaskEventType STARTED;
+public static final group.zn.zero.core.scheduler.ScheduledTaskEventType STOP_TIMEOUT;
+public static final group.zn.zero.core.scheduler.ScheduledTaskEventType SUCCEEDED;
+public static final group.zn.zero.core.scheduler.ScheduledTaskFailurePolicy CANCEL_ON_FAILURE;
+public static final group.zn.zero.core.scheduler.ScheduledTaskFailurePolicy CONTINUE;
+public static final group.zn.zero.core.scheduler.ScheduledTaskState CANCELLED;
+public static final group.zn.zero.core.scheduler.ScheduledTaskState COMPLETED;
+public static final group.zn.zero.core.scheduler.ScheduledTaskState FAILED;
+public static final group.zn.zero.core.scheduler.ScheduledTaskState REJECTED;
+public static final group.zn.zero.core.scheduler.ScheduledTaskState RUNNING;
+public static final group.zn.zero.core.scheduler.ScheduledTaskState SCHEDULED;
+public static final group.zn.zero.core.scheduler.SchedulerErrorCode EXECUTOR_REJECTED;
+public static final group.zn.zero.core.scheduler.SchedulerErrorCode INVALID_ARGUMENT;
+public static final group.zn.zero.core.scheduler.SchedulerErrorCode INVALID_OPTIONS;
+public static final group.zn.zero.core.scheduler.SchedulerErrorCode NOT_RUNNING;
+public static final group.zn.zero.core.scheduler.SchedulerErrorCode OBSERVER_FAILED;
+public static final group.zn.zero.core.scheduler.SchedulerErrorCode STOP_TIMEOUT;
+public static final group.zn.zero.core.scheduler.SchedulerErrorCode TASK_EXECUTION_FAILED;
+public static final group.zn.zero.core.scheduler.SchedulerErrorCode TASK_LIMIT_EXCEEDED;
+public static final group.zn.zero.core.scheduler.SchedulerErrorCode TIMER_REJECTED;
+public static final java.lang.String CONFIG_FILE_ENV;
+public static final java.lang.String CONFIG_FILE_PROPERTY;
+public static group.zn.zero.core.config.ZeroConfig empty();
+public static group.zn.zero.core.config.ZeroConfig fromProperties(java.util.Properties);
+public static group.zn.zero.core.config.ZeroConfig fromPropertiesFile(java.nio.file.Path);
+public static group.zn.zero.core.config.ZeroConfig loadStandard();
+public static group.zn.zero.core.config.ZeroConfig loadStandard(java.util.Map<java.lang.String, java.lang.String>);
+public static group.zn.zero.core.error.ErrorCategory valueOf(java.lang.String);
+public static group.zn.zero.core.error.ErrorCategory[] values();
+public static group.zn.zero.core.error.SystemErrorCode valueOf(java.lang.String);
+public static group.zn.zero.core.error.SystemErrorCode[] values();
+public static group.zn.zero.core.error.ZeroException of(group.zn.zero.core.error.ErrorCode);
+public static group.zn.zero.core.error.ZeroException of(group.zn.zero.core.error.ErrorCode, java.lang.String, java.lang.Throwable);
+public static group.zn.zero.core.lifecycle.LifecycleState valueOf(java.lang.String);
+public static group.zn.zero.core.lifecycle.LifecycleState[] values();
+public static group.zn.zero.core.scheduler.ScheduleType valueOf(java.lang.String);
+public static group.zn.zero.core.scheduler.ScheduleType[] values();
+public static group.zn.zero.core.scheduler.ScheduledTask consumer(java.util.function.Consumer<group.zn.zero.core.scheduler.ScheduledTaskContext>);
+public static group.zn.zero.core.scheduler.ScheduledTask runnable(java.lang.Runnable);
+public static group.zn.zero.core.scheduler.ScheduledTaskDefinition defaults(java.lang.String);
+public static group.zn.zero.core.scheduler.ScheduledTaskEventType valueOf(java.lang.String);
+public static group.zn.zero.core.scheduler.ScheduledTaskEventType[] values();
+public static group.zn.zero.core.scheduler.ScheduledTaskFailurePolicy valueOf(java.lang.String);
+public static group.zn.zero.core.scheduler.ScheduledTaskFailurePolicy[] values();
+public static group.zn.zero.core.scheduler.ScheduledTaskObserver noOp();
+public static group.zn.zero.core.scheduler.ScheduledTaskState valueOf(java.lang.String);
+public static group.zn.zero.core.scheduler.ScheduledTaskState[] values();
+public static group.zn.zero.core.scheduler.SchedulerErrorCode valueOf(java.lang.String);
+public static group.zn.zero.core.scheduler.SchedulerErrorCode[] values();
+public static java.util.Optional<java.nio.file.Path> standardConfigFile();

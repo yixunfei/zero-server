@@ -59,5 +59,5 @@ Read `zero-scaffold.json` when a tool needs machine-readable scaffold metadata.
 - It serializes zone state through a local Actor lane.
 - It demonstrates NPC spawn, behavior switch, deterministic local ticks and state query only.
 - It does not implement behavior trees, pathfinding, combat AI, aggro, tick budget, backpressure or cross-server migration.
-- It does not connect external middleware or open network ports.
+- The default selection does not connect external middleware or open network ports. Adding Redis requires an external service at startup.
 - It is not a production NPC / AI / tick API commitment.

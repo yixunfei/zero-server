@@ -2,15 +2,17 @@ package group.zn.zero.data.redis;
 
 import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.data.error.DataErrorCode;
-import group.zn.zero.protocol.buffer.ZeroReader;
 import group.zn.zero.protocol.buffer.ZeroWriter;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Map;
+import java.util.HashMap;
 
 /**
  * Redis 数据本地磁盘化追加日志。
@@ -36,6 +38,9 @@ public final class LocalDiskDataJournal {
      * 日志记录 codec。
      */
     private final RedisDataJournalEntryCodec codec;
+
+    /** 当前实例已验证的完整边界，避免每次追加重新扫描；每个根目录须由一个实例独占写入。 */
+    private final Map<Path, Long> verifiedLengths = new HashMap<>();
 
     /**
      * 创建本地磁盘化追加日志。
@@ -73,10 +78,21 @@ public final class LocalDiskDataJournal {
             byte[] entryBytes = codec.encode(current);
             ZeroWriter writer = new ZeroWriter(entryBytes.length + 5);
             writer.writeByteArray(entryBytes);
-            Files.write(path, writer.toByteArray(),
+            try (FileChannel channel = FileChannel.open(path,
                     StandardOpenOption.CREATE,
                     StandardOpenOption.WRITE,
-                    StandardOpenOption.APPEND);
+                    StandardOpenOption.READ)) {
+                long boundary = recoverBoundary(path, channel.size());
+                channel.truncate(boundary);
+                channel.position(boundary);
+                byte[] bytes = writer.toByteArray();
+                java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(bytes);
+                while (buffer.hasRemaining()) {
+                    channel.write(buffer);
+                }
+                channel.force(true);
+                verifiedLengths.put(path, channel.position());
+            }
         } catch (IOException | RuntimeException ex) {
             throw ZeroException.of(DataErrorCode.WRITE_FAILED, "append local data journal failed", ex);
         }
@@ -97,15 +113,69 @@ public final class LocalDiskDataJournal {
                 return List.of();
             }
             byte[] bytes = Files.readAllBytes(path);
-            ZeroReader reader = new ZeroReader(bytes);
             List<RedisDataJournalEntry> entries = new ArrayList<>();
-            while (reader.isReadable()) {
-                entries.add(codec.decode(reader.readByteArray()));
+            int offset = 0;
+            while (offset < bytes.length) {
+                int[] frame = completeFrame(bytes, offset);
+                if (frame == null) {
+                    break;
+                }
+                entries.add(codec.decode(java.util.Arrays.copyOfRange(
+                        bytes, frame[0], frame[0] + frame[1])));
+                offset = frame[0] + frame[1];
             }
             return List.copyOf(entries);
         } catch (IOException | RuntimeException ex) {
             throw ZeroException.of(DataErrorCode.READ_FAILED, "read local data journal failed", ex);
         }
+    }
+
+    /** 首次追加或上次写失败后恢复完整帧边界，完整帧损坏不可静默截断。 */
+    private long recoverBoundary(final Path path, final long size) throws IOException {
+        Long verified = verifiedLengths.get(path);
+        if (verified != null && verified == size) {
+            return size;
+        }
+        byte[] bytes = Files.readAllBytes(path);
+        int offset = 0;
+        while (offset < bytes.length) {
+            int[] frame = completeFrame(bytes, offset);
+            if (frame == null) {
+                break;
+            }
+            codec.decode(java.util.Arrays.copyOfRange(bytes, frame[0], frame[0] + frame[1]));
+            offset = frame[0] + frame[1];
+        }
+        return offset;
+    }
+
+    /**
+     * 解析一个完整的长度前缀帧；尾部不完整帧返回 null。
+     */
+    private int[] completeFrame(final byte[] bytes, final int start) {
+        int cursor = start;
+        int length = 0;
+        int shift = 0;
+        for (int count = 0; count < 5; count++) {
+            if (cursor >= bytes.length) {
+                return null;
+            }
+            int value = bytes[cursor++] & 0xFF;
+            length |= (value & 0x7F) << shift;
+            if ((value & 0x80) == 0) {
+                if (count == 4 && (value & 0xF8) != 0) {
+                    throw ZeroException.of(DataErrorCode.READ_FAILED,
+                            "local data journal frame length overflow", null);
+                }
+                if (length > bytes.length - cursor) {
+                    return null;
+                }
+                return new int[] {cursor, length};
+            }
+            shift += 7;
+        }
+        throw ZeroException.of(DataErrorCode.READ_FAILED,
+                "local data journal frame length is too long", null);
     }
 
     /**

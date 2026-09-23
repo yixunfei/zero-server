@@ -20,10 +20,21 @@ import group.zn.zero.data.redis.RedisDriverSettings;
 import group.zn.zero.discovery.nacos.NacosDiscoveryConfigKeys;
 import group.zn.zero.rpc.local.InMemoryRpcTransport;
 import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
+import group.zn.zero.runtime.cache.CacheRuntime;
+import group.zn.zero.runtime.discovery.DiscoveryRuntime;
+import group.zn.zero.runtime.production.ProductionAdapterErrorCode;
+import group.zn.zero.runtime.production.ProductionAdapterException;
+import group.zn.zero.runtime.production.ProductionAdapterFailurePhase;
+import group.zn.zero.runtime.production.ProductionAdapterNames;
+import group.zn.zero.runtime.production.ZeroProductionAdapterState;
+import group.zn.zero.runtime.production.ZeroProductionAdapterStatus;
+import group.zn.zero.runtime.production.ZeroProductionAssemblyReport;
+import group.zn.zero.runtime.production.ZeroProductionRuntime;
+import group.zn.zero.runtime.production.ZeroProductionRuntimeConfigKeys;
+import group.zn.zero.runtime.rpc.RpcRuntime;
 import group.zn.zero.starter.LocalRuntime;
-import group.zn.zero.starter.LocalRuntimeCapabilities;
-import group.zn.zero.starter.ZeroRuntimeConfigKeys;
-import group.zn.zero.starter.ZeroRuntimeExecutors;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
@@ -119,7 +130,7 @@ class ZeroProductionRuntimeFactoryTest {
                 MongoDriverSettings.PROPERTY_MONGO_DATABASE, "zero_secret")));
 
         assertInstanceOf(InMemoryRpcTransport.class,
-                components.require(LocalRuntimeCapabilities.RPC_TRANSPORT));
+                components.require(RpcRuntime.RPC_TRANSPORT));
         assertFalse(components.report().plan().components().toString().contains(MongoDataAdapter.class.getName()));
         components.close();
     }
@@ -162,7 +173,7 @@ class ZeroProductionRuntimeFactoryTest {
                 RedisDriverSettings.PROPERTY_REDIS_URI,
                 "redis://:" + secretSentinel + "@127.0.0.1:6379/0")));
 
-        ZeroProductionAdapterStatus status = report.adapterStatus(ZeroProductionRuntimeBuilder.ADAPTER_REDIS_CACHE)
+        ZeroProductionAdapterStatus status = report.adapterStatus(ProductionAdapterNames.ADAPTER_REDIS_CACHE)
                 .orElseThrow();
         assertEquals(ZeroProductionAdapterState.MISSING_CONFIG, status.state());
         assertEquals(
@@ -185,15 +196,15 @@ class ZeroProductionRuntimeFactoryTest {
     void productionBuilderShouldRejectNonCanonicalAdapterSelector() {
         Map<String, String> selectors = Map.of(
                 ZeroProductionRuntimeConfigKeys.ADAPTER_RPC_KAFKA_ENABLED,
-                ZeroProductionRuntimeBuilder.ADAPTER_KAFKA_RPC,
+                ProductionAdapterNames.ADAPTER_KAFKA_RPC,
                 ZeroProductionRuntimeConfigKeys.ADAPTER_DATA_MONGO_ENABLED,
-                ZeroProductionRuntimeBuilder.ADAPTER_MONGO_DATA,
+                ProductionAdapterNames.ADAPTER_MONGO_DATA,
                 ZeroProductionRuntimeConfigKeys.ADAPTER_DATA_REDIS_ENABLED,
-                ZeroProductionRuntimeBuilder.ADAPTER_REDIS_DATA,
+                ProductionAdapterNames.ADAPTER_REDIS_DATA,
                 ZeroProductionRuntimeConfigKeys.ADAPTER_CACHE_REDIS_ENABLED,
-                ZeroProductionRuntimeBuilder.ADAPTER_REDIS_CACHE,
+                ProductionAdapterNames.ADAPTER_REDIS_CACHE,
                 ZeroProductionRuntimeConfigKeys.ADAPTER_DATA_POSTGRESQL_ENABLED,
-                ZeroProductionRuntimeBuilder.ADAPTER_POSTGRESQL_DATA);
+                ProductionAdapterNames.ADAPTER_POSTGRESQL_DATA);
 
         for (Map.Entry<String, String> selector : selectors.entrySet()) {
             ProductionAdapterException exception = assertThrows(
@@ -231,7 +242,7 @@ class ZeroProductionRuntimeFactoryTest {
             assertEquals(
                     ZeroProductionAdapterState.DISABLED,
                     runtime.productionReport()
-                            .adapterStatus(ZeroProductionRuntimeBuilder.ADAPTER_NACOS_DISCOVERY)
+                            .adapterStatus(ProductionAdapterNames.ADAPTER_NACOS_DISCOVERY)
                             .orElseThrow()
                             .state());
         } finally {
@@ -246,7 +257,7 @@ class ZeroProductionRuntimeFactoryTest {
                         .build());
         assertSame(ProductionAdapterErrorCode.CONFIG_INVALID, exception.errorCode());
         assertEquals(ProductionAdapterFailurePhase.CONFIG_SELECTION, exception.failurePhase());
-        assertEquals(ZeroProductionRuntimeBuilder.ADAPTER_NACOS_DISCOVERY, exception.adapterName());
+        assertEquals(ProductionAdapterNames.ADAPTER_NACOS_DISCOVERY, exception.adapterName());
         assertFalse(exception.message().contains("NACOS"));
     }
 
@@ -347,15 +358,15 @@ class ZeroProductionRuntimeFactoryTest {
             String text = report.toString();
 
             assertTrue(runtime.plan().components().stream().anyMatch(component ->
-                    ProductionKafkaRpcProvider.ID.equals(component.componentId())));
+                    group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_KAFKA_RPC.equals(component.componentId())));
             assertTrue(runtime.plan().components().stream().anyMatch(component ->
-                    ProductionMongoDataProvider.ID.equals(component.componentId())));
+                    group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_MONGO_DATA.equals(component.componentId())));
             assertTrue(runtime.plan().components().stream().anyMatch(component ->
-                    ProductionRedisDataProvider.ID.equals(component.componentId())));
+                    group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_REDIS_DATA.equals(component.componentId())));
             assertTrue(runtime.plan().components().stream().anyMatch(component ->
-                    ProductionPostgresqlDataProvider.ID.equals(component.componentId())));
+                    group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_POSTGRESQL_DATA.equals(component.componentId())));
             assertEquals(ZeroProductionAdapterState.CREATED,
-                    report.adapterStatus(ZeroProductionRuntimeBuilder.ADAPTER_MONGO_DATA).orElseThrow().state());
+                    report.adapterStatus(ProductionAdapterNames.ADAPTER_MONGO_DATA).orElseThrow().state());
             assertFalse(text.contains("secret-pass"));
             assertFalse(text.contains("secret-broker"));
             assertFalse(text.contains("mongodb://"));
@@ -387,10 +398,10 @@ class ZeroProductionRuntimeFactoryTest {
                 .build();
         try {
             assertInstanceOf(RedisDistributedCacheService.class,
-                    runtime.require(LocalRuntimeCapabilities.CACHE_SERVICE));
+                    runtime.require(CacheRuntime.CACHE_SERVICE));
             assertSame(
-                    runtime.require(LocalRuntimeCapabilities.CACHE_SERVICE),
-                    runtime.require(LocalRuntimeCapabilities.CACHE_SERVICE));
+                    runtime.require(CacheRuntime.CACHE_SERVICE),
+                    runtime.require(CacheRuntime.CACHE_SERVICE));
         } finally {
             runtime.close();
         }
@@ -409,8 +420,8 @@ class ZeroProductionRuntimeFactoryTest {
                         NacosDiscoveryConfigKeys.DEFAULT_CLUSTER, "FACTORY_TEST_CLUSTER")))
                 .build();
         try {
-            assertTrue(runtime.optional(ProductionRuntimeCapabilities.SERVICE_DISCOVERY).isPresent());
-            assertTrue(runtime.optional(ProductionRuntimeCapabilities.RPC_SERVICE_RESOLVER).isPresent());
+            assertTrue(runtime.optional(DiscoveryRuntime.SERVICE_DISCOVERY).isPresent());
+            assertTrue(runtime.optional(RpcRuntime.RPC_SERVICE_RESOLVER).isPresent());
         } finally {
             runtime.close();
         }

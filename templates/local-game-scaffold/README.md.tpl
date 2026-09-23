@@ -29,7 +29,12 @@ local-game=ok|mode=local|name=__PROJECT_NAME__|uid=1001|position=3,5|logs=4|metr
 src/main/protocol/Game.si
 src/main/protocol/protoId.txt
 src/main/java/__PACKAGE_PATH__/__APP_CLASS__.java
+src/main/java/__PACKAGE_PATH__/LocalGameBO.java
+src/main/java/__PACKAGE_PATH__/LocalGameFlow.java
+src/main/java/__PACKAGE_PATH__/LocalGameFixture.java
+src/main/java/__PACKAGE_PATH__/LocalGameObservation.java
 src/test/java/__PACKAGE_PATH__/__TEST_CLASS__.java
+src/test/java/__PACKAGE_PATH__/LocalGameAsyncTest.java
 BUSINESS_GUIDE.md
 COMPONENTS.md
 NEXT_STEPS.md
@@ -41,6 +46,20 @@ The Maven `generate-sources` phase calls `zero-codegen` and writes generated pro
 ~~~text
 target/generated-sources/zero-codegen
 ~~~
+
+## Optional TCP Server
+
+Only projects generated with `--components net` contain `__SERVER_CLASS__` and the smoke helper `__CLIENT_CLASS__`. Current limitation (2026-09-18): generated `RuntimeAssembly` calls `NetworkRuntime.module()` without the required policy/limiter arguments, so a fresh `net` project does not compile. Until that integration is corrected, use the repository `examples/rpg-tcp-generated` for a runnable TCP flow. After resolving the assembly, the intended server command is:
+
+~~~powershell
+mvn -q exec:java '-Dexec.mainClass=__PACKAGE__.__SERVER_CLASS__' '-Dexec.args=--port=0 --once'
+~~~
+
+This binds a loopback ephemeral port, sends a real TCP smoke request and closes resources. Remove `--once` and use `--port=6200` to keep listening; Ctrl+C stops the server. The client helper has no standalone main method. The response is a minimal request DTO echo, not a complete login response protocol. Authentication, TLS, heartbeat, rate limiting and production capacity remain application responsibilities.
+
+## Async Boundary
+
+`LocalGameBO`, `LocalGameFlow`, `LocalGameFixture` and `LocalGameObservation` are separate generated files. Business services return `CompletionStage`; handler and Actor paths must never call `join()` or `get()`. The single wait retained in `__APP_CLASS__.java` is only the outer `runDemo` smoke boundary. `runDemo` is not a long-running production server.
 
 ## Next Business Step
 
@@ -56,6 +75,6 @@ Read `zero-scaffold.json` when a tool needs machine-readable scaffold metadata.
 ## Boundaries
 
 - This project is a local / prototype scaffold.
-- It does not connect Kafka, MongoDB, Redis, PostgreSQL or Nacos.
-- It does not open network ports.
+- The default selection does not connect external middleware. Adding Redis requires an external service at startup.
+- The default demo does not open network ports. Selecting `net` also generates the explicit Server entry described below.
 - It does not include account authentication, AOI, broadcast, frame sync, GM security or production deployment config.

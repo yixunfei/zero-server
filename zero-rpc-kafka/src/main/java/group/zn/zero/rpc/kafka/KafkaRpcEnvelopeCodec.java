@@ -5,6 +5,7 @@ import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.rpc.RpcMode;
 import group.zn.zero.rpc.RpcRequest;
 import group.zn.zero.rpc.RpcResponse;
+import group.zn.zero.security.SecurityMetadataSnapshot;
 import group.zn.zero.rpc.error.RpcErrorCode;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -65,6 +66,7 @@ public final class KafkaRpcEnvelopeCodec {
             writeString(out, current.topic());
             writeString(out, current.group());
             writeString(out, current.partitionKey());
+            writeMetadata(out, current.securityMetadata());
             writeBytes(out, current.payload());
             out.flush();
             return bytes.toByteArray();
@@ -111,10 +113,10 @@ public final class KafkaRpcEnvelopeCodec {
         try {
             DataInputStream in = new DataInputStream(new ByteArrayInputStream(payload));
             KafkaRpcEnvelopeKind kind = readHeader(in);
-            if (kind == KafkaRpcEnvelopeKind.REQUEST) {
-                return KafkaRpcEnvelope.request(readRequest(in));
-            }
-            return KafkaRpcEnvelope.response(readResponse(in));
+            KafkaRpcEnvelope envelope = kind == KafkaRpcEnvelopeKind.REQUEST
+                    ? KafkaRpcEnvelope.request(readRequest(in)) : KafkaRpcEnvelope.response(readResponse(in));
+            if (in.available() != 0) throw new IllegalArgumentException("trailing kafka rpc envelope bytes");
+            return envelope;
         } catch (IOException | RuntimeException ex) {
             throw ZeroException.of(RpcErrorCode.CODEC_FAILED, "kafka rpc envelope decode failed", ex);
         }
@@ -150,6 +152,7 @@ public final class KafkaRpcEnvelopeCodec {
                 readString(in),
                 readString(in),
                 readString(in),
+                readMetadata(in),
                 readBytes(in));
     }
 
@@ -165,6 +168,37 @@ public final class KafkaRpcEnvelopeCodec {
                 readBytes(in));
     }
 
+    private void writeMetadata(final DataOutputStream out, final SecurityMetadataSnapshot metadata) throws IOException {
+        out.writeBoolean(metadata != null);
+        if (metadata == null) return;
+        writeString(out, metadata.subject());
+        writeString(out, metadata.transport());
+        writeString(out, metadata.peerAddress());
+        writeString(out, metadata.trustedSourceAddress());
+        writeString(out, metadata.traceId());
+        writeString(out, metadata.correlationId());
+        writeString(out, String.join("\u001f", metadata.permissions()));
+        writeString(out, metadata.assertionReference());
+        writeString(out, metadata.signature());
+        out.writeLong(metadata.issuedAt().toEpochMilli());
+        out.writeLong(metadata.expiresAt().toEpochMilli());
+    }
+
+    private SecurityMetadataSnapshot readMetadata(final DataInputStream in) throws IOException {
+        if (!in.readBoolean()) return null;
+        String subject = readString(in);
+        String transport = readString(in);
+        String peer = readString(in);
+        String trusted = readString(in);
+        String trace = readString(in);
+        String correlation = readString(in);
+        java.util.Set<String> permissions = java.util.Arrays.stream(readString(in).split("\u001f", -1))
+                .filter(value -> !value.isBlank()).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        String assertion = readString(in);
+        String signature = readString(in);
+        return new SecurityMetadataSnapshot(subject, transport, peer, trusted, trace, correlation,
+                permissions, assertion, Instant.ofEpochMilli(in.readLong()), Instant.ofEpochMilli(in.readLong()), signature);
+    }
     private void writeString(final DataOutputStream out, final String value) throws IOException {
         byte[] bytes = Objects.requireNonNull(value, "value").getBytes(StandardCharsets.UTF_8);
         if (bytes.length > MAX_STRING_BYTES) {
@@ -173,6 +207,7 @@ public final class KafkaRpcEnvelopeCodec {
         out.writeInt(bytes.length);
         out.write(bytes);
     }
+
 
     private String readString(final DataInputStream in) throws IOException {
         int length = readLength(in, MAX_STRING_BYTES, "kafka rpc string is too large");
@@ -196,6 +231,9 @@ public final class KafkaRpcEnvelopeCodec {
         }
         if (length > maxLength) {
             throw new IllegalArgumentException(tooLargeMessage);
+        }
+        if (length > in.available()) {
+            throw new IllegalArgumentException("declared kafka rpc length exceeds remaining payload");
         }
         return length;
     }

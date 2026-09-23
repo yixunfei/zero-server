@@ -15,12 +15,9 @@ import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
-import io.netty.channel.EventLoopGroup;
 import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.DatagramPacket;
-import io.netty.channel.socket.nio.NioDatagramChannel;
 import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Objects;
@@ -65,15 +62,10 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
      */
     private final AtomicReference<InetSocketAddress> boundAddress = new AtomicReference<>();
 
-    /**
-     * worker 线程组。
-     */
-    private EventLoopGroup workerGroup;
-
-    /**
-     * UDP channel。
-     */
-    private Channel channel;
+    /** 组合根借用的 IO 资源；为空时每次启动创建独占组。 */
+    private final NettyIoResources borrowedResources;
+    /** 本次启动独占的监听与连接生命周期。 */
+    private NettyServerResources resources;
 
     /**
      * 创建 UDP 服务器。
@@ -90,6 +82,24 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
             final ServerFrameHandler frameHandler,
             final ConnectionListener connectionListener,
             final Executor handlerExecutor) {
+        this(options, frameCodec, frameHandler, connectionListener, handlerExecutor, null);
+    }
+
+    /**
+     * 创建借用 IO 组的 UDP 服务；构造不启动线程，停止只关闭本服务 socket。
+     * @param options UDP 配置，transport 必须匹配借用组。
+     * @param frameCodec 编解码器，不可为空。
+     * @param frameHandler 业务处理器，不可为空。
+     * @param connectionListener 监听器，不可为空。
+     * @param handlerExecutor 受管执行器，不可为空。
+     * @param ioResources 借用组；为空时创建独占组，非空由调用方关闭。
+     * @throws NullPointerException 必填参数为空。
+     * @throws IllegalArgumentException 配置类型不是 UDP。
+     */
+    public NettyUdpServer(final ServerOptions options, final ProtocolFrameCodec frameCodec,
+            final ServerFrameHandler frameHandler, final ConnectionListener connectionListener,
+            final Executor handlerExecutor, final NettyIoResources ioResources) {
+        this.borrowedResources = ioResources;
         this.options = Objects.requireNonNull(options, "options");
         if (options.serverType() != ServerType.UDP) {
             throw new IllegalArgumentException("NettyUdpServer only supports UDP options");
@@ -141,24 +151,25 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
      */
     @Override
     protected void doStart() {
-        workerGroup = new NioEventLoopGroup(options.workerThreads());
         try {
+            NettyServerResources current = new NettyServerResources(options, borrowedResources);
+            resources = current;
             Bootstrap bootstrap = new Bootstrap()
-                    .group(workerGroup)
-                    .channel(NioDatagramChannel.class)
+                    .group(current.io().workers())
+                    .channel(NettyTransportFactory.datagramChannel(options.tuning().transport()))
                     .handler(new ChannelInitializer<DatagramChannel>() {
                         @Override
                         protected void initChannel(final DatagramChannel current) {
                             current.pipeline().addLast("udpHandler", new UdpFrameHandler());
                         }
                     });
-            channel = bootstrap.bind(options.host(), options.port()).sync().channel();
+            Channel channel = current.bind(bootstrap.bind(options.host(), options.port()));
             boundAddress.set((InetSocketAddress) channel.localAddress());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             shutdownGroup();
             throw ZeroException.of(NetErrorCode.START_FAILED, "start netty UDP server interrupted", ex);
-        } catch (RuntimeException ex) {
+        } catch (Exception ex) {
             shutdownGroup();
             throw ZeroException.of(NetErrorCode.START_FAILED, "start netty UDP server failed", ex);
         }
@@ -171,24 +182,14 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
      */
     @Override
     protected void doStop() {
-        try {
-            if (channel != null) {
-                channel.close().sync();
-            }
-            shutdownGroup();
-            boundAddress.set(null);
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw ZeroException.of(NetErrorCode.STOP_FAILED, "stop netty UDP server interrupted", ex);
-        } catch (RuntimeException ex) {
-            throw ZeroException.of(NetErrorCode.STOP_FAILED, "stop netty UDP server failed", ex);
-        }
+        try { shutdownGroup(); }
+        finally { boundAddress.set(null); }
     }
 
     private void shutdownGroup() {
-        if (workerGroup != null) {
-            workerGroup.shutdownGracefully().syncUninterruptibly();
-            workerGroup = null;
+        if (resources != null) {
+            resources.close();
+            resources = null;
         }
     }
 

@@ -65,6 +65,31 @@ class RuntimeFailureMatrixTest {
     }
 
     @Test
+    void deadlineBetweenProvidersMustRollbackPreviouslyAcquiredResources() {
+        List<String> events = new ArrayList<>();
+        var clockReads = new java.util.concurrent.atomic.AtomicInteger();
+        FakeRuntimeProvider alpha = provider(ALPHA_ID, ALPHA, null, context -> {
+            context.resources().register(RecordingResource.healthy("alpha", events));
+            return contribution(ALPHA, "alpha", null);
+        });
+        FakeRuntimeProvider beta = provider(BETA_ID, BETA, ALPHA, context -> {
+            events.add("create:beta");
+            return contribution(BETA, "beta", null);
+        });
+
+        RuntimeAssemblyException failure = assertThrows(RuntimeAssemblyException.class,
+                () -> assembler(catalog(alpha, beta), BETA, BETA_ID)
+                        .assemblyTimeout(Duration.ofNanos(10))
+                        .monotonicClock(() -> clockReads.incrementAndGet() < 5 ? 0L : 10L)
+                        .build());
+
+        assertEquals(RuntimeErrorCode.RUNTIME_STARTUP_TIMEOUT, failure.errorCode());
+        assertEquals(List.of("close:alpha"), events);
+        assertEquals(RuntimeState.FAILED, failure.report().orElseThrow().state());
+        assertEquals(0, failure.report().orElseThrow().pendingResourceCloseCount());
+    }
+
+    @Test
     void firstMiddleAndLastCreateFailureShouldRollbackOnlyAcquiredResources() {
         List<List<String>> expected = List.of(
                 List.of("close:alpha"),
@@ -265,6 +290,28 @@ class RuntimeFailureMatrixTest {
 
         assertEquals(RuntimeErrorCode.RUNTIME_STARTUP_TIMEOUT, failure.errorCode());
         assertEquals(List.of("close:alpha"), events);
+    }
+
+    @Test
+    void finalSynchronousHealthProbeMustNotOutliveStartupBudget() {
+        AtomicLong clock = new AtomicLong();
+        List<String> events = new ArrayList<>();
+        var descriptor = ComponentDescriptor.builder(ALPHA_ID).provide(ALPHA).health(HealthPhase.STARTUP).build();
+        var alpha = new FakeRuntimeProvider(descriptor, context -> {
+            context.resources().register(RecordingResource.healthy("alpha", events));
+            return ComponentContribution.builder().bind(ALPHA, "alpha")
+                    .healthProbe(HealthPhase.STARTUP, request -> {
+                        clock.set(20L);
+                        return CompletableFuture.completedFuture(HealthResult.healthy("late"));
+                    }).build();
+        });
+        try (var runtime = assembler(catalog(alpha), ALPHA, ALPHA_ID)
+                .startupTimeout(Duration.ofNanos(10L)).monotonicClock(clock::get).build()) {
+            var failure = assertThrows(RuntimeAssemblyException.class, runtime::start);
+            assertEquals(RuntimeErrorCode.RUNTIME_STARTUP_TIMEOUT, failure.errorCode());
+            assertEquals(RuntimeState.FAILED, runtime.runtimeState());
+            assertEquals(List.of("close:alpha"), events);
+        }
     }
 
     @Test

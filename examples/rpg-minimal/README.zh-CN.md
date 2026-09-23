@@ -68,7 +68,7 @@ examples/rpg-minimal/src/main/protocol/Rpg.si
 - 使用 `LocalPlayerService` 处理登录、玩家加载和 GM 查询玩家。
 - 使用 `LocalSceneService` 处理进入场景、移动、场景实体查询和离开场景。
 - 使用 `InMemoryLogSink` 作为本地终端快照，业务日志经 `LogAppender` 安全入口写入，并由 `MonitorRuntime` 记录指标。
-- 通过 `GameRuntime.require(LocalRuntimeCapabilities.*)` 取得 Actor、配置和安全日志等 typed capability。
+- 通过 `GameRuntime.require(...)` 与 `ActorRuntime`、`RuntimeBasics`、`LogRuntime` 的能力键取得 Actor、配置和安全日志。
 
 协议驱动入口还演示了以下做法：
 
