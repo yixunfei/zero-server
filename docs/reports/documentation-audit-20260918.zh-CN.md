@@ -40,6 +40,10 @@ mvn -q -f target/tcp-demo/pom.xml clean test
 
 可用替代入口为 `examples/rpg-tcp-generated`，本轮实际通过测试和真实 loopback 请求/响应。
 
+## 后续状态（2026-09-23）
+
+此前记录的 `local + net` 生成工程装配缺陷已修复：生成器现在显式写入拒绝握手的占位策略和框架内置有界限流，并启用所选网络生命周期 provider；runtime 网络模板不再误带聚合 Starter。该历史审计仍保留原始失败证据；当前复现应以 `docs/migrations/20260923-dependency-upgrades.md` 和最新脚手架测试为准。
+
 ## 本轮验证
 
 | 命令 / 检查 | 结果与边界 |

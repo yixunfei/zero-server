@@ -78,14 +78,14 @@ mvn -q -f examples/rpg-tcp-generated/pom.xml clean test exec:java
 
 TCP 示例监听本机临时端口，执行 Socket → Netty → 生成 BO → 响应后退出。
 
-当前 `local + net` 已生成 Server/客户端辅助类，但 **2026-09-18 新生成工程编译验证失败**：装配代码调用无参 `NetworkRuntime.module()`，现有 API 要求显式 policy/limiter。以下命令用于复现该限制，暂不作为开箱即用入口；真实 TCP 收发请使用上面的 `rpg-tcp-generated` 示例。
+`local + net` 会生成 Server/客户端辅助类。生成的 `RuntimeAssembly` 使用拒绝握手的占位策略及框架内置有界限流，启用所选网络生命周期 provider；应用必须显式接入握手、鉴权和安全链。独立 Server 示例用于本地 loopback 回显，不能视为生产安全接线。真实 TCP 收发也可以使用上面的 `rpg-tcp-generated` 示例。
 
 ```bash
 java scripts/NewLocalGame.java --template local --components net --projectName tcp-demo --packageName group.example.tcpdemo --outputDir target/tcp-demo
 mvn -q -f target/tcp-demo/pom.xml clean test
 ```
 
-Server 源码定义了 `--port`、`--once` 和关闭流程，客户端类是没有独立 main 的 smoke 辅助类；这些入口在装配编译问题解决前不能由上述新工程运行。响应设计仍是请求 DTO 的最小回显。认证、TLS、心跳、限流和断线重连需应用接入，见[网络完整链路](guides/net-full-flow.zh-CN.md)及[本轮核对报告](reports/documentation-audit-20260918.zh-CN.md)。
+Server 源码定义了 `--port`、`--once` 和关闭流程，客户端类是没有独立 main 的 smoke 辅助类。响应设计仍是请求 DTO 的最小回显。认证、TLS、心跳、限流和断线重连需应用接入，见[网络完整链路](guides/net-full-flow.zh-CN.md)及[本轮核对报告](reports/documentation-audit-20260918.zh-CN.md)。
 
 ## 4. 中心—逻辑服务器
 

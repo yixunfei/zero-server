@@ -49,7 +49,7 @@ target/generated-sources/zero-codegen
 
 ## Optional TCP Server
 
-Only projects generated with `--components net` contain `__SERVER_CLASS__` and the smoke helper `__CLIENT_CLASS__`. Current limitation (2026-09-18): generated `RuntimeAssembly` calls `NetworkRuntime.module()` without the required policy/limiter arguments, so a fresh `net` project does not compile. Until that integration is corrected, use the repository `examples/rpg-tcp-generated` for a runnable TCP flow. After resolving the assembly, the intended server command is:
+Only projects generated with `--components net` contain `__SERVER_CLASS__` and the smoke helper `__CLIENT_CLASS__`. The generated composition enables the selected network lifecycle provider with a handshake-rejecting placeholder policy and the framework bounded rate limiter. Supply application handshake, authentication and security-chain behavior before using this composition for real clients. The separate Server example is for local loopback echo only. The intended server command is:
 
 ~~~powershell
 mvn -q exec:java '-Dexec.mainClass=__PACKAGE__.__SERVER_CLASS__' '-Dexec.args=--port=0 --once'

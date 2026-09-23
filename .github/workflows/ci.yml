@@ -45,7 +45,7 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Collect repository and local acceptance evidence
-        run: java scripts/ZeroAcceptanceEvidence.java --level full
+        run: java scripts/ZeroAcceptanceEvidence.java --level full --local-only --no-stage0
       - name: Upload acceptance evidence
         if: always()
         uses: actions/upload-artifact@v7

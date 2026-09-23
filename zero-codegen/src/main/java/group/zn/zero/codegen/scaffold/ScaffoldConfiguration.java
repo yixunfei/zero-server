@@ -36,6 +36,8 @@ final class ScaffoldConfiguration {
                 values.put("zero.adapter.data." + component + ".enabled", "true");
             } else if (component.equals("kafka")) {
                 values.put("zero.adapter.rpc.kafka.enabled", "true");
+            } else if (component.equals("net")) {
+                values.put("zero.net.lifecycle.enabled", "true");
             } else if (component.equals("nacos")) {
                 values.put("zero.discovery.mode", "nacos");
             }

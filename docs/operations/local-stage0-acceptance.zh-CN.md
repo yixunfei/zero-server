@@ -165,3 +165,7 @@ mvn -B -ntp -DskipTests install
 2026-09-08，在 PostgreSQL 连接池及资源关闭回归修正后重新执行 full：17/17 通过，耗时 492191 ms，失败和跳过均为 0。Reactor Surefire 531 项、本地 Failsafe 1 项全部通过；质量门禁、47 模块 / 18 规则架构守卫以及十九种生成消费者均通过。未选择 PostgreSQL 的生成消费者额外验证 HikariCP 类缺席。
 
 真实 Repository 的停启、并发与持续运行通过独立 `scripts/VerifyRepositoryDrivers.ps1 -Resilience` 入口验证，不计入本地 full。具体记录与下一阶段顺序见[按需组装推进方案](../reports/demand-composition-2026-09-12.zh-CN.md)。
+
+## 本地证据包与 CI 范围
+
+普通 CI 的证据包使用 `java scripts/ZeroAcceptanceEvidence.java --level full --local-only --no-stage0`。入口先安装当前 reactor；`evidence.json` 的 `scope=local` 明确排除外部 Kafka 与持久化恢复，并将这些记录标为 skipped。Stage 0 在同一 workflow 的 Full local framework acceptance job 独立执行，避免证据包重复执行导致十分钟子进程超时。手工采集全范围证据时省略 `--local-only`；外部前置缺失仍使采集失败。生产就绪声明仍为 false。

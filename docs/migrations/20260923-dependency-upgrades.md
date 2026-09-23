@@ -28,3 +28,17 @@ mvn -B -ntp -Pquality,benchmarks,integration-tests verify
 58 个 reactor 项目全部成功，包含 Checkstyle、PMD、SpotBugs、Surefire、Failsafe 和 benchmark smoke。远端 CI 仍需对最终候选提交运行并核对。Redis、MongoDB、Nacos 的真实外部服务测试因本机 Docker Desktop backend 启动失败而未执行，不能将本次结果视为外部组件验收。
 
 历史性能报告基于旧依赖组合，不能作为上述升级版本的性能实测证据。
+
+## 生成网络组件与验收入口修复
+
+`net` 生成装配使用现有带参数 API，默认拒绝握手并将 limiter 留给框架内置有界实现；所选 `zero.net.lifecycle.enabled=true` 与清单 provider 对齐。没有新增无参兼容 API，也没有开放匿名生产接入。`runtime + net` 移除多余聚合 Starter；`local + net` 的 TCP 示例继续保留所需 Starter。已有生成工程请先备份，按 ownership 升级流程检查冲突后重新生成，应用安全策略必须显式提供。
+
+验收入口先安装当前 reactor 依赖，再在拥有目标测试的模块执行指定测试，保留“找不到测试即失败”的约束；修复 CLI classpath 分隔符、Windows Path 继承和空工作区误报 dirty。普通 CI 使用 `--local-only --no-stage0`：Kafka 与外部持久化证据标记 skipped，Stage 0 由同一 workflow 独立必跑 job 执行。默认不加 `--local-only` 的完整证据采集仍要求外部证据，不将 blocked 改记 passed。
+
+复验命令：
+
+```text
+mvn -B -ntp -DskipTests install
+java scripts/VerifyGeneratedCompositions.java
+java scripts/ZeroAcceptanceEvidence.java --level full --local-only --no-stage0
+```

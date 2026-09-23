@@ -8,7 +8,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -16,7 +15,8 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>This tool collects a reproducible repository/environment snapshot and runs
  * existing local gates without treating historical markers as execution evidence.
- * It writes only below {@code target/acceptance-evidence}.</p>
+ * Bundle output is stored below {@code target/acceptance-evidence}; invoked builds also
+ * write their regular target directories and install current reactor artifacts.</p>
  */
 public final class ZeroAcceptanceEvidence {
     private static final String SCHEMA = "zero-acceptance-evidence/v2";
@@ -38,7 +38,9 @@ public final class ZeroAcceptanceEvidence {
         records.add(runCommand(root, "maven", List.of(options.maven(), "--version"), "toolchain.maven"));
         records.add(checkWorkflow(root));
         records.add(capabilityRecord(root));
-        records.add(runCommand(root, "actor-async-thread-contract", List.of(options.maven(), "-pl", "zero-actor,zero-runtime-bootstrap", "-am",
+        records.add(runCommand(root, "reactor-install", List.of(options.maven(), "-B", "-ntp", "-DskipTests", "install"),
+                "build.reactor-dependencies"));
+        records.add(runCommand(root, "actor-async-thread-contract", List.of(options.maven(), "-pl", "zero-actor,zero-runtime-bootstrap",
                 "-Dtest=ExecutorActorSchedulerTest,LocalActorSchedulerTest,ZeroRuntimeExecutorsFocusedTest",
                 "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "matrix.actor-async-thread-contract"));
         records.add(runCommand(root, "empty-runtime", List.of(options.maven(), "-f", "examples/modular-composition/minimal/pom.xml",
@@ -48,7 +50,8 @@ public final class ZeroAcceptanceEvidence {
         records.add(runCommand(root, "tcp-starter-template", List.of(options.maven(), "-pl", "zero-server-starter", "-Dtest=ZeroServerTcpApplicationTest", "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "matrix.single-process-tcp"));
         records.add(runCommand(root, "tcp-net-real-socket", List.of(options.maven(), "-pl", "zero-net", "-Dtest=NettyServerImplementationsTest", "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "matrix.tcp-real-socket"));
         records.add(runCommand(root, "kafka-slice-build", List.of(options.maven(), "-f", "examples/modular-composition/center-logic-kafka/pom.xml", "clean", "test"), "matrix.center-logic-build"));
-        records.add(runCommand(root, "kafka-dual-jvm", List.of(findPwsh(), "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "scripts/VerifyCenterLogicKafka.ps1"), "matrix.center-logic"));
+        records.add(options.localOnly() ? Record.skipped("matrix.center-logic", "external Kafka excluded by --local-only")
+                : runCommand(root, "kafka-dual-jvm", List.of(findPwsh(), "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "scripts/VerifyCenterLogicKafka.ps1"), "matrix.center-logic"));
         records.add(runCommand(root, "adapters", List.of("java", "scripts/VerifyAdapterCompositions.java"), "matrix.adapters"));
         records.add(runCommand(root, "mixed-composition", List.of("java", "scripts/VerifyMixedComposition.java"), "matrix.mixed-composition"));
         records.add(runCommand(root, "no-sdk-external-service", List.of("java", "scripts/VerifyNoSdkExternalService.java"),
@@ -59,7 +62,8 @@ public final class ZeroAcceptanceEvidence {
         records.add(runCommand(root, "scaffold-concurrent-lock-tests", List.of(options.maven(), "-pl", "zero-codegen", "-Dtest=ScaffoldTransactionTest#concurrentApplyIsRejectedAndLockIsReleased", "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "matrix.scaffold-concurrent-lock"));
         records.add(cliExitCodeMatrix(root, options));
         records.add(runCommand(root, "release-artifact-evidence", List.of("java", "scripts/ZeroReleaseArtifactEvidence.java"), "release.artifact-local"));
-        records.add(productionEvidenceRecord());
+        records.add(options.localOnly() ? Record.skipped("production.persistence-recovery", "external persistence excluded by --local-only")
+                : productionEvidenceRecord());
         records.add(runCommand(root, "platform-transaction", List.of("java", "scripts/ZeroPlatformProductionGate.java", "--platform-transaction"),
                 "matrix.platform-transaction"));
         records.add(runCommand(root, "local-production-focused", List.of("java", "scripts/ZeroPlatformProductionGate.java", "--local-production-focused"),
@@ -89,54 +93,47 @@ public final class ZeroAcceptanceEvidence {
             final List<String> command, final String id) throws IOException {
         Instant started = Instant.now();
         Path log = OUTPUT.resolve("logs").resolve(fileName + ".log");
-        String output;
         int exit;
         String status;
         String reason = "";
         try {
             ProcessBuilder builder = new ProcessBuilder(command).directory(root.toFile())
-                    .redirectErrorStream(true);
+                    .redirectErrorStream(true).redirectOutput(log.toFile());
             inheritCurrentJavaHome(builder);
             Process process = builder.start();
-            CompletableFuture<String> outputFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    return new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-                } catch (IOException exception) {
-                    return exception.getClass().getSimpleName() + ": " + safe(exception.getMessage());
-                }
-            });
             boolean completed;
             try {
-                completed = process.waitFor(COMMAND_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+                completed = process.waitFor(id.startsWith("stage0.") ? Duration.ofMinutes(60).toSeconds()
+                        : COMMAND_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
+                process.descendants().toList().reversed().forEach(ProcessHandle::destroyForcibly);
                 process.destroyForcibly();
                 return Record.blocked(id, command, log, started, "interrupted");
             }
             if (!completed) {
+                process.descendants().toList().reversed().forEach(ProcessHandle::destroyForcibly);
                 process.destroyForcibly();
                 exit = 124;
                 status = "blocked";
                 reason = "timeout";
             } else {
                 exit = process.exitValue();
-                if (id.equals("matrix.center-logic") && outputFuture.isDone()
-                        && outputFuture.join().contains("center-logic-kafka=blocked")) {
+                if (id.equals("matrix.center-logic")
+                        && new String(Files.readAllBytes(log), StandardCharsets.UTF_8).contains("center-logic-kafka=blocked")) {
                     status = "blocked";
                     reason = "external Kafka/Docker prerequisite unavailable";
                 } else {
                     status = exit == 0 ? "passed" : "failed";
                 }
             }
-            output = outputFuture.join();
         } catch (IOException exception) {
-            output = exception.getClass().getSimpleName() + ": " + safe(exception.getMessage());
+            Files.writeString(log, exception.getClass().getSimpleName() + ": " + safe(exception.getMessage()),
+                    StandardCharsets.UTF_8);
             exit = 127;
             status = "missing";
             reason = "command unavailable";
         }
-        Files.writeString(log, output, StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
         return new Record(id, status, command, exit, started, Instant.now(), log.toString(), reason);
     }
 
@@ -165,6 +162,7 @@ public final class ZeroAcceptanceEvidence {
         Path file = OUTPUT.resolve("capabilities.json");
         String json = "{\n"
                 + "  \"schema\": \"zero-capability-evidence/v2\",\n"
+                + "  \"evidenceScope\": \"historical baseline only; use records.jsonl for current execution\",\n"
                 + "  \"productionReady\": false,\n"
                 + "  \"goalAchieved\": false,\n"
                 + "  \"capabilities\": [\n"
@@ -196,6 +194,7 @@ public final class ZeroAcceptanceEvidence {
         StringBuilder json = new StringBuilder("{\n");
         json.append("  \"schema\":\"").append(SCHEMA).append("\",\n");
         json.append("  \"level\":\"").append(escape(options.level())).append("\",\n");
+        json.append("  \"scope\":\"").append(options.localOnly() ? "local" : "all").append("\",\n");
         json.append("  \"collectedAt\":\"").append(snapshot.collectedAt()).append("\",\n");
         json.append("  \"repository\":\"").append(escape(snapshot.root().toString())).append("\",\n");
         json.append("  \"branch\":\"").append(escape(snapshot.branch())).append("\",\n");
@@ -259,29 +258,31 @@ public final class ZeroAcceptanceEvidence {
         }
     }
 
-    private record Options(String level, boolean noStage0, String maven) {
+    private record Options(String level, boolean noStage0, boolean localOnly, String maven) {
         static Options parse(final String[] args) {
             String level = "quick";
             boolean noStage0 = false;
+            boolean localOnly = false;
             String maven = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "mvn.cmd" : "mvn";
             for (int i = 0; i < args.length; i++) {
                 switch (args[i]) {
                     case "--level" -> { if (++i >= args.length) throw new IllegalArgumentException("missing level"); level = args[i]; }
                     case "--no-stage0" -> noStage0 = true;
+                    case "--local-only" -> localOnly = true;
                     case "--maven" -> { if (++i >= args.length) throw new IllegalArgumentException("missing maven"); maven = args[i]; }
-                    case "--help", "-h" -> { System.out.println("Usage: java scripts/ZeroAcceptanceEvidence.java [--level quick|full] [--no-stage0] [--maven mvn]"); System.exit(0); }
+                    case "--help", "-h" -> { System.out.println("Usage: java scripts/ZeroAcceptanceEvidence.java [--level quick|full] [--no-stage0] [--local-only] [--maven mvn]"); System.exit(0); }
                     default -> throw new IllegalArgumentException("unknown option: " + args[i]);
                 }
             }
             if (!List.of("quick", "full").contains(level)) throw new IllegalArgumentException("level must be quick or full");
-            return new Options(level, noStage0, maven);
+            return new Options(level, noStage0, localOnly, maven);
         }
     }
 
     private record Snapshot(Path root, String branch, String revision, boolean dirty,
             List<String> untracked, List<String> riskFiles, Instant collectedAt) {
         static Snapshot collect(final Path root) throws IOException {
-            String branch = git(root, List.of("symbolic-ref", "--short", "HEAD"));
+            String branch = git(root, List.of("rev-parse", "--abbrev-ref", "HEAD"));
             String revision = git(root, List.of("rev-parse", "HEAD"));
             String status = git(root, List.of("status", "--porcelain=v1", "--untracked-files=all"));
             List<String> untracked = status.lines().filter(line -> line.startsWith("?? ")).map(line -> line.substring(3)).toList();
@@ -305,7 +306,7 @@ public final class ZeroAcceptanceEvidence {
             Process process = new ProcessBuilder("git").directory(root.toFile()).command(join("git", args)).redirectErrorStream(true).start();
             String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
             if (!process.waitFor(30, TimeUnit.SECONDS) || process.exitValue() != 0) return "unknown";
-            return output.isBlank() ? "(detached)" : output;
+            return output;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             return "unknown";
@@ -333,11 +334,13 @@ public final class ZeroAcceptanceEvidence {
         if (javaHome != null && !javaHome.isBlank()) {
             builder.environment().put("JAVA_HOME", javaHome);
             String bin = Path.of(javaHome, "bin").toString();
-            String path = builder.environment().get("PATH");
+            String pathKey = builder.environment().keySet().stream()
+                    .filter(key -> key.equalsIgnoreCase("PATH")).findFirst().orElse("PATH");
+            String path = builder.environment().get(pathKey);
             if (path == null || path.isBlank()) {
-                builder.environment().put("PATH", bin);
+                builder.environment().put(pathKey, bin);
             } else if (!path.toLowerCase(Locale.ROOT).contains(bin.toLowerCase(Locale.ROOT))) {
-                builder.environment().put("PATH", bin + java.io.File.pathSeparator + path);
+                builder.environment().put(pathKey, bin + java.io.File.pathSeparator + path);
             }
         }
     }
@@ -383,9 +386,9 @@ public final class ZeroAcceptanceEvidence {
         Files.writeString(application, Files.readString(application, StandardCharsets.UTF_8) + "\n// user modification\n", StandardCharsets.UTF_8);
         List<CliCase> cases = List.of(
                 new CliCase("exit-0-success", List.of("java", "scripts/NewLocalGame.java", "--listTemplates"), 0, ""),
-                new CliCase("exit-1-generation-failure", List.of("java", "-cp", "zero-codegen/target/classes;zero-runtime/target/classes", "group.zn.zero.codegen.scaffold.ProjectScaffoldCli", "--template", "does-not-exist", "--templateRoot", root.resolve("templates").toAbsolutePath().toString()), 1, "SCAFFOLD-GENERATION-FAILED"),
+                new CliCase("exit-1-generation-failure", List.of("java", "-cp", String.join(java.io.File.pathSeparator, "zero-codegen/target/classes", "zero-runtime/target/classes"), "group.zn.zero.codegen.scaffold.ProjectScaffoldCli", "--template", "does-not-exist", "--templateRoot", root.resolve("templates").toAbsolutePath().toString()), 1, "SCAFFOLD-GENERATION-FAILED"),
                 new CliCase("exit-2-invalid-arguments", List.of("java", "-cp", "zero-codegen/target/classes", "group.zn.zero.codegen.scaffold.ProjectScaffoldCli", "--unknown-option"), 2, "SCAFFOLD-INVALID-ARGUMENT"),
-                new CliCase("exit-3-plan-blocked", List.of("java", "-cp", "zero-codegen/target/classes;zero-runtime/target/classes", "group.zn.zero.codegen.scaffold.ProjectScaffoldCli", "--plan", "--template", "local", "--templateRoot", root.resolve("templates").toAbsolutePath().toString(), "--projectName", "blocked", "--packageName", "group.zn.blocked", "--outputDir", directory.resolve("blocked-project").toAbsolutePath().toString()), 3, "SCAFFOLD-PLAN-BLOCKED"));
+                new CliCase("exit-3-plan-blocked", List.of("java", "-cp", String.join(java.io.File.pathSeparator, "zero-codegen/target/classes", "zero-runtime/target/classes"), "group.zn.zero.codegen.scaffold.ProjectScaffoldCli", "--plan", "--template", "local", "--templateRoot", root.resolve("templates").toAbsolutePath().toString(), "--projectName", "blocked", "--packageName", "group.zn.blocked", "--outputDir", directory.resolve("blocked-project").toAbsolutePath().toString()), 3, "SCAFFOLD-PLAN-BLOCKED"));
         boolean all = true;
         for (CliCase current : cases) {
             CliCaseResult result = runCliCase(root, directory, current);

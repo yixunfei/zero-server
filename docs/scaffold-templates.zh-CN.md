@@ -122,14 +122,14 @@ java scripts/RunLocalPrototype.java `
 
 先运行 `mvn -B -ntp -q -DskipTests install` 安装本次框架与生成工具。`--components` 接收逗号分隔的组件 ID，附加到模板必须能力上。未知 ID 会在写入工程前失败。
 
-支持：`bootstrap`、`actor`、`event`、`protocol`、`rpc`、`data`、`cache`、`log`、`monitor`、`discovery`、`redis`、`kafka`、`nacos`、`mongo`、`postgresql`、`net`、`custom-actor`。基础配置/执行器始终存在，组件依赖自动补齐。`redis` 选择 Redis 数据工厂；`custom-actor` 用应用 provider 替换 Actor 调度器。`kafka`/`nacos` 替换同次选择的本地 `rpc`/`discovery`。`runtime + net` 生成网络策略依赖与配置；`local + net` 额外生成 `<Application>Server` 与 `<Application>TcpClient`，必须显式运行 Server 才监听。当前新生成的 net 工程调用无参 `NetworkRuntime.module()`，与现有 policy/limiter API 不匹配，编译验证失败；不能按已通过模板使用。默认无 net 的 smoke 入口仍会退出；复现与可用替代示例见[快速上手](quickstart.zh-CN.md#3-生成并运行业务原型)。
+支持：`bootstrap`、`actor`、`event`、`protocol`、`rpc`、`data`、`cache`、`log`、`monitor`、`discovery`、`redis`、`kafka`、`nacos`、`mongo`、`postgresql`、`net`、`custom-actor`。基础配置/执行器始终存在，组件依赖自动补齐。`redis` 选择 Redis 数据工厂；`custom-actor` 用应用 provider 替换 Actor 调度器。`kafka`/`nacos` 替换同次选择的本地 `rpc`/`discovery`。`runtime + net` 生成网络策略依赖与配置；`local + net` 额外生成 `<Application>Server` 与 `<Application>TcpClient`，必须显式运行 Server 才监听。生成的 `RuntimeAssembly` 启用网络生命周期 provider，使用拒绝握手的占位策略与框架内置有界限流；接入前必须提供业务握手、鉴权与安全链。`runtime + net` 不依赖聚合 Starter，只有 local TCP 示例需要它。默认无 net 的 smoke 入口仍会退出；示例见[快速上手](quickstart.zh-CN.md#3-生成并运行业务原型)。
 
 | 路径 | 生成参数 | 默认验收行为 |
 | --- | --- | --- |
 | 最小运行时 | `--template runtime` | 仅 3 个框架依赖，启动后关闭 |
 | 事件 / Actor | `--template runtime --components event,actor` | 7 个框架依赖，启动后关闭 |
 | 本地 RPG | `--template local` | 登录、场景进入与移动后退出 |
-| TCP 原型（当前受阻） | `--template local --components net` | Server 文件可生成；装配 API 不匹配导致编译失败 |
+| TCP 原型 | `--template local --components net` | Server/客户端辅助类可生成；显式运行本地 Server，业务安全接线仍需应用提供 |
 | 单 Redis | `--template runtime --components redis` | 仅诊断，不创建客户端，输出 `started=false` |
 | 中心—逻辑 RPC | `--template runtime --components kafka` | 自动补齐日志，未选数据库/发现 SDK 缺席 |
 | 分布式基础设施组合 | `--template runtime --components kafka,nacos,mongo,redis,postgresql` | 仅诊断所选配置，不连接真实服务 |

@@ -31,7 +31,10 @@ public final class ZeroPlatformProductionGate {
                     run(root, output, "platform-transaction", List.of(maven(), "-B", "-ntp", "-pl", "zero-codegen",
                             "-Dtest=ProjectScaffoldGeneratorTest,ScaffoldManifestContractTest,ScaffoldCliValidationTest", "test"), "BUILD SUCCESS"));
             case LOCAL_PRODUCTION_FOCUSED -> List.of(
-                    run(root, output, "network-focused", List.of(maven(), "-B", "-ntp", "-pl", "zero-net,zero-runtime-net,zero-server-starter-production", "-am",
+                    run(root, output, "production-dependencies", List.of(maven(), "-B", "-ntp", "-pl",
+                            "zero-net,zero-runtime-net,zero-server-starter-production,zero-gm,zero-gm-rest", "-am",
+                            "-DskipTests", "install"), "BUILD SUCCESS"),
+                    run(root, output, "network-focused", List.of(maven(), "-B", "-ntp", "-pl", "zero-net,zero-runtime-net",
                             "-Dtest=ProductionNetworkLifecycleFocusedTest,ProductionNetworkTelemetryObserverTest,ProductionNetworkProviderTest",
                             "-Dsurefire.failIfNoSpecifiedTests=true", "test"), "BUILD SUCCESS"),
                     run(root, output, "gm-focused", List.of(maven(), "-B", "-ntp", "-pl", "zero-gm,zero-gm-rest", "-am", "test"), "BUILD SUCCESS"),

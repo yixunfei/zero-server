@@ -110,6 +110,12 @@ class ProjectScaffoldGeneratorTest {
         assertTrue(pom.contains("<artifactId>zero-runtime-net</artifactId>"));
         assertTrue(config.contains("zero.net.host=127.0.0.1"));
         assertTrue(config.contains("zero.net.port=0"));
+        String assembly = Files.readString(output.resolve("src/main/java/group/zn/network/game/RuntimeAssembly.java"));
+        assertTrue(assembly.contains("NetworkAdmissionDecision.rejected("));
+        assertFalse(assembly.contains("NetworkRateLimiter.permitAll()"));
+        assertFalse(pom.contains("<artifactId>zero-server-starter</artifactId>"));
+        assertTrue(config.contains("zero.net.lifecycle.enabled=true"));
+        assertFalse(assembly.contains("NetworkRuntime.module()"));
 
         Path local = temporaryDirectory.resolve("local-no-network");
         new ProjectScaffoldGenerator(catalog.capabilityModel()).generate(new ProjectScaffoldRequest(
@@ -118,6 +124,18 @@ class ProjectScaffoldGeneratorTest {
         String localPom = Files.readString(local.resolve("pom.xml"));
         assertFalse(localPom.contains("<artifactId>zero-net</artifactId>"));
         assertFalse(localPom.contains("<artifactId>zero-runtime-net</artifactId>"));
+    }
+
+    @Test
+    void localTcpTemplateRetainsItsStarterDependency() throws IOException {
+        var catalog = ScaffoldCatalog.standard();
+        Path output = temporaryDirectory.resolve("local-tcp");
+        new ProjectScaffoldGenerator(catalog.capabilityModel()).generate(new ProjectScaffoldRequest(
+                "local-tcp", "group.zn.local.tcp", output, "0.1.0-SNAPSHOT", catalog.require("local"),
+                Path.of("../templates"), "", List.of("net"), false));
+        assertTrue(Files.readString(output.resolve("pom.xml")).contains("<artifactId>zero-server-starter</artifactId>"));
+        assertTrue(Files.readString(output.resolve("src/main/java/group/zn/local/tcp/LocalTcpApplicationServer.java"))
+                .contains("ZeroServerTcpApplication"));
     }
 
     @Test

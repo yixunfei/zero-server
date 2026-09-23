@@ -67,7 +67,6 @@ public final class ScaffoldComponents {
             }
             if (id.equals("net")) {
                 return java.util.stream.Stream.of(
-                        MavenCoordinate.zero("zero-server-starter"),
                         MavenCoordinate.zero("zero-runtime-net"));
             }
             return providers(id).stream().flatMap(provider -> provider.artifacts().stream());
@@ -157,7 +156,13 @@ public final class ScaffoldComponents {
         add(specs, "mongo", "mongo.MongoRuntime", StandardRuntimeCapabilityModel.PRODUCTION_MONGO_DATA);
         add(specs, "postgresql", "postgresql.PostgresqlRuntime", StandardRuntimeCapabilityModel.PRODUCTION_POSTGRESQL_DATA);
         add(specs, "custom-actor", "");
-        add(specs, "net", "net.NetworkRuntime", StandardRuntimeCapabilityModel.PRODUCTION_NETWORK_LIFECYCLE);
+        specs.put("net", new Spec(
+                List.of(StandardRuntimeCapabilityModel.PRODUCTION_NETWORK_LIFECYCLE),
+                "group.zn.zero.runtime.net.NetworkRuntime.module("
+                        + "(connection, frame) -> group.zn.zero.net.lifecycle.NetworkAdmissionDecision.rejected("
+                        + "group.zn.zero.net.error.NetErrorCode.HANDSHAKE_REJECTED, "
+                        + "group.zn.zero.net.lifecycle.ConnectionRejectionReason.HANDSHAKE_REJECTED), "
+                        + "null)"));
         return java.util.Collections.unmodifiableMap(specs);
     }
 

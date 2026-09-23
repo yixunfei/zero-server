@@ -96,6 +96,10 @@ public final class ProjectScaffoldGenerator {
         for (MavenCoordinate coordinate : selection.artifacts()) {
             dependencies.add(new ScaffoldDependency(coordinate, ""));
         }
+        // 只有 local TCP 示例入口使用聚合 Starter，runtime 网络组件保持独立依赖闭包。
+        if (template.id().equals("local") && selection.components().contains("net")) {
+            dependencies.add(new ScaffoldDependency(MavenCoordinate.zero("zero-server-starter"), ""));
+        }
         dependencies = dependencies.stream().distinct().sorted().toList();
         values.put("__FRAMEWORK_DEPENDENCIES_XML__", dependenciesXml(dependencies));
         values.put("__FRAMEWORK_COMPONENTS_JSON__", jsonLines(dependencies.stream()

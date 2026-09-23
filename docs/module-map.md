@@ -142,7 +142,7 @@ flowchart TB
 
 这些集成模块不能依赖 Starter 或无关的真实 Adapter。完整选择示例见[按需装配指南](guides/modular-composition-guide.zh-CN.md)。
 
-`ProductionAssembly.builder(profile, config)` 接受 standalone/external-test/production，`plan()` 在不创建资源的前提下返回实际 provider 图。脚手架在 `ScaffoldComponents` 选择现有集成，在 `ScaffoldConfiguration` 生成所选 Adapter 的开关及外部配置样例。示例 `examples/modular-composition/center-logic` 只依赖 bootstrap/RPC；TCP 示例的执行器由 bootstrap 管理、codegen 只存在于构建插件。网络监听与生产安全策略仍由应用显式接入，脚手架尚无 net 组件。入口和限制见[场景指南](quickstart.zh-CN.md)。
+`ProductionAssembly.builder(profile, config)` 接受 standalone/external-test/production，`plan()` 在不创建资源的前提下返回实际 provider 图。脚手架在 `ScaffoldComponents` 选择现有集成，在 `ScaffoldConfiguration` 生成所选 Adapter 的开关及外部配置样例。示例 `examples/modular-composition/center-logic` 只依赖 bootstrap/RPC；TCP 示例的执行器由 bootstrap 管理、codegen 只存在于构建插件。脚手架 `net` 选择网络生命周期 provider，默认拒绝握手并保留内置有界限流；`runtime + net` 仅依赖 `zero-net` / `zero-runtime-net` 及其闭包，`local + net` 的 TCP 示例额外依赖 `zero-server-starter`。网络监听与生产安全策略仍由应用显式接入。入口和限制见[场景指南](quickstart.zh-CN.md)。
 
 `zero-data/repository` 的 `RepositoryDefinition`、`RepositoryFactory`、`RepositorySource`、`RepositoryCatalog` 形成中立业务入口；工厂按需创建既有 envelope Repository。`examples/repository-composition` 演示同一余额业务切换四种来源，生命周期和执行域要求见 [Repository 指南](guides/repository-composition-guide.zh-CN.md)。`VerifyGeneratedCompositions.java` 检查生成消费者的 Maven 依赖、SDK 缺席与自定义实现选择。
 

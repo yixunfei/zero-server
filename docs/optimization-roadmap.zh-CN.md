@@ -8,7 +8,7 @@
 
 | 领域 | 可复用基础 | 仍需完成 |
 | --- | --- | --- |
-| 上手与装配 | Wrapper、统一入口、typed schema、ownership 升级/回滚；local TCP Server 与 Kafka 三模块示例 | net 生成装配编译修复、TCP 业务响应完善、双进程外部验收和治理 |
+| 上手与装配 | Wrapper、统一入口、typed schema、ownership 升级/回滚；local TCP Server 与 Kafka 三模块示例 | TCP 业务响应完善、双进程外部验收和治理 |
 | 入口安全 | `zero-security` 认证/重放/TLS 材料/可信来源契约，TCP 安全策略 | 真实证书加载和轮换、完整传输接入 |
 | Adapter 恢复 | 健康/恢复/预算 SPI、状态机、有界恢复编排与注入测试 | 各真实驱动的周期探测、恢复和故障证据 |
 | GM | DSL、授权门、REST 请求处理适配、审计/幂等/break-glass 端口和内存实现 | HTTP 监听与真实身份、Kafka 接线、持久审批/审计/幂等 |
@@ -22,7 +22,7 @@
 
 | 编号 | 下一步 | 验收条件 |
 | --- | --- | --- |
-| P0-1 运行入口 | 先修复生成器无参 `NetworkRuntime.module()` 与 policy/limiter API 不匹配，再验收已有 TCP Server；补齐响应协议、异常路径与安全策略接线 | 生成项目真实 TCP 请求进入 BO；端口冲突失败；退出释放端口与执行器；最小应用不带 Kafka/DB；三平台 CI 有实际运行证据 |
+| P0-1 运行入口 | 已修复脚手架网络装配的 policy/limiter API 不匹配；继续补齐响应协议、异常路径与安全策略接线 | 生成项目真实 TCP 请求进入 BO；端口冲突失败；退出释放端口与执行器；最小应用不带 Kafka/DB；三平台 CI 有实际运行证据 |
 | P0-6 中心—逻辑套件 | 已有共享契约、center、logic 三项目及验收脚本；完成真实 Kafka 双 JVM 验收和异常场景 | 两个真实进程完成请求/响应；实例注册/摘除、排空、超时、迟到响应、重复请求有可观察结果；业务接口可复用 |
 | P0-2 安全入口 | 将现有安全 SPI 接到真实 TLS 和 HTTP/RPC 边界 | 证书装载/轮换、拒绝明文、可信代理、认证失败、重放和请求限流均有测试；缺策略时 fail-closed |
 | P0-3 Adapter 恢复 | 先选一种真实 Adapter 接通健康→降级→恢复，再推广 | Kafka 重启/rebalance、Nacos 订阅恢复、数据库连接重建及未知写结果按各自语义验证；重试/in-flight/积压有上限 |

@@ -98,7 +98,8 @@ public final class VerifyGeneratedCompositions {
             Path diagnosis = OUTPUT.resolve(consumer.id() + "-diagnose.log");
             run(List.of(mavenCommand(), "-B", "-ntp", "-q", "-f", directory.resolve("pom.xml").toString(),
                     "exec:java", "-Dexec.args=--diagnose"), diagnosis);
-            String expected = external(consumer) ? "incomplete" : "ok";
+            String expected = Arrays.stream(consumer.components().split(",")).anyMatch(DRIVER_CLASSES::containsKey)
+                    ? "incomplete" : "ok";
             require(readOutput(diagnosis).contains("runtime-diagnosis=" + expected), "unexpected diagnosis marker");
         }
         require(result.contains(consumer.template().equals("local") ? "local-game=ok" : "runtime-composition=ok")
@@ -240,7 +241,7 @@ public final class VerifyGeneratedCompositions {
     }
 
     private static boolean external(final Consumer consumer) {
-        return Arrays.stream(consumer.components().split(",")).anyMatch(DRIVER_CLASSES::containsKey);
+        return Arrays.stream(consumer.components().split(",")).anyMatch(id -> id.equals("net") || DRIVER_CLASSES.containsKey(id));
     }
 
     private static void run(final List<String> command, final Path log) throws Exception {
