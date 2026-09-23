@@ -1,0 +1,130 @@
+# zeroServer Docker Compose baseline.
+# This is a deployment starting point, not a production-ready distribution.
+# The application image must be built and published by the consuming project.
+name: ${COMPOSE_PROJECT_NAME:-zero-server}
+
+services:
+  app:
+    image: ${ZERO_APP_IMAGE:?Set ZERO_APP_IMAGE to an image supplied by your project}
+    restart: unless-stopped
+    init: true
+    user: "${ZERO_APP_UID:-10001}:${ZERO_APP_GID:-10001}"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=${ZERO_TMPFS_SIZE:-64m}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      ZERO_ENV: ${ZERO_ENV:-compose}
+      ZERO_CONFIG_FILE: ${ZERO_CONFIG_FILE:-/run/secrets/zero-config}
+      ZERO_REDIS_URI: ${ZERO_REDIS_URI:-redis://redis:6379}
+      ZERO_POSTGRESQL_URL: ${ZERO_POSTGRESQL_URL:-jdbc:postgresql://postgres:5432/${POSTGRES_DB:-zero}}
+      ZERO_POSTGRES_USER: ${ZERO_POSTGRES_USER:-zero}
+      ZERO_POSTGRES_PASSWORD_FILE: ${ZERO_POSTGRES_PASSWORD_FILE:-/run/secrets/postgres-password}
+      ZERO_LOG_LEVEL: ${ZERO_LOG_LEVEL:-INFO}
+    ports:
+      - "${ZERO_BIND_ADDRESS:-127.0.0.1}:${ZERO_HTTP_PORT:-8080}:8080"
+      - "${ZERO_BIND_ADDRESS:-127.0.0.1}:${ZERO_GAME_PORT:-9000}:9000"
+    networks:
+      - zero-internal
+    secrets:
+      - zero-config
+      - postgres-password
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
+      postgres:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD-SHELL", "${ZERO_HEALTHCHECK_CMD:-wget -q -O - http://127.0.0.1:8080/health >/dev/null}"]
+      interval: ${ZERO_HEALTHCHECK_INTERVAL:-30s}
+      timeout: ${ZERO_HEALTHCHECK_TIMEOUT:-5s}
+      retries: ${ZERO_HEALTHCHECK_RETRIES:-3}
+      start_period: ${ZERO_HEALTHCHECK_START_PERIOD:-30s}
+    deploy:
+      resources:
+        limits:
+          cpus: "${ZERO_CPU_LIMIT:-2.0}"
+          memory: ${ZERO_MEMORY_LIMIT:-1g}
+        reservations:
+          cpus: "${ZERO_CPU_RESERVATION:-0.25}"
+          memory: ${ZERO_MEMORY_RESERVATION:-256m}
+
+  redis:
+    image: ${ZERO_REDIS_IMAGE:-redis:7.4-alpine}
+    profiles: [middleware]
+    restart: unless-stopped
+    read_only: true
+    user: "${ZERO_REDIS_UID:-999}:${ZERO_REDIS_GID:-999}"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    command: ["redis-server", "--appendonly", "yes", "--protected-mode", "yes"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - zero-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "${ZERO_REDIS_CPU_LIMIT:-1.0}"
+          memory: ${ZERO_REDIS_MEMORY_LIMIT:-512m}
+
+  postgres:
+    image: ${ZERO_POSTGRES_IMAGE:-postgres:16-alpine}
+    profiles: [middleware]
+    restart: unless-stopped
+    read_only: true
+    user: "${ZERO_POSTGRES_UID:-999}:${ZERO_POSTGRES_GID:-999}"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /run/postgresql:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-zero}
+      POSTGRES_USER: ${ZERO_POSTGRES_USER:-zero}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    secrets:
+      - postgres-password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - zero-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "${ZERO_POSTGRES_CPU_LIMIT:-2.0}"
+          memory: ${ZERO_POSTGRES_MEMORY_LIMIT:-1g}
+
+networks:
+  zero-internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  redis-data:
+  postgres-data:
+
+secrets:
+  zero-config:
+    file: ${ZERO_CONFIG_SECRET_FILE:-./secrets/zero-config}
+  postgres-password:
+    file: ${ZERO_POSTGRES_PASSWORD_FILE_HOST:-./secrets/postgres-password}

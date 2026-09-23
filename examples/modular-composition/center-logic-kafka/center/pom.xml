@@ -1,0 +1,18 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+ <modelVersion>4.0.0</modelVersion>
+ <parent><groupId>group.zn.zero.examples</groupId><artifactId>center-logic-kafka</artifactId><version>0.1.0-SNAPSHOT</version></parent>
+ <artifactId>center</artifactId>
+ <dependencies>
+  <dependency><groupId>group.zn.zero.examples</groupId><artifactId>common-contract</artifactId><version>${project.version}</version></dependency>
+  <dependency><groupId>group.zn.zero</groupId><artifactId>zero-rpc-kafka</artifactId></dependency>
+  <dependency><groupId>group.zn.zero</groupId><artifactId>zero-runtime-bootstrap</artifactId></dependency>
+  <dependency><groupId>group.zn.zero</groupId><artifactId>zero-runtime-rpc</artifactId></dependency>
+  <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.10.3</version><scope>test</scope></dependency>
+ </dependencies>
+    <build>
+        <plugins>
+            <plugin><groupId>org.codehaus.mojo</groupId><artifactId>exec-maven-plugin</artifactId><version>3.5.0</version><configuration><mainClass>group.zn.zero.examples.centerlogic.kafka.center.CenterMain</mainClass></configuration></plugin>
+        </plugins>
+    </build>
+
+</project>

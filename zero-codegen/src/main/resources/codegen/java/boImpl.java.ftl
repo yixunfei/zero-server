@@ -1,5 +1,5 @@
 /*
- * ${generatedMarker}. Do not edit manually.
+ * Created by zeroServer codegen. User-owned implementation; edit as needed.
  */
 package ${packageName};
 
@@ -9,7 +9,7 @@ import ${import};
 <#if imports?size gt 0>
 </#if>
 /**
- * 生成协议事件业务默认实现模板。
+ * 协议事件业务实现；仅首次生成，后续由业务开发者维护。
  */
 public class ${implName} implements ${boName} {
 <#list methods as method>

@@ -1,0 +1,33 @@
+services:
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "127.0.0.1:${ZERO_REPOSITORY_MONGO_PORT:-}:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  postgresql:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: zero_contract
+      POSTGRES_USER: zero_contract
+      POSTGRES_PASSWORD: zero_contract_local
+    ports:
+      - "127.0.0.1:${ZERO_REPOSITORY_POSTGRESQL_PORT:-}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zero_contract -d zero_contract"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  redis:
+    image: redis:7.2
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]
+    ports:
+      - "127.0.0.1:${ZERO_REPOSITORY_REDIS_PORT:-}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

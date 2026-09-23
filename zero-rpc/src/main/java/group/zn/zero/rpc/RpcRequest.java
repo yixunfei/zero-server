@@ -1,6 +1,7 @@
 package group.zn.zero.rpc;
 
 import java.time.Instant;
+import group.zn.zero.security.SecurityMetadataSnapshot;
 
 /**
  * RPC 请求。
@@ -15,6 +16,7 @@ import java.time.Instant;
  * @param topic 传输 topic；为空时由传输层按服务名生成。
  * @param group 传输消费组；为空时由传输层配置决定。
  * @param partitionKey 分区键；为空时由传输层按 correlationId 处理。
+ * @param securityMetadata 跨进程安全元数据快照；可为空表示本地或未认证调用。
  * @param payload 业务负载。
  * @author zn
  */
@@ -29,6 +31,7 @@ public record RpcRequest(
         String topic,
         String group,
         String partitionKey,
+        SecurityMetadataSnapshot securityMetadata,
         byte[] payload) {
 
     /**
@@ -53,14 +56,20 @@ public record RpcRequest(
             final Instant timeoutAt,
             final RpcMode mode,
             final byte[] payload) {
-        this(correlationId, replyTopic, serviceName, methodName, traceId, timeoutAt, mode, "", "", "", payload);
+        this(correlationId, replyTopic, serviceName, methodName, traceId, timeoutAt, mode, "", "", "", null, payload);
     }
 
-    /**
-     * 创建 RPC 请求。
-     *
-     * @throws NullPointerException 当标准字段为空时抛出。
-     */
+    /** Creates a request preserving the pre-metadata constructor shape. */
+    public RpcRequest(
+            final String correlationId, final String replyTopic, final String serviceName,
+            final String methodName, final String traceId, final Instant timeoutAt, final RpcMode mode,
+            final String topic, final String group, final String partitionKey, final byte[] payload) {
+        this(correlationId, replyTopic, serviceName, methodName, traceId, timeoutAt, mode,
+                topic, group, partitionKey, null, payload);
+    }
+
+
+    /** Validates and defensively copies request fields. */
     public RpcRequest {
         java.util.Objects.requireNonNull(correlationId, "correlationId");
         java.util.Objects.requireNonNull(replyTopic, "replyTopic");

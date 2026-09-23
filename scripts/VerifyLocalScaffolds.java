@@ -233,7 +233,7 @@ public final class VerifyLocalScaffolds {
         requireContains(manifestText, "\"protocolFile\": \"" + spec.protocolFile() + "\"", manifest);
         requireContains(manifestText, "\"summaryPrefix\": \"" + spec.summaryPrefix() + "\"", manifest);
         requireContains(manifestText, "\"prototype\": true", manifest);
-        requireContains(manifestText, "\"zero-codegen\"", manifest);
+        requireContains(manifestText, "\"zero-runtime-bootstrap\"", manifest);
         requireContains(manifestText, "\"BUSINESS_GUIDE.md\"", manifest);
         requireContains(manifestText, "\"COMPONENTS.md\"", manifest);
         requireContains(manifestText, "\"NEXT_STEPS.md\"", manifest);

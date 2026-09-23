@@ -59,5 +59,5 @@ Read `zero-scaffold.json` when a tool needs machine-readable scaffold metadata.
 - It serializes world and shard state through a local Actor lane.
 - It demonstrates enter world, move, shard transfer and entity query only.
 - It does not implement cross-process migration, reliable handoff, distributed locks, cross-server broadcast, AOI stitching or production consistency protocols.
-- It does not connect external middleware or open network ports.
+- The default selection does not connect external middleware or open network ports. Adding Redis requires an external service at startup.
 - It is not a production WorldShard / ScenePartition / migration API commitment.

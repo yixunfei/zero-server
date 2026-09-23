@@ -1,5 +1,8 @@
 # 协议 DSL 与代码生成设计
 
+
+2026-09-23 Java 生成分发新增 `dispatchFrame(ProtocolFrame)`：从自持有 payload 直接构建只读 reader，BO 仍接收原有 DTO/业务参数。已有数组 dispatch 同样使用只读 reader；两种入口均在调用 BO 前拒绝对象外尾随数据。自定义 `ProtocolCodec` 的 `decodeView` 默认委托数组解码。用原协议生成命令更新工具管理的源码；已有 BOImp 始终保留，内容相同的各语言产物不重写。见[性能迁移](migrations/20260923-performance-incremental.md)与[codegen 对接迁移](migrations/20260923-codegen-integration.md)。
+
 ## 1. 总体目标
 
 zeroServer 使用自定义协议 DSL 声明协议消息、协议方法和业务事件，并通过工具生成服务端与客户端代码。
@@ -258,3 +261,20 @@ zero-codegen/src/test/resources/protocol-dsl/sample/
 - CLI 与 Swing GUI 共用 `ProtocolCodegenRunner`，避免服务端、客户端和工具链入口出现重复生成逻辑。
 - `zero-codegen` Maven `package` 阶段会附加 `zero-codegen-<version>-all.jar`，可通过 `--gui` 启动图形工具，也可通过 `jpackage` 包装为平台可执行文件。
 - 面向客户端和活动策划的完整用户指南位于 `zero-codegen/docs/user-guide.zh-CN.md`。
+
+
+## 2026-09-17 报告核实修订
+
+Java 包名覆盖须为合法 Java 21 限定标识符，Java DTO 后缀须能组成合法标识符；非法路径输入在生成前拒绝，包目录解析后须位于配置输出根内。二进制数组和集合声明长度在分配前按剩余载荷检查；自定义集合元素读取器须至少消费 1 字节（空对象也需携带对象长度）。有效线格式不变。
+
+## 编码缓冲生命周期
+
+`GeneratedProtocolCodec` 与 `ZeroBinaryFrameCodec` 的同步编码复用内部临时堆缓冲。每个平台线程最多保留一个容量不超过 64 KiB 的 writer；超大缓冲丢弃，虚拟线程不缓存。借出期间缓存槽为空，嵌套编码使用独立 writer；成功或异常均归还/丢弃，返回 `byte[]` 仍是独立副本。
+
+实现 `ZeroPayloadCodec.write` 时只能在本次同步调用内使用 writer 及其 `buffer()`、切片和 ByteBuffer 借用视图，不得保留或交给异步任务。需要长期保存的内容必须复制。重置仅清空逻辑长度，不擦除底层字节；编码器必须完整写入所有输出字段，不得读取未写入区域。
+
+`ZeroBuffers.heap/direct/nativeMemory` 的调用方所有权不变，未引入对外通用池或 Netty 依赖。native 路径仍为显式选择，调用方需独占访问并关闭；源码使用可达性栅栏防止 Cleaner 在原始地址操作完成前回收 owner，并不支持并发 close。Java 21 的 FFM 是预览（JEP 442），正式 API 从 Java 22（JEP 454）开始；当前不启用预览，未来迁移需同时定义 Arena、切片、扩容与线程边界。
+
+### 2026-09-23 网络缓冲入口
+
+`ProtocolFrameCodec` 增加 `encodeTo/decodeFrom/encodedLength`；默认 Netty codec 直接连接协议 ZeroReader/ZeroWriter 与 ByteBuf，线格式与生成 DTO 不变。业务帧仍自持有数据，数组 getter 仍复制；只读视图和无复制长度用于安全消除中转。自定义 codec 的所有权及上界要求见[迁移说明](migrations/20260923-performance-plan.md)。直接 UTF-8 实验未达到吞吐要求，默认保留 JDK 字符编码。

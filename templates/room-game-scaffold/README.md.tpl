@@ -58,5 +58,5 @@ Read `zero-scaffold.json` when a tool needs machine-readable scaffold metadata.
 - This project is a local / prototype room scaffold.
 - It serializes room state through a local Actor lane.
 - It does not implement matchmaking, broadcast, disconnect recovery, spectators, frame sync or cross-server migration.
-- It does not connect external middleware or open network ports.
+- The default selection does not connect external middleware or open network ports. Adding Redis requires an external service at startup.
 - It is not a production room API commitment.

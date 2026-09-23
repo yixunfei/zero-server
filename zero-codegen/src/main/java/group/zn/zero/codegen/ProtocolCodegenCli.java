@@ -122,7 +122,7 @@ public final class ProtocolCodegenCli {
               --out <dir>          Java output directory. Default: target/generated-sources/zero-codegen
               --pkg <package>      Java package name. Default: group.zn.zero.generated
               --protoId <file>     protoId.txt path. Optional.
-              --genBoImpl <bool>   Generate XXXEventBOImp templates. Default: false
+              --genBoImpl <bool>   Create missing XXXEventBOImp templates; preserve existing files. Default: false
               --languages <list>   Target languages: java,csharp,typescript,gdscript. Default: java
               --genJava <bool>     Enable Java generation. Default follows --languages.
               --genCs <bool>       Enable C# generation. Default follows --languages.

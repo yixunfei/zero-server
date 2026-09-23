@@ -232,7 +232,7 @@ class CodegenProtocolNetSessionFlowTest {
         generated.dispatcherClass()
                 .getMethod("registerPlayerQueryPlayerEventBO", generated.boClass())
                 .invoke(dispatcher, bo);
-        Method dispatch = generated.dispatcherClass().getMethod("dispatch", int.class, byte[].class);
+        Method dispatch = generated.dispatcherClass().getMethod("dispatchFrame", ProtocolFrame.class);
 
         LogicSessionManager sessionManager = new LogicSessionManager();
         CountDownLatch closeLatch = new CountDownLatch(1);
@@ -304,7 +304,7 @@ class CodegenProtocolNetSessionFlowTest {
             final Object dispatcher,
             final ProtocolFrame frame) {
         try {
-            return (boolean) dispatch.invoke(dispatcher, frame.protocolId(), frame.payload());
+            return (boolean) dispatch.invoke(dispatcher, frame);
         } catch (ReflectiveOperationException ex) {
             throw new IllegalStateException("generated dispatcher failed", ex);
         }

@@ -54,6 +54,16 @@ public final class ZeroReader {
     }
 
     /**
+     * 借用稳定数组创建只读读取器，不复制内容，返回切片不能暴露可写存储。
+     * @param bytes 输入数组，不可为空；所有者必须保证读取/保留切片期间不修改数组。
+     * @return 新读取器，游标线程独占；需要长期快照时使用自持有 Frame 或先复制数组。
+     * @throws NullPointerException 数组为空。
+     */
+    public static ZeroReader readOnly(final byte[] bytes) {
+        return new ZeroReader(new ReadOnlyZeroBuffer(bytes));
+    }
+
+    /**
      * 创建读取器。
      *
      * @param bytes 字节数组；不可为空。
@@ -69,11 +79,15 @@ public final class ZeroReader {
     /**
      * 创建读取器。
      *
+     * 只读 ByteBuffer 借用 remaining 区间，不复制内容、不改变来源游标；调用方保证内容稳定。
+     * 可写输入沿用 ZeroBuffers.wrap 的规则：heap 复制、direct 借用。
+     * 读取器独占使用；只读输入返回的切片不暴露可写内存；ProtocolFrame 的自持有视图可跨异步保留。
      * @param byteBuffer ByteBuffer；不可为空。
      * @throws NullPointerException 当 ByteBuffer 为空时抛出。
      */
     public ZeroReader(final ByteBuffer byteBuffer) {
-        this(ZeroBuffers.wrap(byteBuffer));
+        this(Objects.requireNonNull(byteBuffer, "byteBuffer").isReadOnly()
+                ? new ReadOnlyZeroBuffer(byteBuffer) : ZeroBuffers.wrap(byteBuffer));
     }
 
     /**
@@ -465,6 +479,7 @@ public final class ZeroReader {
      */
     public boolean[] readBooleanArray() {
         int count = readSize();
+        requireElements(count, 1);
         boolean[] values = new boolean[count];
         for (int index = 0; index < count; index++) {
             values[index] = readBoolean();
@@ -482,6 +497,7 @@ public final class ZeroReader {
         if (count < 0) {
             return null;
         }
+        requireElements(count, 1);
         boolean[] values = new boolean[count];
         for (int index = 0; index < count; index++) {
             values[index] = readBoolean();
@@ -496,6 +512,7 @@ public final class ZeroReader {
      */
     public short[] readShortArray() {
         int count = readSize();
+        requireElements(count, 1);
         short[] values = new short[count];
         for (int index = 0; index < count; index++) {
             values[index] = readShort();
@@ -513,6 +530,7 @@ public final class ZeroReader {
         if (count < 0) {
             return null;
         }
+        requireElements(count, 1);
         short[] values = new short[count];
         for (int index = 0; index < count; index++) {
             values[index] = readShort();
@@ -527,6 +545,7 @@ public final class ZeroReader {
      */
     public int[] readIntArray() {
         int count = readSize();
+        requireElements(count, 1);
         int[] values = new int[count];
         for (int index = 0; index < count; index++) {
             values[index] = readInt();
@@ -544,6 +563,7 @@ public final class ZeroReader {
         if (count < 0) {
             return null;
         }
+        requireElements(count, 1);
         int[] values = new int[count];
         for (int index = 0; index < count; index++) {
             values[index] = readInt();
@@ -558,6 +578,7 @@ public final class ZeroReader {
      */
     public long[] readLongArray() {
         int count = readSize();
+        requireElements(count, 1);
         long[] values = new long[count];
         for (int index = 0; index < count; index++) {
             values[index] = readLong();
@@ -575,6 +596,7 @@ public final class ZeroReader {
         if (count < 0) {
             return null;
         }
+        requireElements(count, 1);
         long[] values = new long[count];
         for (int index = 0; index < count; index++) {
             values[index] = readLong();
@@ -589,6 +611,7 @@ public final class ZeroReader {
      */
     public float[] readFloatArray() {
         int count = readSize();
+        requireElements(count, 4);
         float[] values = new float[count];
         for (int index = 0; index < count; index++) {
             values[index] = readFloat();
@@ -606,6 +629,7 @@ public final class ZeroReader {
         if (count < 0) {
             return null;
         }
+        requireElements(count, 4);
         float[] values = new float[count];
         for (int index = 0; index < count; index++) {
             values[index] = readFloat();
@@ -620,6 +644,7 @@ public final class ZeroReader {
      */
     public double[] readDoubleArray() {
         int count = readSize();
+        requireElements(count, 8);
         double[] values = new double[count];
         for (int index = 0; index < count; index++) {
             values[index] = readDouble();
@@ -637,6 +662,7 @@ public final class ZeroReader {
         if (count < 0) {
             return null;
         }
+        requireElements(count, 8);
         double[] values = new double[count];
         for (int index = 0; index < count; index++) {
             values[index] = readDouble();
@@ -658,6 +684,7 @@ public final class ZeroReader {
         Objects.requireNonNull(elementType, "elementType");
         Objects.requireNonNull(elementReader, "elementReader");
         int count = readSize();
+        requireElements(count, 1);
         T[] values = (T[]) Array.newInstance(elementType, count);
         for (int index = 0; index < count; index++) {
             values[index] = elementReader.apply(this);
@@ -682,6 +709,7 @@ public final class ZeroReader {
         if (count < 0) {
             return null;
         }
+        requireElements(count, 1);
         T[] values = (T[]) Array.newInstance(elementType, count);
         for (int index = 0; index < count; index++) {
             values[index] = elementReader.apply(this);
@@ -753,6 +781,7 @@ public final class ZeroReader {
         Objects.requireNonNull(collectionFactory, "collectionFactory");
         Objects.requireNonNull(elementReader, "elementReader");
         int count = readSize();
+        requireElements(count, 1);
         C values = collectionFactory.apply(count);
         for (int index = 0; index < count; index++) {
             values.add(elementReader.apply(this));
@@ -779,6 +808,7 @@ public final class ZeroReader {
         if (count < 0) {
             return null;
         }
+        requireElements(count, 1);
         C values = collectionFactory.apply(count);
         for (int index = 0; index < count; index++) {
             values.add(elementReader.apply(this));
@@ -838,6 +868,7 @@ public final class ZeroReader {
         Objects.requireNonNull(keyReader, "keyReader");
         Objects.requireNonNull(valueReader, "valueReader");
         int count = readSize();
+        requireElements(count, 1);
         M values = mapFactory.apply(count);
         for (int index = 0; index < count; index++) {
             K key = keyReader.apply(this);
@@ -870,6 +901,7 @@ public final class ZeroReader {
         if (count < 0) {
             return null;
         }
+        requireElements(count, 1);
         M values = mapFactory.apply(count);
         for (int index = 0; index < count; index++) {
             K key = keyReader.apply(this);
@@ -886,8 +918,12 @@ public final class ZeroReader {
      */
     public boolean[] readPresenceBits() {
         int fieldCount = readSize();
+        if (fieldCount < 0) {
+            throw invalid("field count must not be negative");
+        }
+        int byteCount = fieldCount / Byte.SIZE + (fieldCount % Byte.SIZE == 0 ? 0 : 1);
+        requireReadable(byteCount);
         boolean[] values = new boolean[fieldCount];
-        int byteCount = (fieldCount + Byte.SIZE - 1) / Byte.SIZE;
         for (int byteIndex = 0; byteIndex < byteCount; byteIndex++) {
             int word = readByte() & 0xFF;
             int base = byteIndex * Byte.SIZE;
@@ -899,13 +935,22 @@ public final class ZeroReader {
         return values;
     }
 
+    /** 在集合分配前按每项最小线长度检查输入，除法比较避免乘法溢出。 */
+    private void requireElements(final int count, final int minimumBytes) {
+        if (count < 0 || count > (limit - readerIndex) / minimumBytes) {
+            throw invalid("element count exceeds readable payload");
+        }
+    }
+
     /**
      * 读取 size。
      *
      * @return size 值。
      */
     private int readSize() {
-        return readUnsignedInt();
+        int count = readUnsignedInt();
+        if (count < 0) throw invalid("size exceeds signed integer range");
+        return count;
     }
 
     /**
@@ -914,7 +959,7 @@ public final class ZeroReader {
      * @return size；-1 表示 null。
      */
     private int readNullableSize() {
-        int sizePlusOne = readUnsignedInt();
+        int sizePlusOne = readSize();
         if (sizePlusOne == 0) {
             return -1;
         }

@@ -5,7 +5,6 @@ import group.zn.zero.data.envelope.ZeroDataEnvelope;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeStore;
 import group.zn.zero.data.error.DataErrorCode;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -14,6 +13,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import javax.sql.DataSource;
+import org.postgresql.ds.PGSimpleDataSource;
 
 /**
  * PostgreSQL JDBC-backed 通用对象表信封存储。
@@ -33,9 +34,12 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
     private final String collection;
 
     /**
-     * driver 配置。
+     * Validated SQL table name.
      */
-    private final PostgresqlDriverSettings settings;
+    private final String tableName;
+
+    /** Caller-owned source; closing a borrowed connection returns it to its source. */
+    private final DataSource dataSource;
 
     /**
      * 创建 PostgreSQL JDBC-backed 信封存储。
@@ -49,9 +53,16 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
             final String namespace,
             final String collection,
             final PostgresqlDriverSettings settings) {
+        this(namespace, collection, Objects.requireNonNull(settings, "settings").tableName(), unpooled(settings));
+    }
+
+    /** Uses a caller-owned DataSource with auto-commit connections and a validated SQL table name. */
+    public PostgresqlDriverEnvelopeStore(
+            final String namespace, final String collection, final String tableName, final DataSource dataSource) {
         this.namespace = requireText(namespace, "namespace");
         this.collection = requireText(collection, "collection");
-        this.settings = Objects.requireNonNull(settings, "settings");
+        this.tableName = PostgresqlDriverSettings.requireIdentifier(tableName);
+        this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
         initializeSchema();
     }
 
@@ -64,7 +75,7 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
     @Override
     public Optional<ZeroDataEnvelope> findById(final String id) {
         String sql = "select namespace, collection, id, version, schema_version, codec_version, "
-                + "updated_at_epoch_millis, payload from " + settings.tableName()
+                + "updated_at_epoch_millis, payload from " + tableName
                 + " where namespace=? and collection=? and id=?";
         try (Connection connection = connection();
                 PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -90,7 +101,7 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
     @Override
     public List<ZeroDataEnvelope> findAll() {
         String sql = "select namespace, collection, id, version, schema_version, codec_version, "
-                + "updated_at_epoch_millis, payload from " + settings.tableName()
+                + "updated_at_epoch_millis, payload from " + tableName
                 + " where namespace=? and collection=? order by id";
         try (Connection connection = connection();
                 PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -116,7 +127,7 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
     @Override
     public void save(final ZeroDataEnvelope envelope) {
         PostgresqlDataRow row = PostgresqlDataRow.fromEnvelope(validateEnvelope(envelope));
-        String sql = "insert into " + settings.tableName()
+        String sql = "insert into " + tableName
                 + " (namespace, collection, id, version, schema_version, codec_version, "
                 + "updated_at_epoch_millis, payload) values (?, ?, ?, ?, ?, ?, ?, ?) "
                 + "on conflict (namespace, collection, id) do update set "
@@ -169,7 +180,7 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
      */
     @Override
     public void deleteById(final String id) {
-        String sql = "delete from " + settings.tableName()
+        String sql = "delete from " + tableName
                 + " where namespace=? and collection=? and id=?";
         try (Connection connection = connection();
                 PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -189,7 +200,7 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
      */
     @Override
     public long count() {
-        String sql = "select count(*) from " + settings.tableName()
+        String sql = "select count(*) from " + tableName
                 + " where namespace=? and collection=?";
         try (Connection connection = connection();
                 PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -205,7 +216,7 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
     }
 
     private void initializeSchema() {
-        String sql = "create table if not exists " + settings.tableName() + " ("
+        String sql = "create table if not exists " + tableName + " ("
                 + "namespace varchar(128) not null, "
                 + "collection varchar(128) not null, "
                 + "id varchar(512) not null, "
@@ -224,7 +235,7 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
     }
 
     private boolean insertIfAbsent(final PostgresqlDataRow row) throws SQLException {
-        String sql = "insert into " + settings.tableName()
+        String sql = "insert into " + tableName
                 + " (namespace, collection, id, version, schema_version, codec_version, "
                 + "updated_at_epoch_millis, payload) values (?, ?, ?, ?, ?, ?, ?, ?) "
                 + "on conflict (namespace, collection, id) do nothing";
@@ -236,7 +247,7 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
     }
 
     private boolean updateIfVersion(final PostgresqlDataRow row, final long expectedVersion) throws SQLException {
-        String sql = "update " + settings.tableName()
+        String sql = "update " + tableName
                 + " set version=?, schema_version=?, codec_version=?, "
                 + "updated_at_epoch_millis=?, payload=? "
                 + "where namespace=? and collection=? and id=? and version=?";
@@ -288,7 +299,24 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
     }
 
     private Connection connection() throws SQLException {
-        return DriverManager.getConnection(settings.jdbcUrl(), settings.username(), settings.password());
+        Connection connection = dataSource.getConnection();
+        try {
+            if (!connection.getAutoCommit()) {
+                throw new SQLException("repository DataSource must provide auto-commit connections");
+            }
+            return connection;
+        } catch (SQLException failure) {
+            try { connection.close(); } catch (SQLException cleanup) { failure.addSuppressed(cleanup); }
+            throw failure;
+        }
+    }
+
+    private static DataSource unpooled(final PostgresqlDriverSettings settings) {
+        var source = new PGSimpleDataSource();
+        source.setURL(settings.jdbcUrl());
+        source.setUser(settings.username());
+        source.setPassword(settings.password());
+        return source;
     }
 
     private String requireText(final String value, final String name) {

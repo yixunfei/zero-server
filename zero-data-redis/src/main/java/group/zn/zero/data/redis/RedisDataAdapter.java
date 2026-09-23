@@ -2,6 +2,7 @@ package group.zn.zero.data.redis;
 
 import group.zn.zero.data.adapter.AbstractRepositoryAdapter;
 import group.zn.zero.data.envelope.ZeroDataEntityCodec;
+import group.zn.zero.data.envelope.EnvelopeRepositoryFactory;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeCodec;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeCrudRepository;
 import group.zn.zero.data.mapping.ZeroDataObjectMetadata;
@@ -45,6 +46,13 @@ public final class RedisDataAdapter extends AbstractRepositoryAdapter {
     public RedisDataAdapter(final RedisDataKeyStrategy keyStrategy) {
         super("redis");
         this.keyStrategy = Objects.requireNonNull(keyStrategy, "keyStrategy");
+    }
+
+    /** Uses the caller's shared Redis client; repository data and cache remain separate contracts. */
+    public EnvelopeRepositoryFactory repositoryFactory(final RedisClient client) {
+        Objects.requireNonNull(client, "client");
+        return new EnvelopeRepositoryFactory(metadata -> new RedisDriverEnvelopeStore(
+                metadata.namespace(), metadata.collection(), client, keyStrategy, null));
     }
 
     /**

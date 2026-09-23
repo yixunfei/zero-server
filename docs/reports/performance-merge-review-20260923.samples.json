@@ -1,0 +1,77 @@
+{
+  "baselineHead": "d2a701aec49b46285c2e1e5c2b8e150bf5355dfd",
+  "scope": "Pre-merge review; historical performance samples are not remeasured by this verification",
+  "historicalSamplesSha256": "b41c79238c55b7b2f27a735255eea4f0956b9b53197e9b2e1242efbe6095705b",
+  "reviewArtifact": {
+    "path": "target\\performance-merge-review-20260923\\review.jar",
+    "sha256": "c3838116311e7ae5ee23b379f847a44df50af911f854706729097e1d59e1f068"
+  },
+  "changedMeasuredSources": {
+    "zero-benchmarks/src/main/java/group/zn/zero/benchmark/performance/TargetRateTcpLoad.java": {
+      "measured": "68a223ad47a3c8f856e6f403524267276511fd98f51923420809dbb65228978b",
+      "reviewed": "0d98ad6d5c762455e364342a9f733ddba1785354fbf56a7995c2fe6e93ce030a"
+    }
+  },
+  "regressionTestSha256": "41737268ff3062d1aee7d33f5024a264093be6c0160016af6af01589eb021cf1",
+  "changedMeasuredClasses": [
+    "group/zn/zero/benchmark/performance/TargetRateTcpLoad$Client.class",
+    "group/zn/zero/benchmark/performance/TargetRateTcpLoad$Pending.class",
+    "group/zn/zero/benchmark/performance/TargetRateTcpLoad.class"
+  ],
+  "unchangedMeasuredProductionClasses": 850,
+  "tests": {
+    "xmlReports": 209,
+    "uniquePassed": 782,
+    "failure": 0,
+    "error": 0,
+    "skipped": 0
+  },
+  "verificationLogs": {
+    "regression-before.log": "821a772abfbdd939c76881ea7384c3bcf3a51625e7395bc594bdb0029f57cfae",
+    "quality.log": "985e87ae776b589679c3d6a7adcfbb9aa98ebc6950d1d96d7ed7f674c05c2dcf",
+    "architecture.log": "4ee678df9a1aa1c6c394dd957ea0c031c24bc6f026a6211cba7e47d96a887ad9",
+    "api.log": "cddb8c59f818cfd570601260f63e59a8bf4f0e8e60a322eb87f7b69633c350c7"
+  },
+  "dtoSmoke": {
+    "result": {
+      "kind": "result",
+      "startedAtMillis": 1790160606490,
+      "finishedAtMillis": 1790160616504,
+      "planned": 20000,
+      "offered": 20000,
+      "completed": 20000,
+      "failed": 0,
+      "timeouts": 0,
+      "rejected": 0,
+      "pending": 0,
+      "unexpectedResponses": 0,
+      "reconnects": 1,
+      "seconds": 10.011151,
+      "sendingSeconds": 9.999515,
+      "completedPerSecond": 1997.772,
+      "p50ns": 75263,
+      "p95ns": 182271,
+      "p99ns": 385023,
+      "p999ns": 1196031,
+      "maxNs": 6937800
+    },
+    "completion": {
+      "serverExitCode": 0,
+      "finishedAt": "2026-09-23T18:50:19.5069220+08:00",
+      "clientExitCode": 0
+    },
+    "files": {
+      "client.jsonl": "958db6b77ed784a418d0510146b50427619152adbe5f85331aeb78ea7f1bd4f5",
+      "client.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "completed.json": "8d5d3d7cf9b82835c5c76d6a2d478095c4aa8f99c63aa05c56f3495e52af8a7f",
+      "effective-flags.txt": "00e9e2f913b011b38037e5e2d03e75ae8249bcd324bfabd9ba049e9584e116f3",
+      "gc.log": "41b1299b5a80d06c37b27257a317df58829e36b14fb569288d1fbaee9e8da7fc",
+      "metadata.json": "0cadd50e99350c44adc1c74baa2042c196b38c0546a46c6a5c10d31886f400fc",
+      "os-resources.jsonl": "fc48b66ecb6ad558134bd13509b1e4b5d309a496ba524a66bf23d1126143cbc2",
+      "port.txt": "5645d6ad8ebb340f42a29d932701f6ea9cd4031d524c3a46344f08bd29b3c8ee",
+      "server.jsonl": "5f75a37199e020709d10ac1d718a5a569dd75bc12e219a765c1a19be056662aa",
+      "server.stderr": "21a52d1e1611076f6869f99d04ee1d7193b3cf49560fc25dcf6a0427aad15089",
+      "stop": "a0b28cdf92e250a1a93294d91144a0f893d27197d56b39991cc421768794005f"
+    }
+  }
+}

@@ -19,14 +19,14 @@ class __TEST_CLASS__ {
         String summary = result.summaryLine();
 
         assertAll("local room scaffold result",
-                () -> assertEquals("local", result.mode()),
+                () -> assertEquals("__RUNTIME_PROFILE__", result.mode()),
                 () -> assertEquals("__PROJECT_NAME__", result.name()),
                 () -> assertEquals("room=room-1,owner=1001,players=2,ready=2,started=true,frame=1,inputSum=42",
                         result.roomSummary()),
                 () -> assertEquals(7, result.logCount()),
                 () -> assertEquals(6, result.metricCount()),
                 () -> assertEquals(91109, result.maxProtocolId()),
-                () -> assertTrue(summary.startsWith("room-game=ok|mode=local|name=__PROJECT_NAME__")),
+                () -> assertTrue(summary.startsWith("room-game=ok|mode=__RUNTIME_PROFILE__|name=__PROJECT_NAME__")),
                 () -> assertTrue(summary.endsWith("|maxProtocolId=91109")));
     }
 }

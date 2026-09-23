@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import group.zn.zero.cache.InMemoryCacheService;
+import group.zn.zero.codegen.dsl.ProtocolDslDocument;
 import group.zn.zero.codegen.ProtocolCodegenOptions;
 import group.zn.zero.codegen.ProtocolCodegenRunner;
-import group.zn.zero.codegen.dsl.ProtocolDslDocument;
 import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.data.repository.InMemoryCrudRepository;
 import group.zn.zero.log.InMemoryLogSink;
@@ -27,7 +27,12 @@ import group.zn.zero.player.PlayerLoginRequest;
 import group.zn.zero.player.PlayerLoginResult;
 import group.zn.zero.player.PlayerProfile;
 import group.zn.zero.protocol.buffer.ZeroWriter;
+import group.zn.zero.runtime.actor.ActorRuntime;
 import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
+import group.zn.zero.runtime.log.LogRuntime;
+import group.zn.zero.runtime.monitor.MonitorRuntimeComponent;
 import group.zn.zero.scene.LocalSceneService;
 import group.zn.zero.scene.SceneEnterRequest;
 import group.zn.zero.scene.SceneLeaveRequest;
@@ -45,12 +50,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import java.util.stream.Stream;
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
@@ -59,8 +64,8 @@ import javax.tools.JavaFileObject;
 import javax.tools.StandardJavaFileManager;
 import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.Test;
 
 /**
  * 阶段 3 generated BO 到业务模块的完整闭环测试。
@@ -133,7 +138,7 @@ class Stage3GeneratedBoFullLoopIT {
                             ZeroRuntimeConfigKeys.ZERO_NAME, "stage3-generated-bo-full-loop")),
                     logSink,
                     ZeroRuntimeExecutors.localPrototype("zero-stage3-full-loop", 2))
-                    .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime)
+                    .replace(MonitorRuntimeComponent.MONITOR_RUNTIME, monitorRuntime)
                     .build();
             ZeroServerApplication application = new ZeroServerApplication(components);
             InMemoryCrudRepository<Long, PlayerProfile> playerRepository = new InMemoryCrudRepository<>();
@@ -142,13 +147,13 @@ class Stage3GeneratedBoFullLoopIT {
 
             application.start();
             try (LocalPlayerService playerService = new LocalPlayerService(
-                    components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER),
+                    components.require(ActorRuntime.ACTOR_SCHEDULER),
                     request -> 1001L,
                     playerRepository,
                     playerCache);
                     LocalSceneService sceneService = new LocalSceneService(
-                            components.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER))) {
-                registerMetrics(components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME));
+                            components.require(ActorRuntime.ACTOR_SCHEDULER))) {
+                registerMetrics(components.require(MonitorRuntimeComponent.MONITOR_RUNTIME));
                 Object dispatcher = registerGeneratedBos(generated, components, playerService, sceneService, results);
                 dispatchScenario(generated, dispatcher);
                 assertFullLoop(
@@ -159,7 +164,7 @@ class Stage3GeneratedBoFullLoopIT {
                         playerCache,
                         sceneService,
                         logSink,
-                        components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME));
+                        components.require(MonitorRuntimeComponent.MONITOR_RUNTIME));
             } finally {
                 application.stop();
             }
@@ -545,7 +550,7 @@ class Stage3GeneratedBoFullLoopIT {
             final String traceId,
             final String message,
             final String operation) {
-        components.require(LocalRuntimeCapabilities.LOG_APPENDER).append(ZeroLogRecord.create(
+        components.require(LogRuntime.LOG_APPENDER).append(ZeroLogRecord.create(
                 Instant.now(),
                 LogLevel.INFO,
                 LogType.BUSINESS,
@@ -560,7 +565,7 @@ class Stage3GeneratedBoFullLoopIT {
             final GameRuntime components,
             final String metricName,
             final String operation) {
-        components.require(LocalRuntimeCapabilities.MONITOR_RUNTIME).registry().record(new MetricSample(
+        components.require(MonitorRuntimeComponent.MONITOR_RUNTIME).registry().record(new MetricSample(
                 metricName,
                 1.0D,
                 Map.of("operation", operation),

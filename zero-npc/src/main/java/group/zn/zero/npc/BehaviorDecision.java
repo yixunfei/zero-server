@@ -1,0 +1,1 @@
+package group.zn.zero.npc; import java.util.Objects; public record BehaviorDecision(BehaviorState nextState,String reason){public BehaviorDecision{Objects.requireNonNull(nextState);Objects.requireNonNull(reason);}}

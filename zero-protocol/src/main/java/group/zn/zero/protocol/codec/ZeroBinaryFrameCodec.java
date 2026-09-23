@@ -83,20 +83,13 @@ public final class ZeroBinaryFrameCodec implements ProtocolFrameCodec {
     @Override
     public byte[] encode(final ProtocolFrame frame) {
         Objects.requireNonNull(frame, "frame");
-        byte[] extension = frame.extension();
-        byte[] payload = frame.payload();
-        validateLength(extension.length, maxExtensionLength, "extension");
-        validateLength(payload.length, maxPayloadLength, "payload");
-
-        ZeroWriter writer = new ZeroWriter(MAGIC.length + extension.length + payload.length + 16);
-        writer.writeBytes(MAGIC);
-        writer.writeUnsignedInt(FRAME_VERSION);
-        writer.writeUnsignedInt(frame.protocolVersion());
-        writer.writeUnsignedInt(frame.flags());
-        writer.writeUnsignedInt(frame.protocolId());
-        writer.writeByteArray(extension);
-        writer.writeByteArray(payload);
-        return writer.toByteArray();
+        ZeroWriter writer = EncodingWriters.acquire(encodedLength(frame));
+        try {
+            encodeTo(frame, writer);
+            return writer.toByteArray();
+        } finally {
+            EncodingWriters.release(writer);
+        }
     }
 
     /**
@@ -109,24 +102,24 @@ public final class ZeroBinaryFrameCodec implements ProtocolFrameCodec {
     @Override
     public ProtocolFrame decode(final byte[] bytes) {
         Objects.requireNonNull(bytes, "bytes");
+        return decodeFrom(new ZeroReader(bytes));
+    }
+
+    /**
+     * 直接读取帧边界，数组在长度检查后分配，返回帧自持有副本。
+     * @param reader 独占读取器，不可为空；修改其读取位置。
+     * @return 不可变帧，线程安全。
+     * @throws ZeroException 格式或长度无效。
+     */
+    @Override public ProtocolFrame decodeFrom(final ZeroReader reader) {
+        Objects.requireNonNull(reader, "reader");
         try {
-            ZeroReader reader = new ZeroReader(bytes);
-            for (byte magicByte : MAGIC) {
-                if (reader.readByte() != magicByte) {
-                    throw invalid("invalid frame magic");
-                }
-            }
-            int frameVersion = reader.readUnsignedInt();
-            if (frameVersion != FRAME_VERSION) {
-                throw invalid("unsupported frame version: " + frameVersion);
-            }
+            readHeader(reader);
             int protocolVersion = reader.readUnsignedInt();
             int flags = reader.readUnsignedInt();
             int protocolId = reader.readUnsignedInt();
-            byte[] extension = reader.readByteArray();
-            byte[] payload = reader.readByteArray();
-            validateLength(extension.length, maxExtensionLength, "extension");
-            validateLength(payload.length, maxPayloadLength, "payload");
+            byte[] extension = readBounded(reader, maxExtensionLength, "extension");
+            byte[] payload = readBounded(reader, maxPayloadLength, "payload");
             if (!reader.isReadable()) {
                 return new ProtocolFrame(protocolId, protocolVersion, flags, extension, payload);
             }
@@ -141,8 +134,56 @@ public final class ZeroBinaryFrameCodec implements ProtocolFrameCodec {
         }
     }
 
+    private void readHeader(final ZeroReader reader) {
+        for (byte magicByte : MAGIC) {
+            if (reader.readByte() != magicByte) throw invalid("invalid frame magic");
+        }
+        int version = reader.readUnsignedInt();
+        if (version != FRAME_VERSION) throw invalid("unsupported frame version: " + version);
+    }
+
+    /**
+     * 直接写入目标缓冲，保持线格式；不暴露帧内部数组，线程安全但 writer 须独占。
+     * @param frame 不可变帧。
+     * @param writer 目标，修改写位置，不持有或关闭。
+     * @throws ZeroException 长度无效。
+     */
+    @Override public void encodeTo(final ProtocolFrame frame, final ZeroWriter writer) {
+        encodedLength(frame);
+        writer.writeBytes(MAGIC);
+        writer.writeUnsignedInt(FRAME_VERSION);
+        writer.writeUnsignedInt(frame.protocolVersion());
+        writer.writeUnsignedInt(frame.flags());
+        writer.writeUnsignedInt(frame.protocolId());
+        writer.writeUnsignedInt(frame.extensionLength());
+        if (frame.extensionLength() > 0) writer.writeBytes(frame.extensionView());
+        writer.writeUnsignedInt(frame.payloadLength());
+        if (frame.payloadLength() > 0) writer.writeBytes(frame.payloadView());
+    }
+
+    /** @param frame 不可变帧。 @return 精确字节数；只读、线程安全。 @throws ZeroException 超限。 */
+    @Override public int encodedLength(final ProtocolFrame frame) {
+        validateLength(frame.extensionLength(), maxExtensionLength, "extension");
+        validateLength(frame.payloadLength(), maxPayloadLength, "payload");
+        long length = 5L + varintLength(frame.protocolVersion()) + varintLength(frame.flags())
+                + varintLength(frame.protocolId()) + varintLength(frame.extensionLength()) + frame.extensionLength()
+                + varintLength(frame.payloadLength()) + frame.payloadLength();
+        if (length > Integer.MAX_VALUE) throw invalid("frame length overflows");
+        return (int) length;
+    }
+
+    private static int varintLength(final int value) {
+        return value == 0 ? 1 : (32 - Integer.numberOfLeadingZeros(value) + 6) / 7;
+    }
+
+    private byte[] readBounded(final ZeroReader reader, final int maximum, final String name) {
+        int length = reader.readUnsignedInt();
+        validateLength(length, maximum, name);
+        return reader.readBytes(length);
+    }
+
     private void validateLength(final int length, final int maxLength, final String name) {
-        if (length > maxLength) {
+        if (length < 0 || length > maxLength) {
             throw ZeroException.of(
                     ProtocolErrorCode.INVALID_FRAME,
                     name + " length exceeds limit: " + length,
@@ -166,6 +207,6 @@ public final class ZeroBinaryFrameCodec implements ProtocolFrameCodec {
      */
     public boolean hasExtensionHeader(final ProtocolFrame frame) {
         Objects.requireNonNull(frame, "frame");
-        return frame.extension().length > 0 || ProtocolFeature.EXTENSION_HEADER.enabledIn(frame.flags());
+        return frame.extensionLength() > 0 || ProtocolFeature.EXTENSION_HEADER.enabledIn(frame.flags());
     }
 }

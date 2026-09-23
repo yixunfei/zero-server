@@ -31,10 +31,14 @@ public final class StandardRuntimeCapabilityModel {
     public static final String CACHE_SERVICE = "zero.cache.service";
     public static final String MONITOR_RUNTIME = "zero.monitor.runtime";
     public static final String DATA_SERVICES = "zero.data.services";
+    public static final String REPOSITORY_SOURCES = "zero.data.repository-sources";
+    public static final String REPOSITORIES = "zero.data.repositories";
     public static final String REDIS_RESOURCE = "zero.data.redis-resource";
     public static final String SERVICE_DISCOVERY = "zero.discovery.service";
     public static final String RPC_SERVICE_RESOLVER = "zero.rpc.service-resolver";
     public static final String NETWORK_LIFECYCLE = "zero.net.connection-lifecycle";
+    /** 可选网络 IO 组；中立能力词汇不引用 Netty 类型。 */
+    public static final String NETWORK_IO = "zero.net.io-resources";
     public static final String INFRASTRUCTURE_LIFECYCLES = "zero.lifecycle.infrastructure";
     public static final String APPLICATION_LIFECYCLES = "zero.lifecycle.application";
 
@@ -48,8 +52,11 @@ public final class StandardRuntimeCapabilityModel {
     public static final ComponentId LOCAL_PROTOCOL = ComponentId.of("zero.local.protocol");
     public static final ComponentId LOCAL_RPC = ComponentId.of("zero.local.rpc");
     public static final ComponentId LOCAL_PERSISTENCE = ComponentId.of("zero.local.persistence");
+    public static final ComponentId LOCAL_REPOSITORIES = ComponentId.of("zero.local.repositories");
     public static final ComponentId LOCAL_CACHE = ComponentId.of("zero.local.cache");
     public static final ComponentId LOCAL_MONITOR = ComponentId.of("zero.local.monitor");
+    /** 显式选择的 IO 资源 provider，不加入默认最小装配。 */
+    public static final ComponentId NETWORK_IO_PROVIDER = ComponentId.of("zero.net.io-provider");
     public static final ComponentId PRODUCTION_KAFKA_RPC = ComponentId.of("zero.production.kafka-rpc");
     public static final ComponentId PRODUCTION_MONGO_DATA = ComponentId.of("zero.production.mongo-data");
     public static final ComponentId PRODUCTION_NACOS_DISCOVERY =
@@ -98,7 +105,7 @@ public final class StandardRuntimeCapabilityModel {
 
     private static void addCapabilities(final RuntimeCapabilityModel.Builder model) {
         add(model, CONFIG, List.of(), "zero-core");
-        add(model, EXECUTORS, List.of(), "zero-server-starter");
+        add(model, EXECUTORS, List.of(), "zero-runtime-bootstrap");
         add(model, TERMINAL_LOG_SINK, List.of(), "zero-log");
         add(model, LOG_APPENDER, List.of(CONFIG, TERMINAL_LOG_SINK), "zero-log");
         add(model, DEAD_LETTER_SINK, List.of(), "zero-event");
@@ -110,9 +117,12 @@ public final class StandardRuntimeCapabilityModel {
         add(model, PERSISTENCE_MANAGER, List.of(), "zero-data");
         add(model, CACHE_SERVICE, List.of(), "zero-cache");
         add(model, MONITOR_RUNTIME, List.of(), "zero-monitor");
+        add(model, NETWORK_IO, List.of(), "zero-net");
         addMultiple(model, DATA_SERVICES, List.of(), "zero-data", EXTERNAL_PROFILES);
+        addMultiple(model, REPOSITORY_SOURCES, List.of(), "zero-data");
+        add(model, REPOSITORIES, List.of(REPOSITORY_SOURCES), "zero-data");
         addExternal(model, REDIS_RESOURCE, List.of(), "zero-data-redis");
-        addExternal(model, SERVICE_DISCOVERY, List.of(), "zero-discovery-nacos");
+        add(model, SERVICE_DISCOVERY, List.of(), "zero-discovery");
         addExternal(model, RPC_SERVICE_RESOLVER, List.of(), "zero-rpc");
         addExternal(model, NETWORK_LIFECYCLE, List.of(
                 CONFIG,
@@ -137,8 +147,9 @@ public final class StandardRuntimeCapabilityModel {
                 List.of(RPC_HANDLER_REGISTRY, RPC_TRANSPORT),
                 List.of(),
                 STANDARD_PROFILES,
-                List.of()));
+                List.of(MavenCoordinate.zero("zero-runtime-rpc"))));
         provider(model, LOCAL_PERSISTENCE, PERSISTENCE_MANAGER);
+        provider(model, LOCAL_REPOSITORIES, REPOSITORY_SOURCES);
         provider(model, LOCAL_CACHE, CACHE_SERVICE);
         provider(model, LOCAL_MONITOR, MONITOR_RUNTIME);
     }
@@ -149,55 +160,55 @@ public final class StandardRuntimeCapabilityModel {
                 List.of(RPC_HANDLER_REGISTRY, RPC_TRANSPORT),
                 List.of(LOG_APPENDER),
                 EXTERNAL_PROFILES,
-                List.of(MavenCoordinate.zero("zero-rpc-kafka"))));
+                List.of(MavenCoordinate.zero("zero-runtime-kafka"))));
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_MONGO_DATA,
-                List.of(DATA_SERVICES),
+                List.of(DATA_SERVICES, REPOSITORY_SOURCES),
                 List.of(),
                 EXTERNAL_PROFILES,
-                List.of(MavenCoordinate.zero("zero-data-mongo"))));
+                List.of(MavenCoordinate.zero("zero-runtime-mongo"))));
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_NACOS_DISCOVERY,
                 List.of(SERVICE_DISCOVERY),
                 List.of(),
                 EXTERNAL_PROFILES,
-                List.of(MavenCoordinate.zero("zero-discovery-nacos"))));
+                List.of(MavenCoordinate.zero("zero-runtime-nacos"))));
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_NACOS_RPC_RESOLVER,
                 List.of(RPC_SERVICE_RESOLVER),
                 List.of(SERVICE_DISCOVERY),
                 EXTERNAL_PROFILES,
-                List.of(MavenCoordinate.zero("zero-discovery-nacos"))));
+                List.of(MavenCoordinate.zero("zero-runtime-nacos"))));
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_NETWORK_LIFECYCLE,
                 List.of(NETWORK_LIFECYCLE),
                 List.of(),
                 EXTERNAL_PROFILES,
-                List.of(MavenCoordinate.zero("zero-net"))));
+                List.of(MavenCoordinate.zero("zero-runtime-net"))));
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_POSTGRESQL_DATA,
-                List.of(DATA_SERVICES),
+                List.of(DATA_SERVICES, REPOSITORY_SOURCES),
                 List.of(),
                 EXTERNAL_PROFILES,
-                List.of(MavenCoordinate.zero("zero-data-postgresql"))));
+                List.of(MavenCoordinate.zero("zero-runtime-postgresql"))));
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_REDIS_RESOURCE,
                 List.of(REDIS_RESOURCE),
                 List.of(),
                 EXTERNAL_PROFILES,
-                List.of(MavenCoordinate.zero("zero-data-redis"))));
+                List.of(MavenCoordinate.zero("zero-runtime-redis"))));
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_REDIS_DATA,
-                List.of(DATA_SERVICES),
+                List.of(DATA_SERVICES, REPOSITORY_SOURCES),
                 List.of(REDIS_RESOURCE),
                 EXTERNAL_PROFILES,
-                List.of(MavenCoordinate.zero("zero-data-redis"))));
+                List.of(MavenCoordinate.zero("zero-runtime-redis"))));
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_REDIS_CACHE,
                 List.of(CACHE_SERVICE),
                 List.of(REDIS_RESOURCE),
                 EXTERNAL_PROFILES,
-                List.of(MavenCoordinate.zero("zero-data-redis"))));
+                List.of(MavenCoordinate.zero("zero-runtime-redis"))));
     }
 
     private static void add(
@@ -252,7 +263,19 @@ public final class StandardRuntimeCapabilityModel {
             final RuntimeCapabilityModel.Builder model,
             final ComponentId providerId,
             final String capabilityId) {
+        String integration = switch (capabilityId) {
+            case CONFIG, EXECUTORS -> "bootstrap";
+            case TERMINAL_LOG_SINK, LOG_APPENDER -> "log";
+            case DEAD_LETTER_SINK, EVENT_BUS -> "event";
+            case ACTOR_SCHEDULER -> "actor";
+            case PROTOCOL_REGISTRY -> "protocol";
+            case PERSISTENCE_MANAGER, REPOSITORY_SOURCES -> "data";
+            case CACHE_SERVICE -> "cache";
+            case MONITOR_RUNTIME -> "monitor";
+            default -> throw new IllegalArgumentException("unknown local integration capability");
+        };
         model.provider(new RuntimeProviderCapability(
-                providerId, List.of(capabilityId), List.of(), STANDARD_PROFILES, List.of()));
+                providerId, List.of(capabilityId), List.of(), STANDARD_PROFILES,
+                List.of(MavenCoordinate.zero("zero-runtime-" + integration))));
     }
 }

@@ -119,7 +119,7 @@ public record PostgresqlDriverSettings(String jdbcUrl, String username, String p
         return current;
     }
 
-    private static String requireIdentifier(final String value) {
+    static String requireIdentifier(final String value) {
         String current = requireText(value, "tableName");
         if (!current.matches("[A-Za-z_][A-Za-z0-9_]*")) {
             throw new IllegalArgumentException("tableName must be a safe SQL identifier");

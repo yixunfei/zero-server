@@ -22,6 +22,22 @@ public enum ConnectionRejectionReason {
     AUTHENTICATION_TIMEOUT,
     /** 鉴权被拒绝。 */
     AUTHENTICATION_REJECTED,
+    /** 未认证请求。 */
+    UNAUTHENTICATED,
+    /** 认证已过期。 */
+    AUTHENTICATION_EXPIRED,
+    /** 请求重放。 */
+    REPLAY_DETECTED,
+    /** TLS 必需但未使用。 */
+    TLS_REQUIRED,
+    /** TLS 握手失败。 */
+    TLS_HANDSHAKE_FAILED,
+    /** 授权被拒绝。 */
+    AUTHORIZATION_DENIED,
+    /** 来源命中黑名单。 */
+    BLACKLISTED,
+    /** 连接过慢。 */
+    SLOW_CONNECTION,
     /** 心跳超时。 */
     HEARTBEAT_TIMEOUT,
     /** 单连接入站预算耗尽。 */

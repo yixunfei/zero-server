@@ -4,22 +4,22 @@ import __PACKAGE__.generated.bo.FrameSyncAdvanceFrameEventBO;
 import __PACKAGE__.generated.bo.FrameSyncJoinMatchEventBO;
 import __PACKAGE__.generated.bo.FrameSyncQuerySnapshotEventBO;
 import __PACKAGE__.generated.bo.FrameSyncSubmitInputEventBO;
-import __PACKAGE__.generated.dto.FrameSyncAdvanceFrameProtocolDTO;
-import __PACKAGE__.generated.dto.FrameSyncJoinMatchProtocolDTO;
-import __PACKAGE__.generated.dto.FrameSyncQuerySnapshotProtocolDTO;
-import __PACKAGE__.generated.dto.FrameSyncSubmitInputProtocolDTO;
 import __PACKAGE__.generated.dto.codec.FrameSyncAdvanceFrameProtocolDTOCodec;
 import __PACKAGE__.generated.dto.codec.FrameSyncJoinMatchProtocolDTOCodec;
 import __PACKAGE__.generated.dto.codec.FrameSyncQuerySnapshotProtocolDTOCodec;
 import __PACKAGE__.generated.dto.codec.FrameSyncSubmitInputProtocolDTOCodec;
-import __PACKAGE__.generated.protocol.ProtocolIds;
+import __PACKAGE__.generated.dto.FrameSyncAdvanceFrameProtocolDTO;
+import __PACKAGE__.generated.dto.FrameSyncJoinMatchProtocolDTO;
+import __PACKAGE__.generated.dto.FrameSyncQuerySnapshotProtocolDTO;
+import __PACKAGE__.generated.dto.FrameSyncSubmitInputProtocolDTO;
 import __PACKAGE__.generated.protocol.dispatch.GeneratedProtocolDispatcher;
+import __PACKAGE__.generated.protocol.ProtocolIds;
 import group.zn.zero.actor.ActorMessage;
-import group.zn.zero.actor.LaneKey;
 import group.zn.zero.actor.handler.ActorHandler;
+import group.zn.zero.actor.LaneKey;
 import group.zn.zero.actor.scheduler.ActorScheduler;
 import group.zn.zero.actor.scheduler.ActorSubscription;
-import group.zn.zero.core.config.MapZeroConfig;
+import group.zn.zero.core.config.ZeroConfigLoader;
 import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.log.LogAppender;
 import group.zn.zero.log.LogLevel;
@@ -33,13 +33,14 @@ import group.zn.zero.monitor.MetricSample;
 import group.zn.zero.monitor.MonitorRuntime;
 import group.zn.zero.protocol.buffer.ZeroWriter;
 import group.zn.zero.protocol.codec.ZeroPayloadCodec;
+import group.zn.zero.runtime.actor.ActorRuntime;
 import group.zn.zero.runtime.api.GameRuntime;
-import group.zn.zero.starter.LocalRuntime;
-import group.zn.zero.starter.LocalRuntimeCapabilities;
-import group.zn.zero.starter.ZeroRuntimeConfigKeys;
-import group.zn.zero.starter.ZeroRuntimeExecutors;
-import group.zn.zero.starter.ZeroServerApplication;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
+import group.zn.zero.runtime.bootstrap.RuntimeBasics;
+import group.zn.zero.runtime.log.LogRuntime;
+import group.zn.zero.runtime.monitor.MonitorRuntimeComponent;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -47,7 +48,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Local frame sync scaffold application.
@@ -68,7 +68,7 @@ public final class __APP_CLASS__ {
     /**
      * Stable local log source.
      */
-    private static final LogSource LOG_SOURCE = new LogSource(APP_NAME, "local", APP_NAME);
+    private static final LogSource LOG_SOURCE = new LogSource(APP_NAME, "__RUNTIME_PROFILE__", APP_NAME);
 
     /**
      * Frame command metric.
@@ -94,20 +94,20 @@ public final class __APP_CLASS__ {
      */
     public static DemoResult runDemo() {
         InMemoryLogSink terminalLogSink = new InMemoryLogSink();
-        MonitorRuntime monitorRuntime = MonitorRuntime.createDefault();
-        GameRuntime runtime = LocalRuntime.builder(
-                new MapZeroConfig(Map.of(
-                        ZeroRuntimeConfigKeys.ZERO_MODE, ZeroRuntimeConfigKeys.MODE_LOCAL,
+        GameRuntime runtime = RuntimeAssembly.create(
+                ZeroConfigLoader.loadStandard(Map.of(
+                        __CONFIG_DEFAULTS__,
                         ZeroRuntimeConfigKeys.ZERO_NAME, APP_NAME)),
-                terminalLogSink,
-                ZeroRuntimeExecutors.localPrototype(APP_NAME, 2))
-                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime)
-                .build();
-        ZeroServerApplication application = new ZeroServerApplication(runtime);
+                terminalLogSink);
+        MonitorRuntime monitorRuntime = runtime.require(MonitorRuntimeComponent.MONITOR_RUNTIME);
 
-        application.start();
+        runtime.start();
+        runtime.require(LogRuntime.LOG_APPENDER).append(ZeroLogRecord.create(
+                Instant.now(), LogLevel.INFO, LogType.RUNTIME, LOG_SOURCE,
+                new LogOperation("runtime-start", LogResult.SUCCESS, null),
+                "bootstrap", "zeroServer started", Map.of("name", APP_NAME)));
         try (FrameSyncActor frameActor = new FrameSyncActor(
-                runtime, runtime.require(LocalRuntimeCapabilities.LOG_APPENDER), monitorRuntime)) {
+                runtime, runtime.require(LogRuntime.LOG_APPENDER), monitorRuntime)) {
             registerMetrics(monitorRuntime);
             GeneratedProtocolDispatcher dispatcher = registerHandlers(frameActor);
 
@@ -129,14 +129,14 @@ public final class __APP_CLASS__ {
                     FrameSyncQuerySnapshotProtocolDTOCodec.INSTANCE, snapshotRequest());
 
             return new DemoResult(
-                    application.config().getOrDefault(ZeroRuntimeConfigKeys.ZERO_MODE, "unknown"),
-                    application.config().getOrDefault(ZeroRuntimeConfigKeys.ZERO_NAME, "unknown"),
+                    runtime.require(RuntimeBasics.CONFIG).getOrDefault(ZeroRuntimeConfigKeys.ZERO_MODE, "unknown"),
+                    runtime.require(RuntimeBasics.CONFIG).getOrDefault(ZeroRuntimeConfigKeys.ZERO_NAME, "unknown"),
                     frameActor.summary(),
                     terminalLogSink.records().size(),
                     monitorRuntime.registry().samples().size(),
                     ProtocolIds.MAX_ID);
         } finally {
-            application.stop();
+            runtime.close();
         }
     }
 
@@ -280,7 +280,7 @@ public final class __APP_CLASS__ {
                 final LogAppender logAppender,
                 final MonitorRuntime monitorRuntime) {
             this.scheduler = Objects.requireNonNull(runtime, "runtime")
-                    .require(LocalRuntimeCapabilities.ACTOR_SCHEDULER);
+                    .require(ActorRuntime.ACTOR_SCHEDULER);
             this.logAppender = Objects.requireNonNull(logAppender, "logAppender");
             this.monitorRuntime = Objects.requireNonNull(monitorRuntime, "monitorRuntime");
             this.subscription = scheduler.register(FrameCommand.class, ActorHandler.sync((context, message) -> {

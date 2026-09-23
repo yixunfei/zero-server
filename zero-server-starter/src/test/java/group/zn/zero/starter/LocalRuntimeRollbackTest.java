@@ -12,12 +12,13 @@ import group.zn.zero.core.lifecycle.LifecycleState;
 import group.zn.zero.runtime.api.ComponentId;
 import group.zn.zero.runtime.api.GameRuntime;
 import group.zn.zero.runtime.api.RuntimeState;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
 import group.zn.zero.runtime.diagnostics.RuntimeAssemblyException;
 import group.zn.zero.runtime.diagnostics.RuntimeErrorCode;
 import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
 import org.junit.jupiter.api.Test;
 
 /** Local Starter integration tests for the neutral runtime rollback contract. */
@@ -50,6 +51,17 @@ class LocalRuntimeRollbackTest {
         assertExecutorShutdown(executors.actorExecutor());
         assertExecutorShutdown(executors.remoteIoExecutor());
         assertExecutorShutdown(executors.backgroundExecutor());
+    }
+
+    @Test
+    void planningFailureDoesNotTakeOwnershipOfCallerExecutors() {
+        try (ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("planning-failure", 1)) {
+            LocalRuntimeBuilder builder = LocalRuntime.builder(
+                    config(), new group.zn.zero.log.InMemoryLogSink(), executors)
+                    .require(group.zn.zero.runtime.api.ComponentKey.single("test.missing", Runnable.class));
+            assertThrows(RuntimeAssemblyException.class, builder::build);
+            assertFalse(((ExecutorService) executors.actorExecutor()).isShutdown());
+        }
     }
 
     @Test

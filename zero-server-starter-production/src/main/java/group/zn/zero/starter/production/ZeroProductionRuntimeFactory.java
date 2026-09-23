@@ -1,16 +1,16 @@
 package group.zn.zero.starter.production;
 
-import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.core.config.ZeroConfig;
 import group.zn.zero.core.config.ZeroConfigLoader;
-import group.zn.zero.core.error.SystemErrorCode;
 import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.log.LogSink;
 import group.zn.zero.log.SystemLoggerLogSink;
-import group.zn.zero.starter.ZeroRuntimeConfigKeys;
-import group.zn.zero.starter.ZeroRuntimeExecutors;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
+import group.zn.zero.runtime.production.ProductionAdapterException;
+import group.zn.zero.runtime.production.ProductionProfiles;
+import group.zn.zero.runtime.production.ZeroProductionAssemblyReport;
+import group.zn.zero.runtime.production.ZeroProductionRuntime;
+import group.zn.zero.runtime.production.ZeroProductionRuntimeConfigKeys;
 import java.util.Objects;
 
 /**
@@ -49,11 +49,7 @@ public final class ZeroProductionRuntimeFactory {
      * @throws ZeroException 配置中的 runtime mode 与 production 不一致时抛出。
      */
     public static ZeroProductionRuntimeBuilder productionBuilder(final ZeroConfig config) {
-        return builder(
-                ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION,
-                config,
-                SystemLoggerLogSink.named(ZeroProductionRuntimeFactory.class.getName()),
-                ZeroRuntimeExecutors.direct());
+        return defaultBuilder(ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION, config);
     }
 
     /**
@@ -88,11 +84,7 @@ public final class ZeroProductionRuntimeFactory {
      * @throws ZeroException 配置中的 runtime mode 与 external-test 不一致时抛出。
      */
     public static ZeroProductionRuntimeBuilder externalTestBuilder(final ZeroConfig config) {
-        return builder(
-                ZeroProductionRuntimeConfigKeys.MODE_EXTERNAL_TEST,
-                config,
-                SystemLoggerLogSink.named(ZeroProductionRuntimeFactory.class.getName()),
-                ZeroRuntimeExecutors.direct());
+        return defaultBuilder(ZeroProductionRuntimeConfigKeys.MODE_EXTERNAL_TEST, config);
     }
 
     /**
@@ -134,10 +126,11 @@ public final class ZeroProductionRuntimeFactory {
             final ZeroConfig config,
             final LogSink terminalLogSink,
             final ZeroRuntimeExecutors executors) {
+        LogSink checked = Objects.requireNonNull(terminalLogSink, "terminalLogSink");
         return new ZeroProductionRuntimeBuilder(
-                requireProfile(profile),
-                mergeProfile(profile, config),
-                Objects.requireNonNull(terminalLogSink, "terminalLogSink"),
+                profile,
+                ProductionProfiles.merge(profile, config),
+                () -> checked,
                 Objects.requireNonNull(executors, "executors"));
     }
 
@@ -169,30 +162,9 @@ public final class ZeroProductionRuntimeFactory {
         return externalTestBuilder(config).diagnose();
     }
 
-    private static String requireProfile(final String profile) {
-        String current = Objects.requireNonNull(profile, "profile");
-        if (!ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION.equals(current)
-                && !ZeroProductionRuntimeConfigKeys.MODE_EXTERNAL_TEST.equals(current)) {
-            throw ZeroException.of(
-                    SystemErrorCode.INVALID_ARGUMENT,
-                    "unsupported production runtime profile",
-                    null);
-        }
-        return current;
-    }
-
-    private static ZeroConfig mergeProfile(final String profile, final ZeroConfig config) {
-        Map<String, String> values = new LinkedHashMap<>();
-        values.put(ZeroRuntimeConfigKeys.ZERO_MODE, profile);
-        values.put(ZeroRuntimeConfigKeys.ZERO_NAME, ZeroRuntimeConfigKeys.DEFAULT_NAME);
-        values.putAll(Objects.requireNonNull(config, "config").asMap());
-        String configuredMode = values.get(ZeroRuntimeConfigKeys.ZERO_MODE);
-        if (!profile.equals(configuredMode)) {
-            throw ZeroException.of(
-                    SystemErrorCode.INVALID_ARGUMENT,
-                    "zero.mode must be " + profile + " for this builder",
-                    null);
-        }
-        return new MapZeroConfig(values);
+    private static ZeroProductionRuntimeBuilder defaultBuilder(final String profile, final ZeroConfig config) {
+        return new ZeroProductionRuntimeBuilder(profile, ProductionProfiles.merge(profile, config),
+                () -> SystemLoggerLogSink.named(ZeroProductionRuntimeFactory.class.getName()),
+                ZeroRuntimeExecutors.direct());
     }
 }

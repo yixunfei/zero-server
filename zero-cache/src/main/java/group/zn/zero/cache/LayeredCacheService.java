@@ -112,7 +112,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
         this.policy = Objects.requireNonNull(policy, "policy");
         this.l1Cache = new InMemoryCacheService<>(policy);
         this.l2Store = l2Store;
-        this.loadCoordinator = new CacheLoadCoordinator<>(policy.maxConcurrentLoads());
+        this.loadCoordinator = new CacheLoadCoordinator<>(policy.maxConcurrentLoads(), policy.loadTimeout());
     }
 
     /**
@@ -158,14 +158,15 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
             throw new IllegalArgumentException("entityVersion must be non-negative");
         }
         CacheStoreEntry<V> entry = normalStoreEntry(value, entityVersion);
-        l1Cache.putVersioned(key, value, entry.cacheVersion());
         if (l2Store == null) {
+            storeL1FromL2(key, entry);
             return CompletableFuture.completedFuture(null);
         }
         return l2Store.putIfVersion(key, entry).thenAccept(saved -> {
             if (!saved) {
                 throw ZeroException.of(CacheErrorCode.VERSION_CONFLICT, "cache version conflict", null);
             }
+            storeL1FromL2(key, entry);
         }).exceptionally(throwable -> {
             markBackendFailure();
             throw wrapCompletion(throwable);
@@ -201,14 +202,24 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
         if (entityVersion < 0L) {
             throw new IllegalArgumentException("entityVersion must be non-negative");
         }
-        l1Cache.invalidate(key);
-        if (l2Store == null) {
-            return CompletableFuture.completedFuture(true);
+        CacheEntry<V> expected = l1Cache.entryOf(key).orElse(null);
+        if (expected != null && expected.entityVersion() > entityVersion) {
+            return CompletableFuture.completedFuture(false);
         }
-        return l2Store.invalidateIfVersion(key, entityVersion).exceptionally(throwable -> {
-            markBackendFailure();
-            throw wrapCompletion(throwable);
-        });
+        if (l2Store == null) {
+            return CompletableFuture.completedFuture(l1Cache.invalidateEntry(key, expected, entityVersion));
+        }
+        return l2Store.invalidateIfVersion(key, entityVersion)
+                .thenApply(invalidated -> {
+                    if (Boolean.TRUE.equals(invalidated)) {
+                        return l1Cache.invalidateEntry(key, expected, entityVersion);
+                    }
+                    return invalidated;
+                })
+                .exceptionally(throwable -> {
+                    markBackendFailure();
+                    throw wrapCompletion(throwable);
+                });
     }
 
     /**
@@ -231,16 +242,14 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
                 return CompletableFuture.completedFuture(entry.orElseThrow().optionalValue());
             }
             missCount.incrementAndGet();
-            return loadCoordinator.getOrLoad(key, () -> loader.load(key)
-                    .whenComplete((ignored, throwable) -> {
-                        if (throwable != null) {
-                            loadFailureCount.incrementAndGet();
-                        }
-                    })
-                    .thenCompose(value -> {
+            return loadCoordinator.getOrLoad(key, () -> loader.load(key), value -> {
                         loadCount.incrementAndGet();
                         return storeLoaded(key, value);
-                    }));
+                    }).whenComplete((ignored, failure) -> {
+                        if (failure != null) {
+                            loadFailureCount.incrementAndGet();
+                        }
+                    });
         });
     }
 
@@ -335,12 +344,11 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
         if (entry.expired(Instant.now())) {
             return Optional.empty();
         }
-        if (entry.negative()) {
-            l1Cache.putNegative(key);
-            return Optional.of(entry);
-        }
-        l1Cache.putVersioned(key, entry.value(), entry.cacheVersion());
-        return Optional.of(entry);
+        cacheVersionGenerator.accumulateAndGet(entry.cacheVersion(), Math::max);
+        CacheEntry<V> selected = l1Cache.mergeEntry(key, new CacheEntry<>(
+                entry.value(), entry.cacheVersion(), entry.expiresAt(), entry.negative(), entry.entityVersion()));
+        return Optional.of(new CacheStoreEntry<>(selected.value(), selected.version(),
+                selected.entityVersion(), selected.expiresAt(), selected.negative()));
     }
 
     private CompletionStage<Optional<V>> storeLoaded(final K key, final Optional<V> value) {

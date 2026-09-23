@@ -113,10 +113,7 @@ public final class DirectZeroBuffer extends AbstractZeroBuffer {
     public void getBytes(final int index, final byte[] target, final int targetOffset, final int length) {
         checkRange(index, length);
         Objects.checkFromIndexSize(targetOffset, length, Objects.requireNonNull(target, "target").length);
-        ByteBuffer duplicate = buffer.duplicate();
-        duplicate.position(index);
-        duplicate.limit(index + length);
-        duplicate.get(target, targetOffset, length);
+        buffer.get(index, target, targetOffset, length);
     }
 
     /**
@@ -131,10 +128,18 @@ public final class DirectZeroBuffer extends AbstractZeroBuffer {
     public void putBytes(final int index, final byte[] source, final int sourceOffset, final int length) {
         checkRange(index, length);
         Objects.checkFromIndexSize(sourceOffset, length, Objects.requireNonNull(source, "source").length);
-        ByteBuffer duplicate = buffer.duplicate();
-        duplicate.position(index);
-        duplicate.limit(index + length);
-        duplicate.put(source, sourceOffset, length);
+        buffer.put(index, source, sourceOffset, length);
+    }
+
+    /**
+     * 使用 JDK 绝对批量搬移；Java 21 保证共享内存的重叠区域按中间副本语义处理。
+     * @param sourceIndex 来源起点。
+     * @param targetIndex 目标起点。
+     * @param length 长度；修改当前缓冲，线程不安全，不改变游标。
+     * @throws IndexOutOfBoundsException 任一范围越界。
+     */
+    @Override public void copy(final int sourceIndex, final int targetIndex, final int length) {
+        buffer.put(targetIndex, buffer, sourceIndex, length);
     }
 
     /**

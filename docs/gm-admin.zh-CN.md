@@ -1,154 +1,60 @@
-# GM 与后台 API 设计
+# GM 与后台接入
 
-生产级 GM 安全运营的独立确认输入见 [GM 操作上下文与审计契约草案](gm-operation-context-contract.zh-CN.md)。该草案只用于讨论 GM 操作上下文、dry-run / execute、权限拒绝、审批阻断、审计事件和安全日志，不代表已经实现 RBAC、IP 白名单、审批流、REST/RPC GM 入口或正式日志 schema。
+适用版本：`0.1.0-SNAPSHOT`，`productionReady=false`。框架提供 GM 命令、授权与审计边界，后台页面和真实运营服务由应用实现。
 
-## 1. 目标
+## 当前可用能力
 
-zeroServer 不内置完整 Web 后台项目。标准 API、安全鉴权、数据修改、上报、功能开启和逻辑调用是长期产品目标；当前 `zero-gm` 只提供命令 DSL、handler 编排和 O1 最小安全审计底座，不能据此宣称完整后台、RBAC、IP 白名单或审批引擎已经实现。
+| 模块 / 类型 | 已有行为 | 应用需要提供 |
+| --- | --- | --- |
+| `zero-gm` / `GmCommandDsl`、Registry、Executor | 路径与位置参数解析、最长路径匹配、dry-run/execute、错误与审计 hook | 业务命令定义和 handler |
+| `GmOperationAuthorizer` | 权限、来源 IP/CIDR、审批事实与第二复核者校验；拒绝后不执行业务 | 可信身份、角色/权限策略和审批验证 provider |
+| `GmOperationEndpoint` | 统一调用入口，返回 `code/message/result/traceId`；可注入幂等 store | 传输接线、可靠存储、业务副作用幂等 |
+| `zero-gm-rest` / `GmRestTransportAdapter` | 处理 `POST /gm/operation`，限制 body，调用显式身份 provider 和 transport delegate | HTTP listener、真实认证、TLS、标准 JSON 边界及完整审计接线 |
+| `GmRpcTransportAdapter` | RPC 请求/响应端口 | Kafka 消费/发布、路由、超时和副作用约束的具体实现 |
+| 审计、幂等、break-glass | 查询分页、留存/归档、claim/冲突/TTL、一次性紧急授权契约和内存参考实现 | 跨进程持久化、访问控制、备份恢复与运营流程 |
 
-后台 Web 项目可以基于这些 API 自由实现。
+REST 处理器与 RPC 端口不是已运行的网络服务。当前 REST 使用受限的平面字符串字段解析器，不能按通用 JSON 服务使用；其 HTTP 响应只包含 `code/message`，与核心 `GmOperationResponse` 的四字段结构不同。真实传输中的幂等键、审计和安全上下文需要贯通验证。
 
-## 2. 通信方式
-
-默认：
-
-- REST。
-
-同时支持：
-
-- 基于 Kafka 的 RPC。
-- 第三方 SDK 或渠道请求适配。
-
-## 3. 统一响应结构
-
-REST API 使用统一返回格式：
-
-```json
-{
-  "code": "ZERO-OK",
-  "msg": "success",
-  "data": {},
-  "traceId": "trace-id"
-}
-```
-
-## 4. 权限
-
-权限模型：
-
-- RBAC。
-- IP 白名单。
-
-IP 白名单只是辅助鉴权，不作为单独权限。只有内网或指定 IP 通过指定账户密码获取特定角色权限后，才能执行对应操作。
-
-JWT 暂不作为当前服务器框架核心能力，多项目上级业务中台可自行接入。
-
-## 5. GM 功能范围
-
-需要支持：
-
-- 公告。
-- 服务器状态维护。
-- 玩家查询。
-- 封禁。
-- 邮件。
-- 道具发放。
-- 充值订单失败补充。
-- 在线人数。
-- 日志检索。
-- 配置发布。
-- 热更发布。
-- GM 指令。
-- 运营活动开启。
-- 兑换码/活动运营码生成。
-
-## 6. 审批与 dry-run
-
-数据修改需要支持：
-
-- dry-run。
-- 审批流。
-
-dry-run 要求业务接口显式实现预演逻辑。
-
-完整审批流属于后续高风险运营能力。当前仅有 `approvalRequired`、受控 `GmApprovalState` 和可选安全 `approvalRef` 归因，用于表达已由上游作出的审批事实；框架尚未提供审批引擎或审批状态机。
-
-## 7. 审计日志
-
-“后台操作全部记录审计日志”是完整运营平台的长期硬要求。当前 O1 只覆盖成功完成 DSL resolve、参数匹配、request 与安全 metadata 构造后的 handler 前后事件；DSL 非法、未知命令和参数数量不匹配发生在 metadata 构造前，当前不会生成 `GmAuditEvent`。
-
-长期审计模型至少需要以下语义，但身份、地址、目标、审批、参数与数据差异必须保存为可归因安全引用、受控状态或不含原值的摘要，不能直接落原值：
-
-- 操作者安全引用。
-- 来源地址安全引用。
-- 授权与权限决策摘要。
-- 操作类型。
-- 目标类型与安全引用。
-- 参数名白名单、数量和可选 HMAC 请求指纹，不含参数值。
-- 不含原值的数据差异摘要。
-- dry-run 结果。
-- 受控审批状态与可选安全引用。
-- 执行结果。
-- 真实失败 `ErrorCode` 与四态业务提交状态。
-- traceId。
-- 时间。
-
-当前事件和统一日志禁止保存原 `GmCommandContext`、raw command、参数值、原 operator/source address/approvalId/target、roles、permissions、attributes、前后原值或原异常 message。
-
-## 8. GM 指令 DSL
-
-GM 指令需要命令 DSL。
-
-示例：
+## 接线顺序
 
 ```text
-/mail send playerId itemId count
-/player ban playerId reason duration
-/item add playerId itemId count
+应用 HTTP / RPC / CLI 入口
+  -> 认证与可信来源
+  -> GmTransportAdapter / GmOperationEndpoint
+  -> 权限、IP、审批事实校验
+  -> GmCommandExecutor dry-run / execute
+  -> 业务 handler 与安全审计
 ```
 
-GM 指令不需要强制走事件总线。
+业务状态修改通过所属 Actor、Repository / DataService 完成。IO 线程不执行阻塞业务。缺少身份 provider 的 REST `failClosed(...)` 入口拒绝请求；添加依赖不会自动生成角色、创建账号或启动服务。
 
-### 8.1 最小命令边界
+详细接线契约见[授权与操作上下文](reference/gm-operation-context-contract.zh-CN.md)和[标准入口与审计存储](reference/gm-standard-entry-persistence-contract.zh-CN.md)。
 
-`zero-gm` 当前已提供第一版最小可验证 GM command DSL 与执行编排，定位是“核心框架命令模型”，不是完整 Web 后台：
+## 命令与 dry-run
 
-- `GmCommandDsl` 解析 `/mail send playerId itemId count` 形式的文本命令。
-- DSL 首版只支持路径和位置参数，支持双引号参数，不支持脚本、表达式、变量求值或批处理。
-- `GmCommandDefinition` 描述命令路径、参数名、风险等级、目标参数和是否要求审批。
-- `GmCommandRegistry` 使用最长路径优先解析命令，例如 `mail send` 会优先匹配 `/mail send ...`。
-- `GmCommandExecutor` 明确区分 `dryRun` 与 `execute`，dry-run 不会调用正式修改 handler。
-- `GmAuditHook` 是审计入口；DSL resolve、参数匹配、request 与安全 metadata 构造成功后，执行器才在 dry-run 或正式 handler 调用前置、后置或失败阶段同步触发审计事件。解析失败、未知命令和参数数量错误当前不产生 `GmAuditEvent`。
-- 审计 hook 失败会使当前命令失败；正式执行前审计失败时不会调用业务 handler。
+DSL 使用路径和位置参数，例如 `/mail send playerId itemId count`。首版支持双引号参数，不支持脚本、表达式、变量求值或批处理。公告、封禁、邮件、道具、订单补偿等属于应用业务命令，不是框架内置功能。
 
-### 8.2 handler 约束
+`dryRun` 由 handler 显式实现预演，不调用正式修改逻辑，也不得修改玩家、场景或持久化状态。完整审批服务仍由应用负责；`approvalRequired`、审批状态、审批引用和第二复核者表达上游作出的事实。
 
-GM handler 必须遵守线程与数据边界：
+## 审计与副作用
 
-- dry-run 只能做预演和可安全查询，不允许修改玩家、场景或持久化状态。
-- 正式执行如需修改玩家、场景或核心状态，必须通过 Actor 消息、Repository / DataService 或业务侧确认的线程绑定入口。
-- handler 不允许吞异常；执行失败必须向上抛出，由上层统一异常处理、日志和审计链路记录。
-- 第一版不内置 RBAC、IP 白名单、复杂审批流、REST 入口或 RPC 入口；扩展这些生产能力前应提交独立 Design Proposal，说明威胁模型、权限、审计和回滚边界。
+`GmAuditHook` 在 DSL resolve、参数匹配、request 和安全 metadata 构造成功后记录执行前、执行后或失败事件。解析失败、未知命令、参数数量错误不自动产生 `GmAuditEvent`，传输层应接入安全失败审计；`GmSecurityFailure` 仅提供载体。
 
-### 8.3 审计字段
+审计遵守以下边界：
 
-`GmAuditRecordFactory` 把已经安全化的 `GmAuditEvent` 转换为统一 `ZeroLogRecord`，再由 `LogAppender` 通过不可绕过的日志安全管线落地。旧的平行 `AuditLogRecord` 已删除。
+- `GmAuditAttributionFactory` 生成 operator/source/approval/target 安全引用，禁止保存 raw command、参数值、token、完整 IP、原始身份、数据快照或异常原文。
+- `GmAuditRecordFactory` 将安全事件转为 `ZeroLogRecord`，通过 `LogAppender` 安全管线写入。
+- `PersistentGmAuditHook` 和 store 接口不自带数据库可靠性保证；内存实现不跨进程、不抗重启。
+- 执行前审计失败阻止 handler；执行后审计失败不能回滚已发生的业务副作用。
 
-当前事件与统一日志表达：
+`GmBusinessCommitState` 为 `NOT_APPLICABLE / NOT_COMMITTED / COMMITTED / UNKNOWN`。`COMMITTED` 与 `UNKNOWN` 禁止自动重试；应用仍需协调外部副作用。对直接注入 `GmIdempotencyStore` 的入口，重复键/请求指纹由 store 决策；真实 REST/Kafka 链路不能仅凭接口存在就宣称已实现端到端幂等。
 
-- `time`
-- `phase`
-- `traceId`
-- `commandKey`
-- `parameterNames` 与 `parameterCount`，不含参数值
-- `dryRun`
-- `result`；`FAILURE / REJECTED` 时绑定真实 `ErrorCode`，`STARTED / SUCCESS` 时禁止携带 `ErrorCode`
-- `businessCommitState`
-- 不含 handler 返回值或异常 message 的 `safeMessage`
-- 不含参数值的 `structureFingerprint`
-- 配置 HMAC 密钥时的可选 `requestFingerprint`
-- `operatorRef` 与 `sourceAddressRef`
-- `approvalRequired`、`approvalState` 与可选 `approvalRef`
-- `targetType` 与可选 `targetRef`
+## 验证与后续
 
-`GmBusinessCommitState` 固定为 `NOT_APPLICABLE / NOT_COMMITTED / COMMITTED / UNKNOWN`。`COMMITTED` 与 `UNKNOWN` 均禁止自动重试；业务仍须保证幂等和外部副作用协调。当前审批字段只记录安全归因，不冻结或实现复杂审批流模型。
+从仓库根目录执行：
+
+```bash
+mvn -B -ntp -pl zero-gm,zero-gm-rest -am test
+```
+
+当前测试覆盖命令解析、授权拒绝、统一入口、审计分页、幂等与紧急授权的内存语义，以及 REST 请求处理边界。真实 listener、身份源、持久审批/审计、Kafka 重投和恢复仍需专项验证，见[路线图 P0-4](optimization-roadmap.zh-CN.md)。

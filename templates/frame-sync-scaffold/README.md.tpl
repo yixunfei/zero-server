@@ -59,5 +59,5 @@ Read `zero-scaffold.json` when a tool needs machine-readable scaffold metadata.
 - It serializes match state through a local Actor lane.
 - It demonstrates fixed-frame input collection and snapshot summaries only.
 - It does not implement network delay compensation, input resend, rollback, spectators, broadcast or cross-server migration.
-- It does not connect external middleware or open network ports.
+- The default selection does not connect external middleware or open network ports. Adding Redis requires an external service at startup.
 - It is not a production frame-sync API commitment.

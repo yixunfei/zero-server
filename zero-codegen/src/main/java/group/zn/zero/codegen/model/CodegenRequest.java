@@ -137,6 +137,13 @@ public record CodegenRequest(
             throw new IllegalArgumentException("languages must not be empty");
         }
         validateJavaArtifactPackages(javaArtifactPackages);
+        if (languages.contains(CodegenLanguage.JAVA)) {
+            validateJavaPackage(languageNamespaces.getOrDefault(CodegenLanguage.JAVA, document.namespace()));
+            String suffix = dtoSuffixes.getOrDefault(CodegenLanguage.JAVA, DEFAULT_DTO_SUFFIX);
+            if (suffix == null || !javax.lang.model.SourceVersion.isIdentifier("Dto" + suffix)) {
+                throw new IllegalArgumentException("invalid Java DTO suffix");
+            }
+        }
         languages = List.copyOf(new LinkedHashSet<>(languages));
         languageOutputDirs = Map.copyOf(new LinkedHashMap<>(languageOutputDirs));
         languageNamespaces = Map.copyOf(new LinkedHashMap<>(languageNamespaces));
@@ -238,9 +245,15 @@ public record CodegenRequest(
 
     private static void validateJavaArtifactPackages(final Map<JavaArtifactKind, String> packages) {
         for (Map.Entry<JavaArtifactKind, String> entry : packages.entrySet()) {
-            if (entry.getValue() == null || entry.getValue().isBlank()) {
-                throw new IllegalArgumentException("java artifact package must not be blank: " + entry.getKey());
-            }
+            validateJavaPackage(entry.getValue());
         }
     }
+    /** Java 包名必须由合法标识符组成，不得携带路径分隔符或相对路径。 */
+    private static void validateJavaPackage(final String packageName) {
+        if (packageName == null || !javax.lang.model.SourceVersion.isName(packageName,
+                javax.lang.model.SourceVersion.RELEASE_21)) {
+            throw new IllegalArgumentException("invalid Java package: " + packageName);
+        }
+    }
+
 }

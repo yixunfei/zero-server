@@ -49,10 +49,18 @@
         <module>zero-protocol</module>
         <module>zero-codegen</module>
         <module>zero-actor</module>
+        <module>zero-world</module>
+        <module>zero-npc</module>
+        <module>zero-ranking</module>
+        <module>zero-room</module>
         <module>zero-game</module>
         <module>zero-player</module>
         <module>zero-scene</module>
+        <module>zero-aoi</module>
+        <module>zero-state-sync</module>
+        <module>zero-frame-sync</module>
         <module>zero-logic</module>
+        <module>zero-security</module>
         <module>zero-net</module>
         <module>zero-rpc-common</module>
         <module>zero-rpc</module>
@@ -66,9 +74,29 @@
         <module>zero-log</module>
         <module>zero-monitor</module>
         <module>zero-gm</module>
+        <module>zero-gm-rest</module>
         <module>zero-hot-update</module>
         <module>zero-server-starter</module>
         <module>zero-server-starter-production</module>
+        <module>zero-runtime-bootstrap</module>
+        <module>zero-runtime-event</module>
+        <module>zero-runtime-actor</module>
+        <module>zero-runtime-protocol</module>
+        <module>zero-runtime-rpc</module>
+        <module>zero-runtime-data</module>
+        <module>zero-runtime-cache</module>
+        <module>zero-runtime-log</module>
+        <module>zero-runtime-monitor</module>
+        <module>zero-discovery</module>
+        <module>zero-rpc-discovery</module>
+        <module>zero-runtime-discovery</module>
+        <module>zero-runtime-production</module>
+        <module>zero-runtime-kafka</module>
+        <module>zero-runtime-mongo</module>
+        <module>zero-runtime-redis</module>
+        <module>zero-runtime-postgresql</module>
+        <module>zero-runtime-nacos</module>
+        <module>zero-runtime-net</module>
     </modules>
 
     <profiles>
@@ -77,6 +105,9 @@
             <modules>
                 <module>zero-benchmarks</module>
             </modules>
+        </profile>
+        <profile>
+            <id>performance-gate</id>
         </profile>
     </profiles>
 </project>

@@ -4,13 +4,15 @@ import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.net.ConnectionListener;
 import group.zn.zero.net.ServerFrameHandler;
 import group.zn.zero.net.error.NetErrorCode;
+import group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
+import group.zn.zero.security.SecurityContext;
+import group.zn.zero.security.SecurityContextBridge;
 import group.zn.zero.protocol.ProtocolFrame;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
@@ -45,6 +47,12 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
      * 当前连接。
      */
     private NettyConnection connection;
+    /** 服务级出站设置。 */
+    private final group.zn.zero.net.ServerOptions options;
+    /** 实际使用的 codec。 */
+    private final group.zn.zero.protocol.codec.ProtocolFrameCodec codec;
+    /** 所有连接共享的出站预算。 */
+    private final OutboundBudget outboundBudget;
 
     /**
      * 单连接 production lifecycle 会话。
@@ -83,6 +91,19 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
             final ConnectionListener connectionListener,
             final Executor handlerExecutor,
             final ProductionNetworkLifecycle productionLifecycle) {
+        this(frameHandler, connectionListener, handlerExecutor, productionLifecycle,
+                group.zn.zero.net.ServerOptions.tcp("localhost", 0),
+                new group.zn.zero.protocol.codec.ZeroBinaryFrameCodec(),
+                new OutboundBudget(group.zn.zero.net.NetworkTuning.defaults().maxPendingBytesTotal()));
+    }
+
+    NettyFrameChannelHandler(final ServerFrameHandler frameHandler, final ConnectionListener connectionListener,
+            final Executor handlerExecutor, final ProductionNetworkLifecycle productionLifecycle,
+            final group.zn.zero.net.ServerOptions options,
+            final group.zn.zero.protocol.codec.ProtocolFrameCodec codec, final OutboundBudget outboundBudget) {
+        this.options = options;
+        this.codec = codec;
+        this.outboundBudget = outboundBudget;
         this.frameHandler = Objects.requireNonNull(frameHandler, "frameHandler");
         this.connectionListener = Objects.requireNonNull(connectionListener, "connectionListener");
         this.handlerExecutor = Objects.requireNonNull(handlerExecutor, "handlerExecutor");
@@ -96,7 +117,17 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
      */
     @Override
     public void channelActive(final ChannelHandlerContext context) {
-        connection = new NettyConnection(UUID.randomUUID().toString(), context.channel());
+        connection = new NettyConnection(context.channel().id().asLongText(), context.channel(), codec, options, outboundBudget);
+        io.netty.handler.ssl.SslHandler sslHandler = context.pipeline().get(io.netty.handler.ssl.SslHandler.class);
+        if (sslHandler != null) {
+            sslHandler.handshakeFuture().addListener(future -> {
+                if (future.isSuccess()) {
+                    connection.attributes().put(ProductionNetworkConnectionAttributes.TLS_ESTABLISHED, Boolean.TRUE);
+                } else {
+                    context.close();
+                }
+            });
+        }
         if (productionLifecycle == null) {
             openListener();
         } else {
@@ -180,10 +211,14 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
     }
 
     private void invokeHandler(final ChannelHandlerContext context, final ProtocolFrame frame) {
+        SecurityContext securityContext = connection.attributes()
+                .get(group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes.SECURITY_CONTEXT)
+                .orElse(null);
         try {
-            CompletionStage<List<ProtocolFrame>> stage = Objects.requireNonNull(
-                    frameHandler.handle(connection, frame),
-                    "handlerStage");
+            CompletionStage<List<ProtocolFrame>> stage = securityContext == null
+                    ? Objects.requireNonNull(frameHandler.handle(connection, frame), "handlerStage")
+                    : SecurityContextBridge.with(securityContext,
+                            () -> Objects.requireNonNull(frameHandler.handle(connection, frame), "handlerStage"));
             stage.whenComplete((responses, cause) -> {
                 completeProductionFrame(context);
                 if (cause != null) {
@@ -207,14 +242,14 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
 
     private void writeResponses(final ChannelHandlerContext context, final List<ProtocolFrame> responses) {
         try {
-            List<ProtocolFrame> frames = List.copyOf(Objects.requireNonNull(responses, "responses"));
-            for (ProtocolFrame response : frames) {
-                connection.sendFrame(response)
-                        .exceptionally(cause -> {
-                            fireException(context, asHandlerException(cause));
-                            return null;
-                        });
-            }
+            Objects.requireNonNull(responses, "responses");
+            CompletionStage<Void> sent = responses.size() == 1
+                    ? connection.sendFrame(Objects.requireNonNull(responses.getFirst(), "response"))
+                    : connection.sendFrames(List.copyOf(responses));
+            sent.exceptionally(cause -> {
+                fireException(context, asHandlerException(cause));
+                return null;
+            });
         } catch (RuntimeException ex) {
             fireException(context, asHandlerException(ex));
         }

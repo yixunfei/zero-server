@@ -1,5 +1,7 @@
 # zeroServer 总体架构
 
+本文说明分层职责与设计方向。当前模块、入口和依赖以[模块图](module-map.md)为准；实现程度见[能力矩阵](capability-matrix.zh-CN.md)。实际装配从[按需装配指南](guides/modular-composition-guide.zh-CN.md)开始。
+
 ## 1. 架构目标
 
 zeroServer 采用四层架构：
@@ -180,7 +182,7 @@ zeroServer 采用四层架构：
 - 运行时拓扑不参与 CSV 业务配置热替换；拓扑变化通过重建 single-use runtime 完成。
 - 1B/1C 没有改变线程/Actor、协议、RPC、存储、缓存或日志语义。
 
-完整方案、公共契约、迁移策略和停止门见[模块化运行时装配设计](modular-runtime-assembly.zh-CN.md)。1D 受影响模块门禁已通过；全仓与阶段 0 full 结果以任务验收档案中的最新记录为准。真实外部中间件和生产容量仍属于后续验证范围。
+完整方案、公共契约、迁移策略和停止门见[模块化运行时装配设计](reference/modular-runtime-assembly.zh-CN.md)。1D 受影响模块门禁已通过；全仓与阶段 0 full 结果以任务验收档案中的最新记录为准。真实外部中间件和生产容量仍属于后续验证范围。
 
 ## 7. 演进路线
 

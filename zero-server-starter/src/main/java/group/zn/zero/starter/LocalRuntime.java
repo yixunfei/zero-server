@@ -3,18 +3,21 @@ package group.zn.zero.starter;
 import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.core.config.ZeroConfig;
 import group.zn.zero.core.config.ZeroConfigLoader;
-import group.zn.zero.log.LogAppender;
-import group.zn.zero.log.LogPipeline;
 import group.zn.zero.log.LogSink;
 import group.zn.zero.log.SystemLoggerLogSink;
 import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.assembly.RuntimeModule;
 import group.zn.zero.runtime.assembly.RuntimeProfile;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
 import group.zn.zero.runtime.capability.RuntimeCapabilityModel;
 import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
+import group.zn.zero.runtime.config.ZeroConfigSource;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * 无 Docker、无外部连接的 Local Starter 薄入口。
@@ -50,10 +53,10 @@ public final class LocalRuntime {
     }
 
     public static LocalRuntimeBuilder builder(final ZeroConfig config) {
-        return builder(
-                config,
-                SystemLoggerLogSink.named(ZeroServerApplication.class.getName()),
-                ZeroRuntimeExecutors.direct());
+        return new LocalRuntimeBuilder(
+                mergeDefaults(config),
+                () -> SystemLoggerLogSink.named(ZeroServerApplication.class.getName()),
+                ZeroRuntimeExecutors.direct(), LocalRuntimePresets.local(), RuntimeProfile.local());
     }
 
     public static LocalRuntimeBuilder builder(final ZeroConfig config, final LogSink terminalLogSink) {
@@ -66,11 +69,9 @@ public final class LocalRuntime {
             final ZeroRuntimeExecutors executors) {
         ZeroConfig merged = mergeDefaults(config);
         LogSink sink = Objects.requireNonNull(terminalLogSink, "terminalLogSink");
-        LogAppender appender = logAppender(merged, sink);
         return new LocalRuntimeBuilder(
                 merged,
-                sink,
-                appender,
+                () -> sink,
                 Objects.requireNonNull(executors, "executors"),
                 LocalRuntimePresets.local(),
                 RuntimeProfile.local());
@@ -84,8 +85,7 @@ public final class LocalRuntime {
         LogSink sink = Objects.requireNonNull(terminalLogSink, "terminalLogSink");
         return new LocalRuntimeBuilder(
                 merged,
-                sink,
-                logAppender(merged, sink),
+                () -> sink,
                 Objects.requireNonNull(executors, "executors"),
                 LocalRuntimePresets.minimal(),
                 RuntimeProfile.minimal());
@@ -93,6 +93,21 @@ public final class LocalRuntime {
 
     public static RuntimeCapabilityModel capabilityModel() {
         return StandardRuntimeCapabilityModel.instance();
+    }
+
+    /** Full local convenience module for an explicit composition root. */
+    public static RuntimeModule module(
+            final ZeroConfig config, final LogSink sink, final ZeroRuntimeExecutors executors) {
+        LogSink checked = Objects.requireNonNull(sink, "sink");
+        return module(config, () -> checked, executors);
+    }
+
+    /** Full local module with terminal sink creation deferred until its provider is selected. */
+    public static RuntimeModule module(
+            final ZeroConfig config, final Supplier<? extends LogSink> sink, final ZeroRuntimeExecutors executors) {
+        ZeroConfig merged = mergeDefaults(config);
+        return new RuntimeModule("zero.local", LocalRuntimeProviders.defaults(merged, sink, executors),
+                LocalRuntimePresets.local(), List.of(new ZeroConfigSource("zero.local", merged)));
     }
 
     public static Map<String, String> defaults() {
@@ -107,12 +122,4 @@ public final class LocalRuntime {
         return new MapZeroConfig(values);
     }
 
-    private static LogAppender logAppender(final ZeroConfig config, final LogSink terminalLogSink) {
-        String runtimeMode = config.getOrDefault(
-                ZeroRuntimeConfigKeys.ZERO_MODE,
-                ZeroRuntimeConfigKeys.MODE_LOCAL);
-        return new LogPipeline(
-                List.of(record -> record.withField("runtimeMode", runtimeMode)),
-                terminalLogSink);
-    }
 }

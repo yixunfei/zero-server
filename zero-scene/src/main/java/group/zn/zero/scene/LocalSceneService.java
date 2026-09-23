@@ -32,7 +32,7 @@ public final class LocalSceneService implements SceneService, AutoCloseable {
     /**
      * 场景实体状态表。
      */
-    private final Map<String, Map<Long, SceneEntityState>> scenes = new ConcurrentHashMap<>();
+    private final Map<String, SceneState> scenes = new ConcurrentHashMap<>();
 
     /**
      * Actor 注册句柄。
@@ -55,7 +55,7 @@ public final class LocalSceneService implements SceneService, AutoCloseable {
                             command.request().uid(),
                             command.request().sceneId(),
                             new ScenePosition(0, 0));
-                    scenes.computeIfAbsent(command.request().sceneId(), ignored -> new ConcurrentHashMap<>())
+                    scenes.computeIfAbsent(command.request().sceneId(), ignored -> new SceneState()).entities
                             .put(command.request().uid(), state);
                     command.result().complete(state);
                 })),
@@ -63,7 +63,7 @@ public final class LocalSceneService implements SceneService, AutoCloseable {
                     MoveCommand command = (MoveCommand) message.payload();
                     Map<Long, SceneEntityState> entities = scenes.computeIfAbsent(
                             command.request().sceneId(),
-                            ignored -> new ConcurrentHashMap<>());
+                            ignored -> new SceneState()).entities;
                     Optional<SceneEntityState> previous = Optional.ofNullable(entities.get(command.request().uid()));
                     SceneEntityState state = new SceneEntityState(
                             command.request().uid(),
@@ -74,10 +74,11 @@ public final class LocalSceneService implements SceneService, AutoCloseable {
                 })),
                 scheduler.register(LeaveSceneCommand.class, ActorHandler.sync((context, message) -> {
                     LeaveSceneCommand command = (LeaveSceneCommand) message.payload();
-                    Map<Long, SceneEntityState> entities = scenes.get(command.request().sceneId());
+                    SceneState scene = scenes.get(command.request().sceneId());
+                    Map<Long, SceneEntityState> entities = scene == null ? null : scene.entities;
                     SceneEntityState removed = entities == null ? null : entities.remove(command.request().uid());
                     if (entities != null && entities.isEmpty()) {
-                        scenes.remove(command.request().sceneId(), entities);
+                        scenes.remove(command.request().sceneId(), scene);
                     }
                     command.result().complete(new SceneLeaveResult(
                             command.request().sceneId(),
@@ -87,14 +88,12 @@ public final class LocalSceneService implements SceneService, AutoCloseable {
                 })),
                 scheduler.register(QueryEntityCommand.class, ActorHandler.sync((context, message) -> {
                     QueryEntityCommand command = (QueryEntityCommand) message.payload();
-                    command.result().complete(Optional.ofNullable(scenes
-                            .getOrDefault(command.sceneId(), Map.of())
+                    command.result().complete(Optional.ofNullable(sceneEntities(command.sceneId())
                             .get(command.uid())));
                 })),
                 scheduler.register(ListEntitiesCommand.class, ActorHandler.sync((context, message) -> {
                     ListEntitiesCommand command = (ListEntitiesCommand) message.payload();
-                    command.result().complete(List.copyOf(scenes
-                            .getOrDefault(command.sceneId(), Map.of())
+                    command.result().complete(List.copyOf(sceneEntities(command.sceneId())
                             .values()));
                 })));
     }
@@ -211,6 +210,18 @@ public final class LocalSceneService implements SceneService, AutoCloseable {
     @Override
     public void close() {
         subscriptions.forEach(ActorSubscription::close);
+    }
+
+    /** 仅在对应 Scene Lane 中读取；返回内部表或空表，不能跨 Lane 暴露。 */
+    private Map<Long, SceneEntityState> sceneEntities(final String sceneId) {
+        SceneState scene = scenes.get(sceneId);
+        return scene == null ? Map.of() : scene.entities;
+    }
+
+    /** 单个场景的私有可变状态，所有访问均由同一 Lane 串行化。 @author zn */
+    private static final class SceneState {
+        /** 不向业务公开；外层并发目录负责跨场景安全发布。 */
+        private final Map<Long, SceneEntityState> entities = new java.util.HashMap<>();
     }
 
     private static String requireText(final String value, final String name) {

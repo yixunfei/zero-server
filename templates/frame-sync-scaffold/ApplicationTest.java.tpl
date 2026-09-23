@@ -19,14 +19,14 @@ class __TEST_CLASS__ {
         String summary = result.summaryLine();
 
         assertAll("local frame sync scaffold result",
-                () -> assertEquals("local", result.mode()),
+                () -> assertEquals("__RUNTIME_PROFILE__", result.mode()),
                 () -> assertEquals("__PROJECT_NAME__", result.name()),
                 () -> assertEquals("match=match-1,players=2,frame=2,inputs=3,inputSum=17,snapshots=2",
                         result.snapshotSummary()),
                 () -> assertEquals(9, result.logCount()),
                 () -> assertEquals(8, result.metricCount()),
                 () -> assertEquals(93107, result.maxProtocolId()),
-                () -> assertTrue(summary.startsWith("frame-sync=ok|mode=local|name=__PROJECT_NAME__")),
+                () -> assertTrue(summary.startsWith("frame-sync=ok|mode=__RUNTIME_PROFILE__|name=__PROJECT_NAME__")),
                 () -> assertTrue(summary.endsWith("|maxProtocolId=93107")));
     }
 }

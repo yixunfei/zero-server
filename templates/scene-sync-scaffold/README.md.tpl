@@ -59,5 +59,5 @@ Read `zero-scaffold.json` when a tool needs machine-readable scaffold metadata.
 - It serializes scene state through a local Actor lane.
 - It uses a small in-memory map and Chebyshev distance for visibility.
 - It does not implement production AOI data structures, broadcast, delta compression, client snapshot protocol, path sync or cross-server migration.
-- It does not connect external middleware or open network ports.
+- The default selection does not connect external middleware or open network ports. Adding Redis requires an external service at startup.
 - It is not a production AOI or state-sync API commitment.

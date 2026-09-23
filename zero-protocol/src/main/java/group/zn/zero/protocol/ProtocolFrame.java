@@ -67,4 +67,28 @@ public record ProtocolFrame(
     public byte[] payload() {
         return Arrays.copyOf(payload, payload.length);
     }
+    /** 返回负载字节数；只读、无复制、线程安全。 @return 非负长度。 */
+    public int payloadLength() { return payload.length; }
+    /** 返回扩展头字节数；只读、无复制、线程安全。 @return 非负长度。 */
+    public int extensionLength() { return extension.length; }
+
+    /**
+     * 返回不复制的只读负载视图；不能访问底层数组，帧自持有数据，无需释放。
+     * @return 新的只读视图；有序、可能为空；内容可跨线程共享，游标需调用方独占。
+     */
+    public java.nio.ByteBuffer payloadView() { return java.nio.ByteBuffer.wrap(payload).asReadOnlyBuffer(); }
+
+    /**
+     * 直接读取自持有 payload，避免 ByteBuffer 适配及字符串字段的中间字节副本。
+     * @return 独立读取器；游标线程独占，内容不可变且可安全保留，切片不暴露可写内部数组。
+     */
+    public group.zn.zero.protocol.buffer.ZeroReader payloadReader() {
+        return group.zn.zero.protocol.buffer.ZeroReader.readOnly(payload);
+    }
+
+    /**
+     * 返回不复制的只读扩展头视图；帧自持有数据，无需释放。
+     * @return 新的只读视图；有序、可能为空；内容可跨线程共享，游标需调用方独占。
+     */
+    public java.nio.ByteBuffer extensionView() { return java.nio.ByteBuffer.wrap(extension).asReadOnlyBuffer(); }
 }

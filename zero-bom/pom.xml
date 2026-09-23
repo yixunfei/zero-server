@@ -46,7 +46,27 @@
             </dependency>
             <dependency>
                 <groupId>group.zn.zero</groupId>
+                <artifactId>zero-world</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-npc</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
                 <artifactId>zero-actor</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-ranking</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-room</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -66,7 +86,27 @@
             </dependency>
             <dependency>
                 <groupId>group.zn.zero</groupId>
+                <artifactId>zero-aoi</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-state-sync</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-frame-sync</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
                 <artifactId>zero-logic</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-security</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -147,6 +187,101 @@
             <dependency>
                 <groupId>group.zn.zero</groupId>
                 <artifactId>zero-server-starter-production</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-bootstrap</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-event</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-actor</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-protocol</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-rpc</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-data</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-cache</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-log</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-monitor</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-discovery</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-rpc-discovery</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-discovery</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-production</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-kafka</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-mongo</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-redis</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-postgresql</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-nacos</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>group.zn.zero</groupId>
+                <artifactId>zero-runtime-net</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

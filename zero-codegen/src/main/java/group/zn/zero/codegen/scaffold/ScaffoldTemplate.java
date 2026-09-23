@@ -23,8 +23,11 @@ public record ScaffoldTemplate(
     public ScaffoldTemplate {
         id = requireText(id, "id");
         directory = requireText(directory, "directory");
-        protocolTemplate = requireText(protocolTemplate, "protocolTemplate");
-        protocolOutput = requireText(protocolOutput, "protocolOutput");
+        protocolTemplate = Objects.requireNonNull(protocolTemplate, "protocolTemplate").trim();
+        protocolOutput = Objects.requireNonNull(protocolOutput, "protocolOutput").trim();
+        if (protocolTemplate.isEmpty() != protocolOutput.isEmpty()) {
+            throw new IllegalArgumentException("protocol template and output must both be present or absent");
+        }
         description = requireText(description, "description");
         keywords = copyText(keywords, "keyword");
         useCase = requireText(useCase, "useCase");
@@ -53,6 +56,10 @@ public record ScaffoldTemplate(
             }
         }
         return score;
+    }
+
+    public boolean generatesProtocol() {
+        return !protocolTemplate.isEmpty();
     }
 
     public List<MavenCoordinate> frameworkArtifacts(final RuntimeCapabilityModel model) {

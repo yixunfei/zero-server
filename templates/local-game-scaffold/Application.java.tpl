@@ -3,15 +3,15 @@ package __PACKAGE__;
 import __PACKAGE__.generated.bo.GameEnterSceneEventBO;
 import __PACKAGE__.generated.bo.GameLoginEventBO;
 import __PACKAGE__.generated.bo.GameMoveEventBO;
-import __PACKAGE__.generated.dto.GameEnterSceneProtocolDTO;
-import __PACKAGE__.generated.dto.GameLoginProtocolDTO;
-import __PACKAGE__.generated.dto.GameMoveProtocolDTO;
 import __PACKAGE__.generated.dto.codec.GameEnterSceneProtocolDTOCodec;
 import __PACKAGE__.generated.dto.codec.GameLoginProtocolDTOCodec;
 import __PACKAGE__.generated.dto.codec.GameMoveProtocolDTOCodec;
-import __PACKAGE__.generated.protocol.ProtocolIds;
+import __PACKAGE__.generated.dto.GameEnterSceneProtocolDTO;
+import __PACKAGE__.generated.dto.GameLoginProtocolDTO;
+import __PACKAGE__.generated.dto.GameMoveProtocolDTO;
 import __PACKAGE__.generated.protocol.dispatch.GeneratedProtocolDispatcher;
-import group.zn.zero.core.config.MapZeroConfig;
+import __PACKAGE__.generated.protocol.ProtocolIds;
+import group.zn.zero.core.config.ZeroConfigLoader;
 import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.log.LogLevel;
 import group.zn.zero.log.LogOperation;
@@ -27,28 +27,28 @@ import group.zn.zero.player.PlayerLoginRequest;
 import group.zn.zero.player.PlayerLoginResult;
 import group.zn.zero.protocol.buffer.ZeroWriter;
 import group.zn.zero.protocol.codec.ZeroPayloadCodec;
+import group.zn.zero.runtime.actor.ActorRuntime;
+import group.zn.zero.runtime.api.GameRuntime;
+import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
+import group.zn.zero.runtime.bootstrap.RuntimeBasics;
+import group.zn.zero.runtime.log.LogRuntime;
+import group.zn.zero.runtime.monitor.MonitorRuntimeComponent;
 import group.zn.zero.scene.LocalSceneService;
 import group.zn.zero.scene.SceneEnterRequest;
 import group.zn.zero.scene.SceneMoveRequest;
 import group.zn.zero.scene.SceneMoveResult;
 import group.zn.zero.scene.ScenePosition;
-import group.zn.zero.runtime.api.GameRuntime;
-import group.zn.zero.starter.LocalRuntime;
-import group.zn.zero.starter.LocalRuntimeCapabilities;
-import group.zn.zero.starter.ZeroRuntimeConfigKeys;
-import group.zn.zero.starter.ZeroRuntimeExecutors;
-import group.zn.zero.starter.ZeroServerApplication;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Local game scaffold application.
  *
  * <p>This class wires generated protocol DTO, codec, BO and dispatcher to the zeroServer
- * local starter, player service, scene service, logs and metrics. It does not connect
+ * selected runtime components, player service, scene service, logs and metrics. It does not connect
  * external middleware and is not a production deployment template.</p>
  *
  * @author zn
@@ -63,7 +63,7 @@ public final class __APP_CLASS__ {
     /**
      * Stable local log source.
      */
-    private static final LogSource LOG_SOURCE = new LogSource(APP_NAME, "local", APP_NAME);
+    private static final LogSource LOG_SOURCE = new LogSource(APP_NAME, "__RUNTIME_PROFILE__", APP_NAME);
 
     /**
      * Login metric name.
@@ -94,23 +94,23 @@ public final class __APP_CLASS__ {
      */
     public static DemoResult runDemo() {
         InMemoryLogSink terminalLogSink = new InMemoryLogSink();
-        MonitorRuntime monitorRuntime = MonitorRuntime.createDefault();
-        GameRuntime runtime = LocalRuntime.builder(
-                new MapZeroConfig(Map.of(
-                        ZeroRuntimeConfigKeys.ZERO_MODE, ZeroRuntimeConfigKeys.MODE_LOCAL,
+        GameRuntime runtime = RuntimeAssembly.create(
+                ZeroConfigLoader.loadStandard(Map.of(
+                        __CONFIG_DEFAULTS__,
                         ZeroRuntimeConfigKeys.ZERO_NAME, APP_NAME)),
-                terminalLogSink,
-                ZeroRuntimeExecutors.localPrototype(APP_NAME, 2))
-                .replace(LocalRuntimeCapabilities.MONITOR_RUNTIME, monitorRuntime)
-                .build();
-        ZeroServerApplication application = new ZeroServerApplication(runtime);
+                terminalLogSink);
+        MonitorRuntime monitorRuntime = runtime.require(MonitorRuntimeComponent.MONITOR_RUNTIME);
 
-        application.start();
+        runtime.start();
+        runtime.require(LogRuntime.LOG_APPENDER).append(ZeroLogRecord.create(
+                Instant.now(), LogLevel.INFO, LogType.RUNTIME, LOG_SOURCE,
+                new LogOperation("runtime-start", LogResult.SUCCESS, null),
+                "bootstrap", "zeroServer started", Map.of("name", APP_NAME)));
         try (LocalPlayerService playerService = new LocalPlayerService(
-                runtime.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER),
+                runtime.require(ActorRuntime.ACTOR_SCHEDULER),
                 request -> 1001L);
                 LocalSceneService sceneService = new LocalSceneService(
-                        runtime.require(LocalRuntimeCapabilities.ACTOR_SCHEDULER))) {
+                        runtime.require(ActorRuntime.ACTOR_SCHEDULER))) {
             registerMetrics(monitorRuntime);
             FlowResults results = new FlowResults();
             GeneratedProtocolDispatcher dispatcher = registerHandlers(runtime, playerService, sceneService, results);
@@ -121,15 +121,15 @@ public final class __APP_CLASS__ {
             dispatch(dispatcher, ProtocolIds.GAME_MOVE_PROTOCOL, GameMoveProtocolDTOCodec.INSTANCE, moveRequest());
 
             return new DemoResult(
-                    application.config().getOrDefault(ZeroRuntimeConfigKeys.ZERO_MODE, "unknown"),
-                    application.config().getOrDefault(ZeroRuntimeConfigKeys.ZERO_NAME, "unknown"),
+                    runtime.require(RuntimeBasics.CONFIG).getOrDefault(ZeroRuntimeConfigKeys.ZERO_MODE, "unknown"),
+                    runtime.require(RuntimeBasics.CONFIG).getOrDefault(ZeroRuntimeConfigKeys.ZERO_NAME, "unknown"),
                     results.loginResult().uid(),
                     results.moveResult().currentState().position(),
                     terminalLogSink.records().size(),
                     monitorRuntime.registry().samples().size(),
                     ProtocolIds.MAX_ID);
         } finally {
-            application.stop();
+            runtime.close();
         }
     }
 
@@ -284,7 +284,7 @@ public final class __APP_CLASS__ {
                 final String metricName,
                 final String action) {
             appendLog(traceId, message, action);
-            runtime.require(LocalRuntimeCapabilities.MONITOR_RUNTIME).registry().record(new MetricSample(
+            runtime.require(MonitorRuntimeComponent.MONITOR_RUNTIME).registry().record(new MetricSample(
                     metricName,
                     1D,
                     Map.of("action", action),
@@ -292,7 +292,7 @@ public final class __APP_CLASS__ {
         }
 
         private void appendLog(final String traceId, final String message, final String action) {
-            runtime.require(LocalRuntimeCapabilities.LOG_APPENDER).append(ZeroLogRecord.create(
+            runtime.require(LogRuntime.LOG_APPENDER).append(ZeroLogRecord.create(
                     Instant.now(),
                     LogLevel.INFO,
                     LogType.BUSINESS,

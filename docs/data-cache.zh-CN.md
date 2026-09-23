@@ -1,5 +1,9 @@
 # 数据与缓存设计
 
+2026-09-22：Redis 条件写异常不再通过本地日志伪装成功，删除使用原子脚本；本地日志追加强制刷盘并恢复尾部不完整帧。
+缓存条件失效按实体版本保护 L1 并发更新，同正实体版本不覆盖；本地容量按插入顺序淘汰，加载默认 3 秒超时。
+详见[行为与 API 迁移](migrations/20260922-security-storage-concurrency.md)。
+
 ## 1. 存储职责
 
 默认职责：
@@ -166,5 +170,10 @@ CacheService / LayeredCacheService
 - `zero-data-redis` 当前还提供 `RedisCacheKeyStrategy`、`DefaultRedisCacheKeyStrategy`、`RedisCacheEnvelope`、`RedisCacheEnvelopeCodec`、`RedisCacheStore`、`RedisCacheHealthCheck` 和 `RedisDistributedCacheService`，使用独立 `zero:cache` / `zero:cachever` / `zero:cacheidx` key namespace 承载 Redis L2 缓存，避免与 snapshot / bucket index / journal key 混用，并可显式探测缓存后端健康状态。
 - `zero-data-postgresql` 当前提供 `PostgresqlDataRow`、`PostgresqlDataEnvelopeStore`、`PostgresqlDriverEnvelopeStore`、`PostgresqlDriverSettings` 和 `PostgresqlDataHealthCheck`，以通用对象表行形态保存 namespace、collection、id、版本、schema、codec、更新时间和 zcode payload；driver-backed store 使用版本条件 update 承载乐观锁，连接 URL、用户名和密码必须由系统属性或环境变量注入。
 - 当前实现已具备 MongoDB / Redis / PostgreSQL 真实驱动外部集成测试入口；默认单元测试仍不强制依赖外部服务。
-- `docs/repository-save-performance-evidence.zh-CN.md` 与 `scripts/ZeroRepositorySaveBenchmarkReadiness.java` 已整理 envelope、Repository CAS、版本冲突、saveAll、dirty flush、失败保留和三类 Adapter 分层测量口径；该入口不创建 Store、不启动调度、不连接数据库，也不证明生产容量。
-- `docs/cache-get-or-load-performance-evidence.zh-CN.md` 与 `scripts/ZeroCacheGetOrLoadBenchmarkReadiness.java` 已整理 L1/L2、loader、singleflight、负缓存、并发加载背压、L2 故障降级和 Redis Driver 分层测量口径；该入口不创建 Cache、不调用 loader、不启动线程、不连接 Redis，也不把聚合 hit 计数误作 L1/L2 分层证据。
+- `docs/operations/evidence/repository-save-performance-evidence.zh-CN.md` 已整理 envelope、Repository CAS、版本冲突、saveAll、dirty flush、失败保留和三类 Adapter 分层测量口径；该入口不创建 Store、不启动调度、不连接数据库，也不证明生产容量。
+- `docs/operations/evidence/cache-get-or-load-performance-evidence.zh-CN.md` 已整理 L1/L2、loader、singleflight、负缓存、并发加载背压、L2 故障降级和 Redis Driver 分层测量口径；该入口不创建 Cache、不调用 loader、不启动线程、不连接 Redis，也不把聚合 hit 计数误作 L1/L2 分层证据。
+
+
+## 2026-09-17 报告核实修订
+
+内存缓存先登记单飞 future 再调用加载器，完成时按身份移除；显式写入和失效阻止更早加载回填。L2 回填 L1 原子比较缓存版本并保留原到期时间；读取到的 L2 版本推进本地版本生成器。持久化管理器必须先 start；在仓库及快照执行域关闭前 stop，停止期间拒绝新增脏对象，等待在途 flush 并保存全部剩余对象。默认停机预算 30 秒，可通过构造器配置；依赖返回非阻塞 CompletionStage。失败/超时保留脏入口并以 PERSISTENCE_FLUSH_FAILED 使生命周期进入 FAILED，可恢复依赖后再次 stop。并发 flush 合并为同一在途批次，后续脏入口继续保留。

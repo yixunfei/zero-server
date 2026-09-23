@@ -88,7 +88,7 @@ public record KafkaRpcSettings(
         return new KafkaRpcSettings(
                 bootstrapServers,
                 "zero-rpc-" + suffix,
-                "zero-rpc-service",
+                "zero-rpc-service-" + suffix,
                 "zero.rpc",
                 "zero.rpc.reply." + suffix,
                 4096,

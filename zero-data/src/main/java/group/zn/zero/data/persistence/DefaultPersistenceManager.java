@@ -14,6 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -89,6 +91,15 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
      */
     private final AtomicLong flushFailureCount = new AtomicLong();
 
+    /** 单飞 flush，避免同一快照被并行保存两次。 */
+    private final AtomicReference<CompletableFuture<PersistenceFlushResult>> activeFlush = new AtomicReference<>();
+    /** 停机与新增脏入口的线性化锁，不在锁内等待外部 IO。 */
+    private final Object admissionLock = new Object();
+    /** 是否已经停止接受新的脏入口。 */
+    private boolean stopping;
+    /** 停机等待预算。 */
+    private final Duration shutdownTimeout;
+
     /**
      * 创建默认统一持久化管理服务。
      */
@@ -119,6 +130,23 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             final String serviceName,
             final PersistenceBindingExecutor bindingExecutor,
             final Clock clock) {
+        this(serviceName, bindingExecutor, clock, Duration.ofSeconds(30));
+    }
+
+    /**
+     * 创建带停机等待预算的管理器；调用方必须在关闭执行域及仓库前停止管理器。
+     * @param serviceName 名称；不可为空白。
+     * @param bindingExecutor 快照执行器；不可为空。
+     * @param clock 统计时钟；不可为空。
+     * @param shutdownTimeout 停机预算；必须为正。
+     * @throws IllegalArgumentException 参数非法时抛出。
+     */
+    public DefaultPersistenceManager(final String serviceName, final PersistenceBindingExecutor bindingExecutor,
+            final Clock clock, final Duration shutdownTimeout) {
+        this.shutdownTimeout = Objects.requireNonNull(shutdownTimeout, "shutdownTimeout");
+        if (shutdownTimeout.isNegative() || shutdownTimeout.isZero()) {
+            throw new IllegalArgumentException("shutdownTimeout must be positive");
+        }
         this.serviceName = requireText(serviceName, "serviceName");
         this.bindingExecutor = Objects.requireNonNull(bindingExecutor, "bindingExecutor");
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -177,8 +205,13 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
         Objects.requireNonNull(snapshotSupplier, "snapshotSupplier");
         requireTarget(currentTargetName);
         DirtyKey key = new DirtyKey(currentTargetName, id);
-        dirtyEntries.put(key, new DirtyEntry<>(key, currentTargetName, id, binding, snapshotSupplier));
-        dirtyMarkCount.incrementAndGet();
+        synchronized (admissionLock) {
+            if (stopping) {
+                throw ZeroException.of(DataErrorCode.PERSISTENCE_FLUSH_FAILED, "persistence is stopping", null);
+            }
+            dirtyEntries.put(key, new DirtyEntry<>(key, currentTargetName, id, binding, snapshotSupplier));
+            dirtyMarkCount.incrementAndGet();
+        }
     }
 
     /**
@@ -203,14 +236,26 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
         if (maxBatchSize <= 0) {
             throw new IllegalArgumentException("maxBatchSize must be positive");
         }
-        long startedAt = clock.millis();
-        List<DirtyEntry<?, ?>> batch = dirtyEntries.values().stream()
-                .limit(maxBatchSize)
-                .toList();
-        flushAttemptCount.addAndGet(batch.size());
-        FlushAccumulator accumulator = new FlushAccumulator(startedAt, batch.size());
-        return flushBatch(batch, accumulator)
-                .thenApply(this::completeResult);
+        CompletableFuture<PersistenceFlushResult> future = new CompletableFuture<>();
+        while (!activeFlush.compareAndSet(null, future)) {
+            CompletableFuture<PersistenceFlushResult> existing = activeFlush.get();
+            if (existing != null) return existing;
+        }
+        try {
+            long startedAt = clock.millis();
+            List<DirtyEntry<?, ?>> batch = dirtyEntries.values().stream().limit(maxBatchSize).toList();
+            flushAttemptCount.addAndGet(batch.size());
+            FlushAccumulator accumulator = new FlushAccumulator(startedAt, batch.size());
+            flushBatch(batch, accumulator).thenApply(this::completeResult).whenComplete((result, failure) -> {
+                activeFlush.compareAndSet(future, null);
+                if (failure == null) future.complete(result);
+                else future.completeExceptionally(failure);
+            });
+        } catch (RuntimeException failure) {
+            activeFlush.compareAndSet(future, null);
+            future.completeExceptionally(failure);
+        }
+        return future;
     }
 
     /**
@@ -252,15 +297,37 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
                 flushFailureCount.get());
     }
 
-    /**
-     * 停止服务时取消所有定时任务。
-     */
+    /** 重新启动时允许登记，残留脏入口继续保留。 */
+    @Override
+    protected void doStart() {
+        synchronized (admissionLock) { stopping = false; }
+    }
+
+    /** 停止定时入口并在预算内保存全部脏对象；失败保留对象且生命周期进入 FAILED。 */
     @Override
     protected void doStop() {
-        for (PersistenceScheduleHandle handle : scheduleHandles) {
-            handle.cancel();
-        }
+        synchronized (admissionLock) { stopping = true; }
+        for (PersistenceScheduleHandle handle : scheduleHandles) handle.cancel();
         scheduleHandles.clear();
+        long startedAt = System.nanoTime();
+        try {
+            do {
+                long remaining = shutdownTimeout.toNanos() - (System.nanoTime() - startedAt);
+                if (remaining <= 0) throw new java.util.concurrent.TimeoutException("persistence stop timed out");
+                PersistenceFlushResult result = flushNow(Integer.MAX_VALUE).toCompletableFuture()
+                        .get(remaining, TimeUnit.NANOSECONDS);
+                if (result.failureCount() > 0) {
+                    throw ZeroException.of(DataErrorCode.PERSISTENCE_FLUSH_FAILED,
+                            "stop flush failed; retained dirty objects=" + dirtyEntries.size(), null);
+                }
+            } while (!dirtyEntries.isEmpty() || activeFlush.get() != null);
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            throw ZeroException.of(DataErrorCode.PERSISTENCE_FLUSH_FAILED, "stop flush interrupted", failure);
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException failure) {
+            throw ZeroException.of(DataErrorCode.PERSISTENCE_FLUSH_FAILED,
+                    "stop flush did not complete; dirty objects retained", failure);
+        }
     }
 
     private CompletionStage<FlushAccumulator> flushBatch(
@@ -283,7 +350,11 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private CompletionStage<Void> flushEntry(final DirtyEntry<?, ?> entry) {
-        return flushTyped((DirtyEntry) entry);
+        try {
+            return flushTyped((DirtyEntry) entry);
+        } catch (RuntimeException failure) {
+            return failedFuture(DataErrorCode.PERSISTENCE_FLUSH_FAILED, "snapshot capture failed", failure);
+        }
     }
 
     private <ID, T extends VersionedEntity<ID>> CompletionStage<Void> flushTyped(

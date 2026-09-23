@@ -24,12 +24,13 @@ Read these files in order:
 Start with:
 
 ~~~text
-src/main/java/__PACKAGE_PATH__/__APP_CLASS__.java
+src/main/java/__PACKAGE_PATH__/LocalGameBO.java
+src/main/java/__PACKAGE_PATH__/LocalGameFlow.java
+src/main/java/__PACKAGE_PATH__/LocalGameFixture.java
+src/main/java/__PACKAGE_PATH__/LocalGameObservation.java
 ~~~
 
-This file contains the local application and handwritten BO implementation used by the generated dispatcher.
-When you add a new request, keep business state changes inside the local service or Actor lane shown by the template.
-Do not create ad hoc thread pools in business code.
+`__APP_CLASS__.java` is the composition root only. `LocalGameBO` adapts generated protocol events to injected asynchronous business ports. Services return `CompletionStage`; handlers must compose stages and must not call `join()` or `get()`.
 
 ## 3. Where To Change Protocol
 

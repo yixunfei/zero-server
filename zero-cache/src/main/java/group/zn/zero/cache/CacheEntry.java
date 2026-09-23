@@ -10,10 +10,22 @@ import java.util.Optional;
  * @param version 版本号。
  * @param expiresAt 过期时间。
  * @param negative 是否为负缓存条目。
+ * @param entityVersion 实体版本；0 表示未版本化。
  * @param <V> 缓存值类型。
  * @author zn
  */
-public record CacheEntry<V>(V value, long version, Instant expiresAt, boolean negative) {
+public record CacheEntry<V>(V value, long version, Instant expiresAt, boolean negative, long entityVersion) {
+
+    /**
+     * 创建未版本化条目；条目不可变，可并发共享。
+     * @param value 缓存值。
+     * @param version 缓存版本。
+     * @param expiresAt 过期时间。
+     * @param negative 是否为负缓存。
+     */
+    public CacheEntry(final V value, final long version, final Instant expiresAt, final boolean negative) {
+        this(value, version, expiresAt, negative, 0L);
+    }
 
     /**
      * 创建缓存条目。
@@ -22,6 +34,9 @@ public record CacheEntry<V>(V value, long version, Instant expiresAt, boolean ne
      */
     public CacheEntry {
         java.util.Objects.requireNonNull(expiresAt, "expiresAt");
+        if (entityVersion < 0L) {
+            throw new IllegalArgumentException("entityVersion must be non-negative");
+        }
     }
 
     /**

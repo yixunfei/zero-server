@@ -1,0 +1,3 @@
+# Generated DTO -> network -> Actor -> generated BO -> response fixture.
+client_to_server:
+  submit(long sequence, long due, String text);

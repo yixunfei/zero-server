@@ -1,0 +1,1 @@
+package group.zn.zero.npc; import java.util.Objects; public record BehaviorState(String type){public BehaviorState{Objects.requireNonNull(type);if(type.isBlank())throw new IllegalArgumentException("blank type");} public static BehaviorState idle(){return new BehaviorState("idle");}}

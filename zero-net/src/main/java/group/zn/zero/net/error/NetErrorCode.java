@@ -25,6 +25,9 @@ public enum NetErrorCode implements ErrorCode {
      */
     SEND_FAILED("ZERO-NET-SEND-FAILED", "net message send failed"),
 
+    /** 待写预算耗尽或慢连接不可写；消息未准入。 */
+    OUTBOUND_OVERFLOW("ZERO-NET-OUTBOUND-OVERFLOW", "network outbound budget exceeded"),
+
     /**
      * 网络消息类型非法。
      */
@@ -81,6 +84,30 @@ public enum NetErrorCode implements ErrorCode {
      */
     RATE_LIMITED(ErrorCategory.CLIENT_REQUEST,
             "ZERO-NET-RATE-LIMITED", "network request rate limited"),
+
+    /** 认证主体缺失。 */
+    UNAUTHENTICATED(ErrorCategory.PERMISSION, "ZERO-NET-UNAUTHENTICATED", "network authentication required"),
+
+    /** 认证凭据已经过期。 */
+    AUTHENTICATION_EXPIRED(ErrorCategory.PERMISSION, "ZERO-NET-AUTHENTICATION-EXPIRED", "network authentication expired"),
+
+    /** 请求被识别为重放。 */
+    REPLAY_DETECTED(ErrorCategory.PERMISSION, "ZERO-NET-REPLAY-DETECTED", "network replay detected"),
+
+    /** TLS 是必需的但连接未使用 TLS。 */
+    TLS_REQUIRED(ErrorCategory.PERMISSION, "ZERO-NET-TLS-REQUIRED", "TLS is required"),
+
+    /** TLS 握手或证书材料失败。 */
+    TLS_HANDSHAKE_FAILED(ErrorCategory.PERMISSION, "ZERO-NET-TLS-HANDSHAKE-FAILED", "TLS handshake failed"),
+
+    /** 请求授权被拒绝。 */
+    AUTHORIZATION_DENIED(ErrorCategory.PERMISSION, "ZERO-NET-AUTHORIZATION-DENIED", "network authorization denied"),
+
+    /** 来源地址命中黑名单。 */
+    BLACKLISTED(ErrorCategory.PERMISSION, "ZERO-NET-BLACKLISTED", "network source is blocked"),
+
+    /** 连接建立过慢。 */
+    SLOW_CONNECTION(ErrorCategory.CLIENT_REQUEST, "ZERO-NET-SLOW-CONNECTION", "network connection is too slow"),
 
     /**
      * 玩家重连协调失败。

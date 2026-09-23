@@ -241,7 +241,7 @@ public final class ZeroWriter implements AutoCloseable {
         if (value < 0) {
             throw new IllegalArgumentException("unsigned int must not be negative");
         }
-        ensureWritable(MAX_INT_BYTES);
+        ensureWritable(unsignedIntSize(value));
         writerIndex += writeUnsignedIntAt(writerIndex, value);
     }
 
@@ -303,8 +303,7 @@ public final class ZeroWriter implements AutoCloseable {
             writeUnsignedInt(0);
             return;
         }
-        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-        writeByteArray(bytes);
+        writeByteArray(value.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
@@ -345,6 +344,18 @@ public final class ZeroWriter implements AutoCloseable {
     public void writeBytes(final byte[] bytes) {
         Objects.requireNonNull(bytes, "bytes");
         writeBytes(bytes, 0, bytes.length);
+    }
+
+    /**
+     * 写入只读或可写视图的剩余数据，不修改源游标；线程不安全，修改本 writer。
+     * @param source 来源，不可为空；调用期间须保持内容稳定。
+     * @throws NullPointerException 来源为空。
+     */
+    public void writeBytes(final ByteBuffer source) {
+        int length = Objects.requireNonNull(source, "source").remaining();
+        ensureWritable(length);
+        buffer.putBytes(writerIndex, source);
+        writerIndex += length;
     }
 
     /**
@@ -810,7 +821,7 @@ public final class ZeroWriter implements AutoCloseable {
      * @param value 待写入值。
      */
     private void writeRawVarInt32(final int value) {
-        ensureWritable(MAX_INT_BYTES);
+        ensureWritable(unsignedIntSize(value));
         writerIndex += writeUnsignedIntAt(writerIndex, value);
     }
 

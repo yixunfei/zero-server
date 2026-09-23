@@ -18,20 +18,11 @@ public final class ScaffoldCatalog {
             StandardRuntimeCapabilityModel.CONFIG,
             StandardRuntimeCapabilityModel.EXECUTORS,
             StandardRuntimeCapabilityModel.LOG_APPENDER,
-            StandardRuntimeCapabilityModel.DEAD_LETTER_SINK,
-            StandardRuntimeCapabilityModel.EVENT_BUS,
             StandardRuntimeCapabilityModel.ACTOR_SCHEDULER,
-            StandardRuntimeCapabilityModel.PROTOCOL_REGISTRY,
-            StandardRuntimeCapabilityModel.RPC_TRANSPORT,
-            StandardRuntimeCapabilityModel.RPC_HANDLER_REGISTRY,
-            StandardRuntimeCapabilityModel.PERSISTENCE_MANAGER,
-            StandardRuntimeCapabilityModel.CACHE_SERVICE,
             StandardRuntimeCapabilityModel.MONITOR_RUNTIME);
 
     private static final List<ScaffoldDependency> DIRECT_DEPENDENCIES = List.of(
-            new ScaffoldDependency(MavenCoordinate.zero("zero-codegen"), "provided"),
-            new ScaffoldDependency(MavenCoordinate.zero("zero-runtime"), ""),
-            new ScaffoldDependency(MavenCoordinate.zero("zero-server-starter"), ""));
+            new ScaffoldDependency(MavenCoordinate.zero("zero-protocol"), ""));
 
     private final RuntimeCapabilityModel capabilityModel;
     private final Map<String, ScaffoldTemplate> templates;
@@ -72,6 +63,12 @@ public final class ScaffoldCatalog {
 
     private static Collection<ScaffoldTemplate> standardTemplates() {
         return List.of(
+                new ScaffoldTemplate("runtime", "runtime-scaffold", "", "",
+                        "minimal runtime with selected components", List.of("runtime", "minimal", "components"),
+                        "explicit component assembly and replaceable providers", "runtime-composition=ok",
+                        "external service startup and deployment verification",
+                        List.of(StandardRuntimeCapabilityModel.CONFIG, StandardRuntimeCapabilityModel.EXECUTORS),
+                        List.of()),
                 template("local", "local-game-scaffold", "Game.si.tpl", "src/main/protocol/Game.si",
                         "player and scene local prototype",
                         List.of("local", "rpg", "player", "scene", "login", "move", "prototype",
@@ -139,6 +136,9 @@ public final class ScaffoldCatalog {
                 summaryPrefix,
                 productionGap,
                 LOCAL_CAPABILITIES,
-                DIRECT_DEPENDENCIES);
+                id.equals("local") ? List.of(
+                        DIRECT_DEPENDENCIES.getFirst(),
+                        new ScaffoldDependency(MavenCoordinate.zero("zero-player"), ""),
+                        new ScaffoldDependency(MavenCoordinate.zero("zero-scene"), "")) : DIRECT_DEPENDENCIES);
     }
 }

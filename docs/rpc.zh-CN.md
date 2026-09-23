@@ -8,6 +8,11 @@ RPC 编解码优先使用自研协议，但必须抽象 SPI，支持未来平滑
 
 ## 2. Kafka RPC
 
+接收端默认 fail-closed，必须配置安全元数据验证器；runtime 入口为 `KafkaRuntime.module(properties, verifier)`。
+消费确认等待异步 handler 和响应 producer ack，pause 期间继续 poll 心跳；失败/停机/重平衡允许重投。
+默认 earliest 和实例独立 consumer group；竞争消费和跨重启恢复须显式设置共享或稳定组名。
+这是至少一次语义，业务需要幂等。具体错误处理、配置和迁移见[安全与确认迁移](migrations/20260922-security-storage-concurrency.md)。
+
 zeroServer 支持同步 RPC 通过 Kafka，但默认鼓励异步回调通知。
 
 同步 RPC 默认超时：
@@ -144,7 +149,7 @@ Broadcast RPC 支持两种筛选：
 
 旧版 `zero.rpc.version`、`zero.rpc.topic`、`zero.rpc.group` 和 `zero.rpc.protocol` 保留兼容读取和写入。
 
-`zero-discovery-nacos` 提供 `NacosRpcMetadataMapper` 和 `ServiceDiscoveryRpcServiceResolver`，负责把 Nacos / 本地 `ServiceDiscovery` 实例映射为 RPC 中立模型。`zero-server-starter-production` 在显式启用 Nacos discovery 时绑定 `ProductionRuntimeCapabilities.RPC_SERVICE_RESOLVER`，调用方通过 `GameRuntime.require(...)` 取得中立接口；默认 local 路径仍不连接 Nacos。
+`zero-rpc-discovery` 提供 `NacosRpcMetadataMapper` 和 `ServiceDiscoveryRpcServiceResolver`，负责把 `zero-discovery` 的中立实例映射为 RPC 模型，不引入 Nacos SDK。`zero-runtime-nacos` 在显式启用 Nacos discovery 时绑定 `RpcRuntime.RPC_SERVICE_RESOLVER`，调用方通过 `GameRuntime.require(...)` 取得中立接口；默认 local 路径仍不连接 Nacos。
 
 consumer 侧默认调用路径仍由 `RpcClientFactory`、`RpcRoute` 和具体 transport 决定。本阶段先提供显式 resolver 协作入口，不把服务发现自动接入所有 RPC 调用，避免改变现有调用语义。
 
@@ -174,5 +179,10 @@ consumer 侧默认调用路径仍由 `RpcClientFactory`、`RpcRoute` 和具体 t
 - common 接口本地闭环已按 `接口代理 -> ProtocolCodec 编码 -> RpcRequest -> 远端实现 -> RpcResponse -> ProtocolCodec 解码` 形态落地。
 - `InMemoryRpcTransport` 支持 request/response 和 oneway，并在本地链路里校验 `timeoutAt`、`correlationId` 和 `traceId`。
 - `zero-rpc-kafka` 当前提供 `KafkaRpcAdapter`、`KafkaRpcSettings`、`KafkaRpcEnvelopeCodec`、`KafkaRpcTopicResolver`、`KafkaRpcPendingRequests` 和内部 `KafkaRpcTimeoutWheel`，已接入 Apache Kafka producer/consumer gateway，并支持默认单元测试使用内存 gateway 验证；Kafka adapter 已发出 RPC 观测事件并暴露 pending、发送、拒绝和 consumer 重启计数快照。
-- `docs/rpc-pending-performance-evidence.zh-CN.md` 与 `scripts/ZeroRpcPendingBenchmarkReadiness.java` 已整理 pending 注册/完成、并发容量、时间轮误差、observer、fail-all 和发送失败的 benchmark 前置口径；该入口不启动时间轮、不连接 Kafka，也不证明生产容量。
+- `docs/operations/evidence/rpc-pending-performance-evidence.zh-CN.md` 已整理 pending 注册/完成、并发容量、时间轮误差、observer、fail-all 和发送失败的 benchmark 前置口径；该入口不启动时间轮、不连接 Kafka，也不证明生产容量。
 - 当前 `replyTopic`、`serviceName`、`methodName`、`traceId`、`timeoutAt`、`topic`、`group` 和 `partitionKey` 已进入 RPC/Kafka 路由链路；RPC discovery 模型只描述服务发现实例 metadata 和显式选择结果，不改变 RPC/Kafka envelope 和 transport 请求语义。Kafka/Nacos 多 JVM external-test 已覆盖远程 Actor caller JVM 通过 Nacos 解析 Kafka route 后向 provider JVM 投递 Actor 消息的最小闭环。
+
+
+## 2026-09-17 报告核实修订
+
+同步客户端从调用入口计算一次超时预算，构造请求的 deadline 与本地剩余等待共用该预算；无法抢占同步阻塞的第三方 SPI。Kafka envelope 拒绝尾随字节及超出剩余载荷的声明长度，时间轮在取得桶锁后重验 tick，避免任务落入刚扫描完的桶。

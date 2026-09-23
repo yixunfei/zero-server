@@ -6,12 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import group.zn.zero.core.config.ZeroConfig;
 import group.zn.zero.core.config.ZeroConfigLoader;
-import group.zn.zero.discovery.nacos.InMemoryServiceDiscovery;
+import group.zn.zero.discovery.InMemoryServiceDiscovery;
 import group.zn.zero.discovery.nacos.NacosDiscoveryAdapter;
 import group.zn.zero.discovery.nacos.NacosDiscoveryConfigKeys;
 import group.zn.zero.discovery.nacos.NacosDiscoveryFactory;
-import group.zn.zero.discovery.nacos.ServiceDiscovery;
-import group.zn.zero.discovery.nacos.ServiceInstance;
+import group.zn.zero.discovery.ServiceDiscovery;
+import group.zn.zero.discovery.ServiceInstance;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Path;

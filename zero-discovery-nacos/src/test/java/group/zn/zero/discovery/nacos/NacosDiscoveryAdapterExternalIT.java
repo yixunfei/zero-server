@@ -5,16 +5,23 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import group.zn.zero.discovery.ServiceDiscoveryConstants;
+import group.zn.zero.discovery.ServiceEvent;
+import group.zn.zero.discovery.ServiceInstance;
+import group.zn.zero.discovery.ServiceQuery;
+import group.zn.zero.discovery.ServiceSubscription;
+import group.zn.zero.rpc.discovery.NacosRpcMetadataMapper;
 import group.zn.zero.rpc.discovery.RpcServiceQuery;
 import group.zn.zero.rpc.discovery.RpcServiceSelection;
+import group.zn.zero.rpc.discovery.ServiceDiscoveryRpcServiceResolver;
 import java.time.Duration;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -70,7 +77,7 @@ class NacosDiscoveryAdapterExternalIT {
                 "",
                 ServiceDiscoveryConstants.DEFAULT_GROUP_NAME,
                 ServiceDiscoveryConstants.DEFAULT_CLUSTER_NAME,
-                5_000,
+                30_000,
                 false,
                 NacosHealthUpdateMode.REREGISTER,
                 Map.of()));
