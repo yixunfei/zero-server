@@ -68,8 +68,10 @@ public final class VerifyNoSdkExternalService {
         String javaHome = System.getProperty("java.home");
         if (javaHome != null) {
             builder.environment().put("JAVA_HOME", javaHome);
-            builder.environment().put("PATH", Path.of(javaHome, "bin") + java.io.File.pathSeparator
-                    + builder.environment().getOrDefault("PATH", ""));
+            String pathKey = builder.environment().keySet().stream()
+                    .filter(key -> key.equalsIgnoreCase("PATH")).findFirst().orElse("PATH");
+            builder.environment().put(pathKey, Path.of(javaHome, "bin") + java.io.File.pathSeparator
+                    + builder.environment().getOrDefault(pathKey, ""));
         }
         Process process = builder.start();
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);

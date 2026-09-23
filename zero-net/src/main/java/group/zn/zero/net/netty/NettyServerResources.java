@@ -34,6 +34,10 @@ final class NettyServerResources implements AutoCloseable {
     void track(final Channel channel) { children.add(channel); }
     Channel bind(final ChannelFuture future) throws InterruptedException {
         listener = future.channel();
+        // Netty 对已完成的 future 不检查中断；显式检查，避免快速 bind 随时序忽略取消。
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedException("server bind interrupted");
+        }
         future.sync();
         return listener;
     }

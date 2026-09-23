@@ -42,3 +42,5 @@ mvn -B -ntp -DskipTests install
 java scripts/VerifyGeneratedCompositions.java
 java scripts/ZeroAcceptanceEvidence.java --level full --local-only --no-stage0
 ```
+
+Stage 0 复验另发现快速 bind 已完成时 Netty `sync()` 不检查预先中断，导致启动是否取消取决于时序。共享 TCP/HTTP/UDP 资源入口现显式检查中断，调用层保留 `START_FAILED` 与中断状态，并关闭本次 listener、不关闭借用 IO 组；增加已完成 future 的确定性回归用例。业务不需要迁移。

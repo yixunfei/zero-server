@@ -88,6 +88,24 @@ class NettyIoResourcesTest {
         }
     }
 
+    @Test void completedBindStillHonorsInterruptionAndClosesItsChannel() throws Exception {
+        try (var io = NettyIoResources.open(OPTIONS)) {
+            var resources = new NettyServerResources(OPTIONS, io);
+            var channel = new io.netty.channel.embedded.EmbeddedChannel();
+            var completed = channel.newSucceededFuture();
+            Thread.currentThread().interrupt();
+            try {
+                assertThrows(InterruptedException.class, () -> resources.bind(completed));
+                assertTrue(Thread.currentThread().isInterrupted());
+            } finally {
+                Thread.interrupted();
+                resources.close();
+            }
+            assertFalse(channel.isOpen());
+            assertFalse(io.snapshot().closing());
+        }
+    }
+
     @Test void ioThreadStopAndResourceCloseNeverWaitForThemselves() throws Exception {
         var io = NettyIoResources.open(OPTIONS);
         var server = echo(OPTIONS, io);

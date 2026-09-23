@@ -11,6 +11,7 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 - 合入已通过完整本机门禁的 MongoDB Driver 5.9.2、Netty 4.2.17.Final、Nacos Client 3.2.3、Jedis 8.0.0，以及 Actions setup-java v6 / upload-artifact v7。
 - SpotBugs Maven Plugin 4.10.3.0 因 zero-protocol 的 11 个 `UNS_UNSAFE_CALL` 质量告警保留 4.9.3.0；未使用 suppression 绕过门禁。
 - 修复 net 脚手架装配参数、网络开关和 runtime 模板依赖闭包；默认拒绝握手，保留框架有界限流。验收入口补齐依赖构建与跨平台 classpath，普通 CI 明确采集本地范围证据，Stage 0 独立执行。
+- 修复快速网络 bind 忽略已设置中断的竞态，保留启动失败错误码、listener 回收及借用 IO 组所有权。
 - 调度器测试增加有界线程退出等待以消除关闭尾部竞态。完整验证、外部 Docker 限制和回滚方式见[迁移说明](docs/migrations/20260923-dependency-upgrades.md)。
 
 ### 2026-09-23 公开检出 CI 入口
