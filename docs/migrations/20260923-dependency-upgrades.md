@@ -1,4 +1,4 @@
-# 2026-09-23 依赖升级与候选合并
+# 2026-09-23 依赖升级、验收修复与合并
 
 本次将经过验证的 Dependabot 依赖升级合入 `main`。项目仍处于 `0.x` 开发预览阶段，升级后的完整组合为：
 
@@ -22,10 +22,18 @@ MongoDB、Netty、Nacos 和 Jedis 的版本声明发生变化，运行时依赖�
 本机通过：
 
 ```text
-mvn -B -ntp -Pquality,benchmarks,integration-tests verify
+mvn -B -ntp -Pquality,benchmarks,integration-tests install
 ```
 
-58 个 reactor 项目全部成功，包含 Checkstyle、PMD、SpotBugs、Surefire、Failsafe 和 benchmark smoke。远端 CI 仍需对最终候选提交运行并核对。Redis、MongoDB、Nacos 的真实外部服务测试因本机 Docker Desktop backend 启动失败而未执行，不能将本次结果视为外部组件验收。
+源码 `ddaa8d3` 的 58 个 reactor 项目全部成功，210 个测试类、787 项测试，失败、错误和跳过均为 0，包含 Checkstyle、PMD、SpotBugs、Surefire、Failsafe 和 benchmark smoke。
+
+[最终源码 CI（35876934868）](https://github.com/yixunfei/zero-server/actions/runs/35876934868) 的 13 项常规 job 全部成功，包含三平台入口/事务、质量、API、架构、本地集成与验收证据包；Stage 0 为 18/18，无跳过，独立生成消费者矩阵为 26/26。外部、性能专项与发布制品三个 opt-in job 未运行。
+
+本地证据包（Windows）与最终源码证据包（Linux）均为 22 passed、4 skipped、0 failed/blocked/missing。跳过项明确为外部 Kafka、外部持久化、另行执行的 macOS 检查和 Stage 0；不将它们记作当前证据包已执行。新生成 local+net 工程完成编译、测试及真实 loopback TCP 回显；独立 scheduler 示例也通过测试和运行。
+
+升级后网络制品的真实生成 DTO/TLS 短测为 32 连接、1000 请求/秒、10 秒，10000/10000 成功，failed/timeouts/rejected/pending/unexpectedResponses 均为 0。该网络制品基于 `af459a8`，SHA-256 为 `217b0ba4bd9881594e055452bb6caff8e39874ac467dc28fc2fa624e2494f672`；后续 scheduler 修复由完整门禁及源码 CI 验证。未将短测延伸为新版本容量或长稳结论。
+
+Redis、MongoDB、Nacos 的真实外部服务测试因本机 Docker Desktop backend 启动失败而未执行，不能将本次结果视为外部组件验收。
 
 历史性能报告基于旧依赖组合，不能作为上述升级版本的性能实测证据。
 
