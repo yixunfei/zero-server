@@ -17,9 +17,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
 import io.netty.handler.ssl.SslContext;
@@ -232,13 +230,16 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
      */
     @Override
     protected void doStart() {
-        bossGroup = new NioEventLoopGroup(options.bossThreads());
-        workerGroup = new NioEventLoopGroup(options.workerThreads());
         try {
+            bossGroup = NettyTransportFactory.eventLoops(options.tuning().transport(), options.bossThreads());
+            workerGroup = NettyTransportFactory.eventLoops(options.tuning().transport(), options.workerThreads());
+            OutboundBudget outbound = new OutboundBudget(options.tuning().maxPendingBytesTotal());
             ServerBootstrap bootstrap = new ServerBootstrap()
                     .group(bossGroup, workerGroup)
-                    .channel(NioServerSocketChannel.class)
-                    .option(ChannelOption.SO_BACKLOG, 128)
+                    .channel(NettyTransportFactory.serverChannel(options.tuning().transport()))
+                    .option(ChannelOption.SO_BACKLOG, options.tuning().backlog())
+                    .childOption(ChannelOption.WRITE_BUFFER_WATER_MARK, new io.netty.channel.WriteBufferWaterMark(
+                            options.tuning().writeLowWaterMark(), options.tuning().writeHighWaterMark()))
                     .childOption(ChannelOption.TCP_NODELAY, true)
                     .childOption(ChannelOption.SO_KEEPALIVE, true)
                     .childHandler(new ChannelInitializer<SocketChannel>() {
@@ -246,6 +247,10 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
                         protected void initChannel(final SocketChannel channel) {
                             if (tlsContext != null) {
                                 channel.pipeline().addLast("ssl", tlsContext.newHandler(channel.alloc()));
+                            }
+                            if (options.tuning().flushConsolidationLimit() > 0) {
+                                channel.pipeline().addLast("flushConsolidation", new io.netty.handler.flush.FlushConsolidationHandler(
+                                        options.tuning().flushConsolidationLimit(), true));
                             }
                             channel.pipeline()
                                     .addLast("lengthDecoder", new LengthFieldBasedFrameDecoder(
@@ -256,12 +261,12 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
                                             4))
                                     .addLast("frameDecoder", new NettyProtocolFrameDecoder(frameCodec))
                                     .addLast("lengthEncoder", new LengthFieldPrepender(4))
-                                    .addLast("frameEncoder", new NettyProtocolFrameEncoder(frameCodec))
+                                    .addLast("frameEncoder", new NettyProtocolFrameEncoder(frameCodec, options.maxFrameLength() - 4))
                                     .addLast("frameHandler", new NettyFrameChannelHandler(
                                             frameHandler,
                                             connectionListener,
                                             handlerExecutor,
-                                            productionLifecycle));
+                                            productionLifecycle, options, frameCodec, outbound));
                         }
                     });
             serverChannel = bootstrap.bind(options.host(), options.port()).sync().channel();

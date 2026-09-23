@@ -192,7 +192,7 @@ class ExecutorActorSchedulerTest {
                 () -> scheduler.dispatch(new ActorMessage(LaneKey.player("p1"), "payload"))
                         .toCompletableFuture().join());
         assertInstanceOf(ZeroException.class, failure.getCause());
-        assertEquals(SystemErrorCode.SYSTEM_ERROR, ((ZeroException) failure.getCause()).errorCode());
+        assertEquals(group.zn.zero.actor.error.ActorErrorCode.EXECUTOR_REJECTED, ((ZeroException) failure.getCause()).errorCode());
     }
 
     private void assertSystemFailure(final java.util.concurrent.CompletionStage<Void> stage, final String message) {

@@ -32,6 +32,9 @@ public final class NettyConnection implements IConnection {
      */
     private final Channel channel;
 
+    /** 有界批次发送器；线程安全。 */
+    private final NettyOutbound outbound;
+
     /**
      * 连接属性。
      */
@@ -44,8 +47,17 @@ public final class NettyConnection implements IConnection {
      * @param channel Netty channel；不可为空。
      */
     public NettyConnection(final String connectionId, final Channel channel) {
+        this(connectionId, channel, new group.zn.zero.protocol.codec.ZeroBinaryFrameCodec(),
+                group.zn.zero.net.ServerOptions.tcp("localhost", 0),
+                new OutboundBudget(group.zn.zero.net.NetworkTuning.defaults().maxPendingBytesTotal()));
+    }
+
+    NettyConnection(final String connectionId, final Channel channel,
+            final group.zn.zero.protocol.codec.ProtocolFrameCodec codec,
+            final group.zn.zero.net.ServerOptions options, final OutboundBudget budget) {
         this.connectionId = Objects.requireNonNull(connectionId, "connectionId");
         this.channel = Objects.requireNonNull(channel, "channel");
+        this.outbound = new NettyOutbound(channel, codec, options, budget);
     }
 
     /**
@@ -113,20 +125,20 @@ public final class NettyConnection implements IConnection {
                     "Netty TCP connection only supports ProtocolFrame",
                     null));
         }
-        CompletableFuture<Void> result = new CompletableFuture<>();
-        ChannelFuture future = channel.writeAndFlush(frame);
-        future.addListener(done -> {
-            if (done.isSuccess()) {
-                result.complete(null);
-                return;
-            }
-            result.completeExceptionally(ZeroException.of(
-                    NetErrorCode.SEND_FAILED,
-                    "send protocol frame failed",
-                    done.cause()));
-        });
-        return result;
+        return outbound.send(java.util.List.of(frame));
     }
+
+    /**
+     * 批量发送可靠帧；统一准入，在 EventLoop 按列表顺序 write 后 flush 一次。
+     * @param frames 有序帧列表，不可为空；方法调用期间不得并发修改。
+     * @return 全部帧实际写完成的信号；线程安全，超限返回 OUTBOUND_OVERFLOW。
+     */
+    public CompletionStage<Void> sendFrames(final java.util.List<ProtocolFrame> frames) {
+        return outbound.send(Objects.requireNonNull(frames, "frames"));
+    }
+
+    /** @return 待写资源预算占用；线程安全，包含事件循环待提交任务。 */
+    public long pendingOutboundBytes() { return outbound.pendingBytes(); }
 
     /**
      * 关闭连接。

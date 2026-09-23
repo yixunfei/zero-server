@@ -10,6 +10,15 @@ import group.zn.zero.core.error.ErrorCode;
  */
 public enum ActorErrorCode implements ErrorCode {
 
+    /** 消息预算耗尽，不接受本次消息。 */
+    CAPACITY_EXCEEDED(ErrorCategory.SYSTEM, "ZERO-ACTOR-CAPACITY-EXCEEDED", "actor capacity exceeded"),
+
+    /** 调度器已关闭，不接受新消息。 */
+    SCHEDULER_CLOSED(ErrorCategory.SYSTEM, "ZERO-ACTOR-SCHEDULER-CLOSED", "actor scheduler closed"),
+
+    /** 外部执行器拒绝调度。 */
+    EXECUTOR_REJECTED(ErrorCategory.SYSTEM, "ZERO-ACTOR-EXECUTOR-REJECTED", "actor executor rejected"),
+
     /**
      * Actor 路由不存在。
      */

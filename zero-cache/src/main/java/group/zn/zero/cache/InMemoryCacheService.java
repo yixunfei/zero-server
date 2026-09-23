@@ -12,7 +12,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * 本地内存缓存服务。
@@ -54,32 +54,32 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
     /**
      * 命中次数。
      */
-    private final AtomicLong hitCount = new AtomicLong();
+    private final LongAdder hitCount = new LongAdder();
 
     /**
      * 未命中次数。
      */
-    private final AtomicLong missCount = new AtomicLong();
+    private final LongAdder missCount = new LongAdder();
 
     /**
      * 加载次数。
      */
-    private final AtomicLong loadCount = new AtomicLong();
+    private final LongAdder loadCount = new LongAdder();
 
     /**
      * 加载失败次数。
      */
-    private final AtomicLong loadFailureCount = new AtomicLong();
+    private final LongAdder loadFailureCount = new LongAdder();
 
     /**
      * 写入次数。
      */
-    private final AtomicLong putCount = new AtomicLong();
+    private final LongAdder putCount = new LongAdder();
 
     /**
      * 失效次数。
      */
-    private final AtomicLong invalidateCount = new AtomicLong();
+    private final LongAdder invalidateCount = new LongAdder();
 
     /**
      * 创建默认内存缓存服务。
@@ -121,10 +121,10 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
     public CompletionStage<Optional<V>> get(final K key) {
         CacheEntry<V> entry = validEntry(key);
         if (entry == null) {
-            missCount.incrementAndGet();
+            missCount.increment();
             return CompletableFuture.completedFuture(Optional.empty());
         }
-        hitCount.incrementAndGet();
+        hitCount.increment();
         return CompletableFuture.completedFuture(entry.optionalValue());
     }
 
@@ -153,7 +153,7 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
             loading.remove(key);
             return null;
         });
-        invalidateCount.incrementAndGet();
+        invalidateCount.increment();
         return CompletableFuture.completedFuture(null);
     }
 
@@ -168,10 +168,10 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
         Objects.requireNonNull(loader, "loader");
         CacheEntry<V> entry = validEntry(key);
         if (entry != null) {
-            hitCount.incrementAndGet();
+            hitCount.increment();
             return CompletableFuture.completedFuture(entry.optionalValue());
         }
-        missCount.incrementAndGet();
+        missCount.increment();
         CompletableFuture<Optional<V>> future = new CompletableFuture<>();
         CompletableFuture<Optional<V>> existing = loading.putIfAbsent(key, future);
         if (existing != null) {
@@ -194,7 +194,7 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
                     }
                     Optional<V> value = Objects.requireNonNull(loaded, "loaded");
                     storeLoadedValue(key, value, future);
-                    loadCount.incrementAndGet();
+                    loadCount.increment();
                     loading.remove(key, future);
                     future.complete(value);
                 } catch (RuntimeException ex) {
@@ -228,16 +228,16 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
     /**
      * 返回统计快照。
      *
-     * @return 统计快照；不可为空；线程安全。
+     * @return 并发观察快照；不可为空；线程安全，非线性一致；写入静止后计数精确。
      */
     public CacheStatistics statistics() {
         return new CacheStatistics(
-                hitCount.get(),
-                missCount.get(),
-                loadCount.get(),
-                loadFailureCount.get(),
-                putCount.get(),
-                invalidateCount.get());
+                hitCount.sum(),
+                missCount.sum(),
+                loadCount.sum(),
+                loadFailureCount.sum(),
+                putCount.sum(),
+                invalidateCount.sum());
     }
 
     /**
@@ -275,7 +275,7 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
             return new CacheEntry<>(value, version < 0L ? nextVersion(previous) : version,
                     Instant.now().plus(effectiveTtl(policy.ttl())), false);
         });
-        putCount.incrementAndGet();
+        putCount.increment();
         return CompletableFuture.completedFuture(null);
     }
 
@@ -292,7 +292,7 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
             return new CacheEntry<>(null, nextVersion(previous),
                     Instant.now().plus(effectiveTtl(policy.negativeTtl())), true);
         });
-        putCount.incrementAndGet();
+        putCount.increment();
         return CompletableFuture.completedFuture(null);
     }
 
@@ -310,7 +310,7 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
             loading.remove(key);
             return entry;
         });
-        putCount.incrementAndGet();
+        putCount.increment();
         return CompletableFuture.completedFuture(null);
     }
 
@@ -385,14 +385,14 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
             entries.remove(key);
             insertionOrder.remove(key);
             loading.remove(key);
-            invalidateCount.incrementAndGet();
+            invalidateCount.increment();
             return true;
         }
     }
 
     private void completeLoadFailure(final CompletableFuture<Optional<V>> loadFuture, final K key, final Throwable throwable) {
         loading.remove(key, loadFuture);
-        loadFailureCount.incrementAndGet();
+        loadFailureCount.increment();
         loadFuture.completeExceptionally(ZeroException.of(
                 CacheErrorCode.LOADER_FAILED,
                 "cache loader failed for key=" + key,

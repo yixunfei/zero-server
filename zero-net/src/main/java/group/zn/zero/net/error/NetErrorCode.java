@@ -25,6 +25,9 @@ public enum NetErrorCode implements ErrorCode {
      */
     SEND_FAILED("ZERO-NET-SEND-FAILED", "net message send failed"),
 
+    /** 待写预算耗尽或慢连接不可写；消息未准入。 */
+    OUTBOUND_OVERFLOW("ZERO-NET-OUTBOUND-OVERFLOW", "network outbound budget exceeded"),
+
     /**
      * 网络消息类型非法。
      */

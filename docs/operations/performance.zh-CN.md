@@ -1,6 +1,11 @@
 # zeroServer 性能设计与基准
 
+
+2026-09-23 增量基准加入共享 EventBus/Ranking、真实 Actor 消费线程和多观察者 AOI，并保留工作区源码摘要与独立基线 jar。JMH 的平均完成成本与分配仅适用于对应工作负载，不换算为端到端尾延迟；TopN 优化仍保留全局锁。原始样本、复现命令和未覆盖项见[增量报告](../reports/performance-incremental-20260923.zh-CN.md)。
+
 本文说明 zeroServer 的性能设计原则、当前可复现基准、结果解释和尚未覆盖的性能问题。所有数字都只描述指定机器、JDK、代码版本和工作负载，不代表生产容量、尾延迟、长稳或 SLA。
+
+2026-09-22 的 Actor 分段、AOI 网格和编码临时缓冲复用测量见[性能反馈优化报告](../reports/performance-feedback-20260922.zh-CN.md)。该报告使用独立手工基准比较同一 workload 的优化前后实现，不替代下文尚未完成的完整性能 track。
 
 ## 1. 性能设计原则
 
@@ -172,3 +177,9 @@ java -jar zero-benchmarks/target/benchmarks.jar `
 - 与基线的语义等价性说明。
 - GC、分配、正确性校验和异常路径。
 - 结果局限以及哪些线上结论不能由该测试推出。
+
+## 2026-09-23 S0-S3 实施证据
+
+当前微基准位于 `zero-benchmarks/.../performance`，覆盖 Ranking、缓存、协议、Actor、AOI 与帧同步。独立 TCP 服务/客户端使用 `TargetRateEchoServer` / `TargetRateTcpLoad`，脚本为 `scripts/performance/RunTcpLoad.ps1`；计时从目标发送时间到完整响应，明确报告 planned/offered/completed/failed/timeouts/rejected/pending。详见[本轮报告](../reports/performance-plan-20260923.zh-CN.md)。
+
+默认准入预算是内存边界而非容量承诺；实际可写水位、allocator/TLS/socket 资源需要一起测量。JMH 纳秒均值不等于真实服务 p99；只有完成响应直方图用于报告请求分位延迟。长稳、Linux 原生和跨机 RPC 证据分别记录，不能互相替代。

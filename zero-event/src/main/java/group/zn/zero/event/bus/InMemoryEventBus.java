@@ -17,6 +17,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 本地内存事件总线。
@@ -54,6 +55,9 @@ public final class InMemoryEventBus implements EventBus {
      * 事件拦截器列表。
      */
     private final List<InterceptorRegistration> interceptors = new ArrayList<>();
+
+    /** 单次 volatile 读取获得同一版本的拦截器与处理器；仅注册时重建。 */
+    private volatile RegistrationSnapshot snapshot = new RegistrationSnapshot(new EnumMap<>(EventType.class), List.of());
 
     /**
      * 死信接收器。
@@ -110,6 +114,7 @@ public final class InMemoryEventBus implements EventBus {
                 handlerSequence.getAndIncrement());
         handlers.computeIfAbsent(eventType, ignored -> new ArrayList<>()).add(registration);
         handlers.get(eventType).sort(HandlerRegistration::compareTo);
+        rebuildSnapshot();
 
         return () -> unregisterHandler(registration);
     }
@@ -131,6 +136,7 @@ public final class InMemoryEventBus implements EventBus {
                 interceptorSequence.getAndIncrement());
         interceptors.add(registration);
         interceptors.sort(InterceptorRegistration::compareTo);
+        rebuildSnapshot();
 
         return () -> unregisterInterceptor(registration);
     }
@@ -145,15 +151,11 @@ public final class InMemoryEventBus implements EventBus {
     @Override
     public CompletionStage<Void> publish(final ZeroEvent event) {
         Objects.requireNonNull(event, "event");
-        List<InterceptorRegistration> interceptorSnapshot;
-        List<HandlerRegistration> handlerSnapshot;
-        synchronized (this) {
-            interceptorSnapshot = List.copyOf(interceptors);
-            handlerSnapshot = List.copyOf(handlers.getOrDefault(event.eventType(), List.of()));
-        }
+        RegistrationSnapshot registrations = snapshot;
+        List<HandlerRegistration> handlerSnapshot = registrations.handlers().getOrDefault(event.eventType(), List.of());
 
         try {
-            for (InterceptorRegistration registration : interceptorSnapshot) {
+            for (InterceptorRegistration registration : registrations.interceptors()) {
                 if (!registration.interceptor().beforePublish(event)) {
                     return CompletableFuture.completedFuture(null);
                 }
@@ -164,52 +166,119 @@ public final class InMemoryEventBus implements EventBus {
             return CompletableFuture.failedFuture(zeroException);
         }
 
-        List<ZeroException> failures = new ArrayList<>();
-        CompletionStage<Void> stage = CompletableFuture.completedFuture(null);
-        for (HandlerRegistration registration : handlerSnapshot) {
-            stage = stage.thenCompose(ignored -> handle(event, registration.handler()).handle((result, failure) -> {
-                if (failure != null) {
-                    ZeroException current = asZeroException(failure);
-                    failures.add(current);
-                    recordDeadLetter(event, current);
+        if (handlerSnapshot.isEmpty()) return CompletableFuture.completedFuture(null);
+        return dispatch(event, handlerSnapshot, 0, null, null);
+    }
+
+    private CompletionStage<Void> dispatch(final ZeroEvent event, final List<HandlerRegistration> registrations,
+            final int start, final List<ZeroException> priorFailures, final CompletableFuture<Void> completion) {
+        List<ZeroException> failures = priorFailures;
+        for (int index = start; index < registrations.size(); index++) {
+            CompletionStage<Void> stage;
+            try {
+                stage = Objects.requireNonNull(registrations.get(index).handler().handle(event), "handler result");
+                // 仅优化标准 CompletableFuture；不调用通用 stage 的 toCompletableFuture 或阻塞未完成结果。
+                if (stage.getClass() == CompletableFuture.class && ((CompletableFuture<?>) stage).isDone()) {
+                    ((CompletableFuture<?>) stage).join();
+                    continue;
                 }
-                return null;
-            }));
-        }
-        return stage.thenCompose(ignored -> {
-            if (failures.isEmpty()) {
-                return CompletableFuture.completedFuture(null);
+            } catch (RuntimeException | Error failure) {
+                failures = appendFailure(event, failures, failure);
+                continue;
             }
+            Continuation continuation = new Continuation(event, registrations, index + 1, failures,
+                    completion == null ? new CompletableFuture<>() : completion);
+            stage.whenComplete(continuation::completed);
+            if (continuation.handoff.compareAndSet(0, 1)) return continuation.completion;
+            // 注册回调期间已完成：原调用栈迭代处理，防止同步 CompletionStage 引起深层递归。
+            failures = continuation.failuresAfterCompletion();
+        }
+        return finish(failures, completion);
+    }
+
+    private List<ZeroException> appendFailure(final ZeroEvent event, final List<ZeroException> failures,
+            final Throwable failure) {
+        List<ZeroException> result = failures == null ? new ArrayList<>() : failures;
+        ZeroException current = asZeroException(failure);
+        result.add(current);
+        recordDeadLetter(event, current);
+        return result;
+    }
+
+    private CompletionStage<Void> finish(final List<ZeroException> failures, final CompletableFuture<Void> completion) {
+        CompletableFuture<Void> result = completion == null ? new CompletableFuture<>() : completion;
+        if (failures == null) {
+            result.complete(null);
+        } else {
             ZeroException first = failures.getFirst();
             for (int index = 1; index < failures.size(); index++) {
                 if (failures.get(index) != first) first.addSuppressed(failures.get(index));
             }
-            return CompletableFuture.failedFuture(first);
-        });
+            result.completeExceptionally(first);
+        }
+        return result;
     }
 
-    private CompletionStage<Void> handle(final ZeroEvent event, final EventHandler handler) {
-        try {
-            CompletionStage<Void> stage = handler.handle(event);
-            return Objects.requireNonNull(stage, "handler result");
-        } catch (RuntimeException | Error ex) {
-            return CompletableFuture.failedFuture(ex);
+    /** 只为无法同步读取的完成信号保存续调；handoff 发布跨线程结果且避免递归。 @author zn */
+    private final class Continuation {
+        /** 0=注册中，1=已交接，2=已完成。 */
+        private final AtomicInteger handoff = new AtomicInteger();
+        /** 当前事件。 */
+        private final ZeroEvent event;
+        /** 本次派发的固定注册快照。 */
+        private final List<HandlerRegistration> registrations;
+        /** 下一处理器。 */
+        private final int next;
+        /** 已有失败；只由当前执行者访问。 */
+        private final List<ZeroException> failures;
+        /** 单次发布私有的完成信号。 */
+        private final CompletableFuture<Void> completion;
+        /** 完成失败，由 handoff 的 release/acquire 发布。 */
+        private Throwable failure;
+
+        private Continuation(final ZeroEvent event, final List<HandlerRegistration> registrations, final int next,
+                final List<ZeroException> failures, final CompletableFuture<Void> completion) {
+            this.event = event;
+            this.registrations = registrations;
+            this.next = next;
+            this.failures = failures;
+            this.completion = completion;
+        }
+
+        private void completed(final Void ignored, final Throwable exception) {
+            failure = exception;
+            if (handoff.getAndSet(2) == 1) dispatch(event, registrations, next, failuresAfterCompletion(), completion);
+        }
+
+        private List<ZeroException> failuresAfterCompletion() {
+            return failure == null ? failures : appendFailure(event, failures, failure);
         }
     }
+
+    private void rebuildSnapshot() {
+        EnumMap<EventType, List<HandlerRegistration>> next = new EnumMap<>(EventType.class);
+        handlers.forEach((type, registrations) -> next.put(type, List.copyOf(registrations)));
+        snapshot = new RegistrationSnapshot(next, List.copyOf(interceptors));
+    }
+
+    /** 发布后不再变更；注册锁内构造，以 volatile 原子替换。 @author zn */
+    private record RegistrationSnapshot(EnumMap<EventType, List<HandlerRegistration>> handlers,
+            List<InterceptorRegistration> interceptors) { }
 
     private synchronized void unregisterHandler(final HandlerRegistration registration) {
         List<HandlerRegistration> registrations = handlers.get(registration.eventType());
         if (registrations == null) {
             return;
         }
-        registrations.remove(registration);
+        if (!registrations.remove(registration)) return;
         if (registrations.isEmpty()) {
             handlers.remove(registration.eventType());
         }
+        rebuildSnapshot();
     }
 
     private synchronized void unregisterInterceptor(final InterceptorRegistration registration) {
-        interceptors.remove(registration);
+        if (interceptors.remove(registration)) rebuildSnapshot();
     }
 
     private void recordDeadLetter(final ZeroEvent event, final ZeroException ex) {
@@ -221,7 +290,7 @@ public final class InMemoryEventBus implements EventBus {
                     0,
                     clock.instant()));
         } catch (RuntimeException | Error sinkFailure) {
-            ex.addSuppressed(sinkFailure);
+            if (sinkFailure != ex) ex.addSuppressed(sinkFailure);
         }
     }
 

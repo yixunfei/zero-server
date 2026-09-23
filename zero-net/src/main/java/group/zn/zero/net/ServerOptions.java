@@ -21,7 +21,23 @@ public record ServerOptions(
         int bossThreads,
         int workerThreads,
         int maxFrameLength,
-        ServerCodecType codecType) {
+        ServerCodecType codecType,
+        NetworkTuning tuning) {
+
+    /**
+     * 使用默认资源预算创建配置；参数约束同完整构造器，线程安全。
+     * @param serverType 服务类型。
+     * @param host 主机。
+     * @param port 端口。
+     * @param bossThreads 接收线程数。
+     * @param workerThreads IO 线程数。
+     * @param maxFrameLength 最大完整帧字节数，TCP 含四字节长度前缀。
+     * @param codecType codec 类型。
+     */
+    public ServerOptions(final ServerType serverType, final String host, final int port,
+            final int bossThreads, final int workerThreads, final int maxFrameLength, final ServerCodecType codecType) {
+        this(serverType, host, port, bossThreads, workerThreads, maxFrameLength, codecType, NetworkTuning.defaults());
+    }
 
     /**
      * 默认最大 frame 长度。
@@ -38,6 +54,7 @@ public record ServerOptions(
         Objects.requireNonNull(serverType, "serverType");
         Objects.requireNonNull(host, "host");
         Objects.requireNonNull(codecType, "codecType");
+        Objects.requireNonNull(tuning, "tuning");
         if (port < 0 || port > 65535) {
             throw new IllegalArgumentException("port must be between 0 and 65535");
         }
@@ -112,7 +129,7 @@ public record ServerOptions(
      * @return 新配置；不可为空；线程安全。
      */
     public ServerOptions withMaxFrameLength(final int length) {
-        return new ServerOptions(serverType, host, port, bossThreads, workerThreads, length, codecType);
+        return new ServerOptions(serverType, host, port, bossThreads, workerThreads, length, codecType, tuning);
     }
 
     /**
@@ -123,7 +140,12 @@ public record ServerOptions(
      * @return 新配置；不可为空；线程安全。
      */
     public ServerOptions withIoThreads(final int boss, final int worker) {
-        return new ServerOptions(serverType, host, port, boss, worker, maxFrameLength, codecType);
+        return new ServerOptions(serverType, host, port, boss, worker, maxFrameLength, codecType, tuning);
+    }
+
+    /** @param value 不可变资源设置。 @return 更新后的独立配置；线程安全。 */
+    public ServerOptions withTuning(final NetworkTuning value) {
+        return new ServerOptions(serverType, host, port, bossThreads, workerThreads, maxFrameLength, codecType, value);
     }
 
     /**

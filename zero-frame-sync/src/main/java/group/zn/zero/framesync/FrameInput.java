@@ -12,4 +12,6 @@ public record FrameInput(String uid, long inputSeq, long targetFrame, long clien
         payload = payload.clone();
     }
     @Override public byte[] payload() { return payload.clone(); }
+    /** 返回负载字节数；只读、无复制、线程安全。 @return 非负长度。 */
+    public int payloadLength() { return payload.length; }
 }

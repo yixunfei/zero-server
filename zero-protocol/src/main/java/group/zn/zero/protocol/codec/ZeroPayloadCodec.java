@@ -21,6 +21,9 @@ public interface ZeroPayloadCodec<T> extends ZeroProvider {
 
     /**
      * 写入 payload。
+     * <p>同步借用 writer，仅本次调用期间有效，不得保留 writer、其底层缓冲或借用视图，
+     * 也不得交给异步任务。需要保留数据时创建副本。框架可能在返回或抛出异常后复用 writer。
+     * 调用方独占 writer；同一 codec 实例并发编码时，实现必须保证自身状态线程安全。
      *
      * @param writer 写入器；不可为空。
      * @param message 消息；不可为空。

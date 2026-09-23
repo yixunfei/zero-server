@@ -4,6 +4,9 @@
 
 | 报告 | 用途 |
 | --- | --- |
+| [性能增量（2026-09-23）](performance-incremental-20260923.zh-CN.md) | 共享竞争、多观察者、只读 payload 和批量搬移对照；契约与未实施项 |
+| [性能方案 S0-S3（2026-09-23）](performance-plan-20260923.zh-CN.md) | JMH 前后对照、独立 TCP 负载、资源与验证边界 |
+| [性能反馈优化（2026-09-22）](performance-feedback-20260922.zh-CN.md) | Actor 分段、AOI 网格、编码分配和 FFM 决策；本地对照基准与验证边界 |
 | [文档现状核对（2026-09-18）](documentation-audit-20260918.zh-CN.md) | 当前源码/文档核对、验证结果与 net 生成编译限制 |
 | [缺陷核验与修复（2026-09-17）](bug-analysis-verification-20260917.zh-CN.md) | 原报告逐项纠正、回归测试和 0.x 行为调整；历史工作区证据 |
 | [场景接入审查（2026-09-14）](scenario-audit-2026-09-14.zh-CN.md) | 三种服务器形态、依赖裁剪、已修复问题和后续路线 |

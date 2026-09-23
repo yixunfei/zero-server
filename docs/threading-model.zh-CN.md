@@ -67,6 +67,10 @@ zeroServer 的线程模型必须同时满足极致性能、状态安全、业务
 
 WP-02 的 focused 契约测试覆盖 direct 调用线程归属、异步成功/异常/取消/超时、未完成 stage 的阻塞检测、executor 拒绝和受管执行器关闭。该测试证明的是本地执行边界，不代表生产容量、跨进程恢复或第三方 provider 的阻塞行为已验证。
 
+`ExecutorActorScheduler` 使用 64 个固定锁段：同一 lane 的入队、出队、空闲回收和拒绝清理在所属段锁内完成，不同段独立推进。处理器使用写时复制的有序快照，精确类型优先，其次按注册顺序匹配父类型；已经入队的消息保留提交时选中的处理器。旧注销句柄不能移除后续重新注册的处理器，即使使用相同 handler 对象。
+
+handler、Executor 提交和 completion 回调均在段锁外执行。异步完成与回调注册交错时通过执行权交接避免 direct executor 递归续调。同一段的不同 lane 仍可并行业务执行；哈希碰撞只影响短临界区竞争。默认每 Lane/全局未完成预算为 4096/65536，包含执行及异步挂起；每批 64 条后续调。超限明确失败，同 Lane 仍不并行。Local 使用直接执行器复用相同注册和准入算法。测量与边界见[本地优化报告](reports/performance-feedback-20260922.zh-CN.md)。
+
 阶段 4B 新增分布式 Actor gateway 的第一版投递边界：
 
 - `LaneKey` 仍只表示线程绑定对象，不承载远程地址、topic、consumer group、实例 ID 或服务发现细节。
@@ -152,3 +156,5 @@ Java 21 虚拟线程允许用于：
 - observer、鉴权或业务完成回调必须先投递回 EventLoop，再修改连接生命周期状态或释放 in-flight 预算。
 
 该实现没有在 `zero-net` 中创建业务线程池，但 `NettyTcpServer` 当前仍自行管理 Netty IO 线程组；把 Netty EventLoop 纳入 starter 全局线程资源管理属于后续独立高风险任务。
+
+当前预算、取消/关闭释放规则、队列观察语义和内部消息 ID 的 0.x 变化见[迁移说明](migrations/20260923-performance-plan.md)。

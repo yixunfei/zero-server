@@ -6,6 +6,10 @@
 
 | 日期 / 主题 | 适用范围 |
 | --- | --- |
+| [codegen 对接（2026-09-23）](20260923-codegen-integration.md) | 只读完整 payload 分发、业务实现保护、四语言增量写入与工具升级步骤 |
+| [性能增量（2026-09-23）](20260923-performance-incremental.md) | EventBus/AOI 内部优化、只读输入及生成分发、精确 TopN 缓存 |
+| [性能方案 S0-S3（2026-09-23）](20260923-performance-plan.md) | 有界 Actor、直接缓冲、网络预算、排名索引和游戏循环迁移 |
+| [2026-09-22 调度、AOI 与编码分配](20260922-performance-feedback.md) | 分段调度、网格边长、同步编码 writer 借用约定与 native 生命周期 |
 | [2026-09-18 文档现状核对](20260918-documentation-audit.md) | TCP、脚手架、路线图及公开导航校正；无运行时变更 |
 | [2026-09-17 缺陷核验修复](20260917-bug-report-verification.md) | 缓存、事件、持久化、玩法组件、协议与 RPC 行为/API 调整 |
 | [2026-09-15 平台和生产门禁](20260915-platform-and-production-gates.md) | 平台事务测试、CI job 结论与 artifact 审查边界 |

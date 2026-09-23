@@ -118,6 +118,7 @@ public final class ZeroArchitectureGuard {
 
     /** benchmark 允许直接依赖的框架运行时模块。 */
     private static final Set<String> BENCHMARK_RUNTIME_MODULES = Set.of(
+            "zero-protocol", "zero-ranking", "zero-actor", "zero-cache", "zero-aoi", "zero-frame-sync", "zero-scene",
             "zero-log",
             "zero-monitor",
             "zero-net",
@@ -637,7 +638,6 @@ public final class ZeroArchitectureGuard {
         List<Dependency> dependencies = dependenciesOf(report, BENCHMARK_MODULE);
         Set<String> runtimeModules = new HashSet<>();
         boolean jmhCorePresent = false;
-        boolean protocolTestPresent = false;
         List<Dependency> unexpected = new ArrayList<>();
         for (Dependency dependency : dependencies) {
             if ("group.zn.zero".equals(dependency.groupId())
@@ -649,19 +649,13 @@ public final class ZeroArchitectureGuard {
                     && "compile".equals(dependency.scope())
                     && isFrozenJmhVersion(dependency.version())) {
                 jmhCorePresent = true;
-            } else if ("group.zn.zero".equals(dependency.groupId())
-                    && "zero-protocol".equals(dependency.artifactId())
-                    && "test".equals(dependency.scope())) {
-                // The opt-in protocol gate exercises codec classes without adding the
-                // protocol module to the runtime class path of the benchmark artifact.
-                protocolTestPresent = true;
             } else {
                 unexpected.add(dependency);
             }
         }
         BenchmarkJmhMetadata metadata = readBenchmarkJmhMetadata(report);
-        // 运行时依赖 + jmh-core + 可选 test 作用域 zero-protocol；注解处理器只出现在 plugin 中。
-        int expectedDependencies = BENCHMARK_RUNTIME_MODULES.size() + 1 + (protocolTestPresent ? 1 : 0);
+        // 精确的基准依赖 + jmh-core；注解处理器只出现在 plugin 中。
+        int expectedDependencies = BENCHMARK_RUNTIME_MODULES.size() + 1;
         boolean frozen = runtimeModules.equals(BENCHMARK_RUNTIME_MODULES)
                 && jmhCorePresent
                 && dependencies.size() == expectedDependencies

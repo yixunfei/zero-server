@@ -31,8 +31,8 @@
 5. TCP 场景下，`NettyTcpServer` 外层使用 4 字节长度字段处理粘包/拆包，内部用 `ZeroBinaryFrameCodec` 编解码 `ProtocolFrame`。
 6. `ServerFrameHandler` 在业务 executor 中执行，不在 Netty IO 线程中跑业务逻辑。
 7. handler 使用 `LogicSessionManager.open(connection)` 创建或获取业务 session，记录请求次数、最近请求时间、渠道等属性。
-8. handler 调用 `GeneratedProtocolDispatcher.dispatch(protocolId, payload)`。
-9. dispatcher 解码 payload 并调用已注册的 `XXXEventBO`。
+8. handler 调用 `GeneratedProtocolDispatcher.dispatchFrame(frame)`，直接读取帧持有的稳定 payload，避免先调用 `frame.payload()` 复制数组。
+9. dispatcher 解码完整 payload，拒绝对象外尾随字节后调用已注册的 `XXXEventBO`；未知协议号返回 `false`。
 10. handler 根据业务处理结果编码响应 `ProtocolFrame` 并通过 `IConnection.sendFrame` 写回。
 11. TCP 连接关闭时通过 `ConnectionListener.onClose` 清理业务 session。
 
@@ -48,6 +48,10 @@
 - `zero-net.session.*` 不再承载业务 session；业务 session 示例位于 `zero-logic.session`。
 
 ### 生成物放置规则
+
+启动阶段完成 BO 注册，再将 dispatcher 安全发布到业务 executor；注册与分发不得并发。业务执行域仍负责 BO 状态的线程安全。已有数组调用方可继续使用 `dispatch(protocolId, payload)`，调用期间保持数组稳定；两种入口均在畸形输入时抛出带协议错误码的异常，不执行 BO。
+
+重新执行原协议生成命令即可更新 dispatcher 和 codec。`--genBoImpl true` 仅创建缺失的实现模板，保留已有 BOImp；如果 DSL 修改了接口，需手工适配业务实现并编译验证。脚手架 `--apply` 管理其 ownership 清单，不会自动重生成普通协议产物。完整步骤见 [codegen 对接迁移](../migrations/20260923-codegen-integration.md)。
 
 生成的 dispatcher 会 import 生成 BO 接口和 DTO codec。因此：
 

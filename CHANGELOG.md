@@ -6,6 +6,34 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 2026-09-23 codegen 对接修复
+
+- Java 生成分发器的帧和数组入口统一使用只读 reader，在执行 BO 前拒绝对象外尾随数据；保持 DSL、线格式和业务签名。
+- BOImp 仅首次创建，重生成保留已有业务代码；四语言生成文件内容不变时不重写，减少无效构建。
+- 同步 CLI/GUI 提示与网络接入指南；新增真实生成代码编译/执行、分模块布局和重生成保护回归。0.x 行为变化与验证见 [迁移说明](docs/migrations/20260923-codegen-integration.md)。
+
+### 2026-09-23 性能增量
+
+- EventBus 使用同版本注册快照与同步迭代完成路径；AOI 合并观察状态、复用有界候选工作区并跳过无变化观察。
+- 只读 payload 到 reader/生成 Dispatcher 贯通；自定义 codec 保留默认数组适配，ProtocolFrame 继续自持有且保持 record 表示。
+- 排行榜复用同版本有界 TopN；保留原同步通知及全局锁。direct/Netty 优化重叠搬移。
+- 业务接入、只读借用边界、生成入口及验证见[增量迁移说明](docs/migrations/20260923-performance-incremental.md)。
+
+### 2026-09-23 性能方案 S0-S3
+
+- 排名使用跨度跳表；缓存统计采用 LongAdder，Scene 私有状态由 Lane 独占；Actor 注册快照缓存派生类型解析，内部消息使用低成本关联 ID。
+- Actor 增加每 Lane/全局准入、批次公平调度、关闭与固定维度队列观测；Local 和 Executor 共享调度语义。
+- 协议提供无复制长度/只读视图及缓冲 codec 入口；Netty 直接缓冲编解码、同连接批写、显式水位/出站预算以及 NIO/AUTO/EPOLL 配置。
+- AOI 增量维护观察快照并提供观察者释放；帧同步维护确定顺序并限制参与者历史。
+- 0.x 默认行为、错误码、API 和验证边界见[迁移说明](docs/migrations/20260923-performance-plan.md)。性能报告同时列出排名写入和 Actor 显式 ID 路径的成本，不将吞吐倒数当作请求延迟。
+
+### 2026-09-22 调度、AOI 与编码分配优化
+
+- `ExecutorActorScheduler` 使用 64 个锁段和有序处理器快照，空闲 lane 回收与拒绝清理在所属段内完成；修复旧注销句柄误删同对象新注册及 direct executor 完成竞态递归。
+- `InMemoryAoiIndex` 使用二维均匀网格，支持指定网格边长；保留精确视野、事件顺序和状态序号，超大范围只扫描已占用格。
+- 默认编码路径有界复用临时堆缓冲；`ZeroPayloadCodec.write` 的 writer/视图仅可在同步调用内借用。direct 批量读写减少包装分配，native 原始地址操作补充 Cleaner 可达性保障。
+- Java 21 基线不启用预览；相关源码注明 FFM 在 Java 21 为预览、Java 22 正式定版及后续迁移约束。迁移与验证见[说明](docs/migrations/20260922-performance-feedback.md)。
+
 ### 2026-09-22 安全、持久化与异步确认修复
 
 - HTTP 元数据经应用验证后按请求传播身份；Kafka 默认拒绝未验证身份，runtime 支持显式注入 verifier。

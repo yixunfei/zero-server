@@ -54,6 +54,16 @@ public final class ZeroReader {
     }
 
     /**
+     * 借用稳定数组创建只读读取器，不复制内容，返回切片不能暴露可写存储。
+     * @param bytes 输入数组，不可为空；所有者必须保证读取/保留切片期间不修改数组。
+     * @return 新读取器，游标线程独占；需要长期快照时使用自持有 Frame 或先复制数组。
+     * @throws NullPointerException 数组为空。
+     */
+    public static ZeroReader readOnly(final byte[] bytes) {
+        return new ZeroReader(new ReadOnlyZeroBuffer(bytes));
+    }
+
+    /**
      * 创建读取器。
      *
      * @param bytes 字节数组；不可为空。
@@ -69,11 +79,15 @@ public final class ZeroReader {
     /**
      * 创建读取器。
      *
+     * 只读 ByteBuffer 借用 remaining 区间，不复制内容、不改变来源游标；调用方保证内容稳定。
+     * 可写输入沿用 ZeroBuffers.wrap 的规则：heap 复制、direct 借用。
+     * 读取器独占使用；只读输入返回的切片不暴露可写内存；ProtocolFrame 的自持有视图可跨异步保留。
      * @param byteBuffer ByteBuffer；不可为空。
      * @throws NullPointerException 当 ByteBuffer 为空时抛出。
      */
     public ZeroReader(final ByteBuffer byteBuffer) {
-        this(ZeroBuffers.wrap(byteBuffer));
+        this(Objects.requireNonNull(byteBuffer, "byteBuffer").isReadOnly()
+                ? new ReadOnlyZeroBuffer(byteBuffer) : ZeroBuffers.wrap(byteBuffer));
     }
 
     /**

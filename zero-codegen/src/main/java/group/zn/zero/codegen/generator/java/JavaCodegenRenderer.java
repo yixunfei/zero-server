@@ -5,6 +5,7 @@ import freemarker.template.Template;
 import freemarker.template.TemplateException;
 import freemarker.template.TemplateExceptionHandler;
 import group.zn.zero.codegen.error.CodegenErrorCode;
+import group.zn.zero.codegen.generator.GeneratedSourceWriter;
 import group.zn.zero.codegen.model.CodegenLanguage;
 import group.zn.zero.codegen.model.CodegenRequest;
 import group.zn.zero.codegen.model.JavaArtifactKind;
@@ -21,7 +22,6 @@ import group.zn.zero.protocol.ProtocolFeature;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -119,7 +119,8 @@ public final class JavaCodegenRenderer {
                     boModel(layout, entry.getKey(), entry.getValue(), false, dtoSuffix)));
             if (request.generateBoImpl()) {
                 String implName = implementationName(entry.getKey());
-                writeGeneratedFile(layout.boImplDir().resolve(implName + ".java"), renderTemplate("boImpl.java.ftl",
+                GeneratedSourceWriter.createImplementation(layout.boImplDir().resolve(implName + ".java"),
+                        renderTemplate("boImpl.java.ftl",
                         boModel(layout, entry.getKey(), entry.getValue(), true, dtoSuffix)));
             }
         }
@@ -258,6 +259,8 @@ public final class JavaCodegenRenderer {
             final String dtoSuffix) {
         Set<String> imports = new TreeSet<>();
         imports.add("group.zn.zero.protocol.buffer.ZeroReader");
+        imports.add("group.zn.zero.core.error.ZeroException");
+        imports.add("group.zn.zero.protocol.error.ProtocolErrorCode");
         addImport(imports, layout.dispatcherPackage(), layout.protocolPackage() + ".ProtocolIds");
         imports.add("java.util.HashMap");
         imports.add("java.util.Map");
@@ -816,24 +819,7 @@ public final class JavaCodegenRenderer {
     }
 
     private void writeGeneratedFile(final Path path, final String content) {
-        try {
-            Path parent = path.getParent();
-            if (parent != null) {
-                Files.createDirectories(parent);
-            }
-            if (Files.exists(path)) {
-                String existing = Files.readString(path, StandardCharsets.UTF_8);
-                if (!existing.contains(GENERATED_MARKER)) {
-                    throw ZeroException.of(
-                            CodegenErrorCode.OUTPUT_FAILED,
-                            "refuse to overwrite non-generated file: " + path,
-                            null);
-                }
-            }
-            Files.writeString(path, content, StandardCharsets.UTF_8);
-        } catch (IOException ex) {
-            throw ZeroException.of(CodegenErrorCode.OUTPUT_FAILED, "failed to write generated file: " + path, ex);
-        }
+        GeneratedSourceWriter.writeGenerated(path, content);
     }
 
     /**

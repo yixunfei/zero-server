@@ -18,6 +18,8 @@ final class NettyProtocolFrameEncoder extends MessageToByteEncoder<ProtocolFrame
      * 协议帧编解码器。
      */
     private final ProtocolFrameCodec frameCodec;
+    /** 完整输出帧的字节上限，扩容前检查。 */
+    private final int maximum;
 
     /**
      * 创建编码桥。
@@ -25,7 +27,12 @@ final class NettyProtocolFrameEncoder extends MessageToByteEncoder<ProtocolFrame
      * @param frameCodec 协议帧编解码器；不可为空。
      */
     NettyProtocolFrameEncoder(final ProtocolFrameCodec frameCodec) {
+        this(frameCodec, group.zn.zero.net.ServerOptions.DEFAULT_MAX_FRAME_LENGTH - 4);
+    }
+
+    NettyProtocolFrameEncoder(final ProtocolFrameCodec frameCodec, final int maximum) {
         this.frameCodec = Objects.requireNonNull(frameCodec, "frameCodec");
+        this.maximum = maximum;
     }
 
     /**
@@ -40,6 +47,13 @@ final class NettyProtocolFrameEncoder extends MessageToByteEncoder<ProtocolFrame
             final ChannelHandlerContext context,
             final ProtocolFrame message,
             final ByteBuf out) {
-        out.writeBytes(frameCodec.encode(message));
+        int start = out.writerIndex();
+        // 输出通常为空；writer 的绝对位置从 0 开始，直接使用 allocator 提供的可扩容 ByteBuf。
+        if (start != 0) throw new IllegalStateException("frame encoder requires an empty output");
+        int bound = frameCodec.encodedLength(message);
+        int limit = bound < 0 ? maximum : Math.min(maximum, bound);
+        var writer = new group.zn.zero.protocol.buffer.ZeroWriter(new NettyZeroBuffer(out, limit));
+        frameCodec.encodeTo(message, writer);
+        out.writerIndex(writer.writerIndex());
     }
 }

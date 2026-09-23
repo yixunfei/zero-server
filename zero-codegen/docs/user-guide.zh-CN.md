@@ -89,7 +89,7 @@ zero-codegen/src/test/resources/protocol-dsl/standard-flow/
 CLI 示例：
 
 ```powershell
-java -cp target/classes group.zn.zero.codegen.ProtocolCodegenCli `
+java -jar zero-codegen/target/zero-codegen-0.1.0-SNAPSHOT-all.jar `
   --input zero-codegen/src/test/resources/protocol-dsl/standard-flow `
   --protoId zero-codegen/src/test/resources/protocol-dsl/standard-flow/protoId.txt `
   --out target/generated-sources/zero-codegen `
@@ -216,7 +216,20 @@ Java：
 
 你不需要手写读写逻辑，只需要维护协议声明。
 
-## 10. 已知边界
+## 10. 更新工具与接入当前运行时
+
+在仓库根目录使用 Java 21 执行 `mvn -pl zero-codegen -am package`，更新完整 CLI/GUI JAR；然后用项目原有的输入、包名和输出目录参数重新生成。GUI 与 CLI 共用同一个生成后端，无需切换优化开关。
+
+- 网络 handler 优先调用 `dispatcher.dispatchFrame(frame)`，直接读取帧持有的 payload；BO 仍接收自持有 DTO，不需要释放缓冲。
+- `dispatch(protocolId, payload)` 仍可用，调用期间不要修改数组。两种入口均拒绝对象外尾随数据，且不会在解码失败时调用业务 BO；对象内部追加字段仍按既有长度边界跳过。
+- BO 在启动时注册并安全发布；注册不得与分发并发，业务线程约束仍由调用方保证。
+- `--genBoImpl true` 只创建不存在的 BOImp，已有实现即使保留旧生成标记也不会覆盖。接口变化需要手工更新业务实现。
+- DTO、codec、协议号、BO 接口和 dispatcher 等工具管理文件内容相同时不重写；非生成文件仍拒绝覆盖。请勿手工修改工具管理文件。
+- 普通协议生成不提供脚手架的 ownership hash、事务或回滚保证，也不清理旧包名/旧后缀下的产物；修改布局后需检查过期文件。
+
+跨模块布局应让业务 dispatcher 依赖 BO 与协议模块，不能让框架 `zero-net` 反向依赖业务代码。迁移和验证范围见 [codegen 对接迁移](../../docs/migrations/20260923-codegen-integration.md)。
+
+## 11. 已知边界
 
 - 生成器不替你设计业务流程。
 - 复杂排序策略、签名、加密、压缩和权限字段，应由业务层或后续扩展头承接。
