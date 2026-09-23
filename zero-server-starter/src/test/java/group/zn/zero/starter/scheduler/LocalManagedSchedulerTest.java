@@ -638,6 +638,53 @@ class LocalManagedSchedulerTest {
         }
     }
 
+    /** 零延迟回调先重排、初始 schedule 后返回时，不得用旧句柄取消新节拍。 */
+    @Test
+    void earlyTimerCallbackKeepsTheRearmedFutureAndCancellationOwnsIt() {
+        Harness harness = Harness.start(4, 2);
+        CompletableFuture<Void> response = new CompletableFuture<>();
+        try {
+            harness.timer.beforeReturn = () -> {
+                assertTrue(harness.timer.runNext());
+                harness.workers.runAll();
+            };
+            ScheduledTaskHandle handle = harness.scheduler.scheduleAtFixedRate(
+                    definition("early-timer"), Duration.ZERO, Duration.ofMillis(10), context -> response);
+            assertEquals(1, harness.timer.pendingCount());
+            assertEquals(CLOCK.instant().plusMillis(10), handle.snapshot().nextScheduledAt().orElseThrow());
+            harness.nanoTime.set(TimeUnit.MILLISECONDS.toNanos(10));
+            assertTrue(harness.timer.runNext());
+            assertEquals(1, handle.snapshot().skippedRunningCount());
+            assertTrue(handle.cancel());
+            assertEquals(0, harness.timer.pendingCount());
+            assertTrue(handle.snapshot().nextScheduledAt().isEmpty());
+            response.complete(null);
+            harness.workers.runAll();
+            assertSame(ScheduledTaskState.CANCELLED, handle.snapshot().state());
+        } finally {
+            response.complete(null);
+            harness.stop();
+        }
+    }
+
+    /** 取消早于 schedule 返回时，迟到 future 仍应取消，且不重新发布下一次触发时间。 */
+    @Test
+    void cancellationBeforeFutureAttachmentDoesNotLeaveAnArmedTimer() {
+        Harness harness = Harness.start(4, 2);
+        try {
+            harness.timer.beforeReturn = harness.scheduler::stop;
+            ScheduledTaskHandle handle = harness.scheduler.scheduleOnce(
+                    definition("cancel-before-attach"), Duration.ZERO,
+                    context -> CompletableFuture.completedFuture(null));
+            assertSame(ScheduledTaskState.CANCELLED, handle.snapshot().state());
+            assertTrue(handle.snapshot().nextScheduledAt().isEmpty());
+            assertEquals(0, harness.timer.pendingCount());
+            assertFalse(harness.timer.runNext());
+        } finally {
+            harness.stop();
+        }
+    }
+
     private static ScheduledTaskHandle runOnce(
             final Harness harness,
             final String name,
@@ -850,6 +897,9 @@ class LocalManagedSchedulerTest {
          */
         private final Queue<ManualScheduledFuture> timers = new ArrayDeque<>();
 
+        /** 仅一次：模拟 timer 在线程调度返回 future 之前已经触发。 */
+        private Runnable beforeReturn;
+
         private ManualTimer() {
             super(1);
         }
@@ -864,6 +914,9 @@ class LocalManagedSchedulerTest {
             }
             ManualScheduledFuture future = new ManualScheduledFuture(command, unit.toNanos(delay));
             timers.add(future);
+            Runnable callback = beforeReturn;
+            beforeReturn = null;
+            if (callback != null) callback.run();
             return future;
         }
 

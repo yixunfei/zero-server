@@ -161,3 +161,5 @@ Java 21 虚拟线程允许用于：
 标准实现和可选装配的 API、关闭期限及迁移见[第三轮迁移说明](migrations/20260923-performance-third.md)。
 
 当前预算、取消/关闭释放规则、队列观察语义和内部消息 ID 的 0.x 变化见[迁移说明](migrations/20260923-performance-plan.md)。
+
+受管 Scheduler 先发布单次 timer 登记，再提交一次性调度。零延迟回调可早于 `schedule` 返回，但只能清除自身登记；迟到 future 不得覆盖后续重排，取消先发生时也必须取消后来附加的 future。此控制只保护句柄归属，不在 timer 上执行用户代码，不增加线程或业务锁。

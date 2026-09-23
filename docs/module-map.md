@@ -214,3 +214,5 @@ mvn -B -ntp -Pquality verify
 - `zero-benchmarks` 的精确直接模块依赖为 protocol/ranking/actor/cache/aoi/frame-sync/scene/log/monitor/net/server-starter-production，架构守卫同步此集合；运行时禁止反向依赖 JMH。`benchmark/performance` 与 `scripts/performance/RunTcpLoad.ps1` 是本地测量入口。
 
 `zero-runtime-actor/ActorRuntime.module(config)` 装配显式 Actor 预算，并在 runtime 资源账本登记调度器，使排队消息在执行器关闭前收到失败。
+
+Scheduler 的单次 timer 登记由 `zero-server-starter/.../scheduler/SchedulerTimerRegistration` 管理；`LocalManagedScheduler` 在提交前发布登记，回调按身份移除，避免迟到 future 覆盖后续任务。它仅拥有 timer future，不创建业务线程，也不改变核心 scheduler SPI。

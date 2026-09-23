@@ -376,19 +376,26 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
             throw ZeroException.of(SchedulerErrorCode.NOT_RUNNING);
         }
         Instant scheduledAt = plusNanos(clock.instant(), delayNanos);
-        ScheduledFuture<?> future = currentTimer.schedule(
-                () -> onTimer(control, deadlineNanos, scheduledAt),
-                delayNanos,
-                TimeUnit.NANOSECONDS);
-        control.replaceTimer(future, scheduledAt);
+        SchedulerTimerRegistration registration = control.reserveTimer(scheduledAt);
+        try {
+            ScheduledFuture<?> future = currentTimer.schedule(
+                    () -> onTimer(control, registration, deadlineNanos, scheduledAt),
+                    delayNanos,
+                    TimeUnit.NANOSECONDS);
+            registration.attach(future);
+        } catch (RuntimeException failure) {
+            control.clearElapsedTimer(registration);
+            registration.cancel();
+            throw failure;
+        }
     }
 
     private void onTimer(
             final TaskControl control,
+            final SchedulerTimerRegistration registration,
             final long deadlineNanos,
             final Instant scheduledAt) {
-        control.clearElapsedTimer();
-        if (!valid(control)) {
+        if (!control.clearElapsedTimer(registration) || !valid(control)) {
             return;
         }
         if (control.scheduleType() == ScheduleType.FIXED_RATE
@@ -870,7 +877,7 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
         /**
          * 当前尚未到期的 timer future。
          */
-        private final AtomicReference<ScheduledFuture<?>> timerFuture = new AtomicReference<>();
+        private final AtomicReference<SchedulerTimerRegistration> timerRegistration = new AtomicReference<>();
 
         /**
          * 实际执行序号和次数。
@@ -921,11 +928,6 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
          * 拒绝次数。
          */
         private final AtomicLong rejectionCount = new AtomicLong();
-
-        /**
-         * 下一次计划观测时间。
-         */
-        private final AtomicReference<Instant> nextScheduledAt = new AtomicReference<>();
 
         /**
          * 最近完成观测时间。
@@ -991,7 +993,7 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
                     skippedCapacityCount.get(),
                     skippedLateCount.get(),
                     rejectionCount.get(),
-                    java.util.Optional.ofNullable(nextScheduledAt.get()),
+                    java.util.Optional.ofNullable(timerRegistration.get()).map(SchedulerTimerRegistration::scheduledAt),
                     java.util.Optional.ofNullable(lastCompletedAt.get()),
                     java.util.Optional.ofNullable(lastErrorCode.get()));
         }
@@ -1025,9 +1027,9 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
             if (terminal.get() || !cancelRequested.compareAndSet(false, true)) {
                 return false;
             }
-            ScheduledFuture<?> current = timerFuture.getAndSet(null);
+            SchedulerTimerRegistration current = timerRegistration.getAndSet(null);
             if (current != null) {
-                current.cancel(false);
+                current.cancel();
             }
             if (transitionToTerminal(InternalState.CANCELLED, false)) {
                 emitControlEvent(
@@ -1041,24 +1043,19 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
             return true;
         }
 
-        private void replaceTimer(
-                final ScheduledFuture<?> future,
-                final Instant scheduledAt) {
-            ScheduledFuture<?> previous = timerFuture.getAndSet(future);
-            if (previous != null && !previous.isDone()) {
-                previous.cancel(false);
-            }
-            nextScheduledAt.set(scheduledAt);
+        private SchedulerTimerRegistration reserveTimer(final Instant scheduledAt) {
+            var registration = new SchedulerTimerRegistration(scheduledAt);
+            SchedulerTimerRegistration previous = timerRegistration.getAndSet(registration);
+            if (previous != null) previous.cancel();
             if (!valid(this)) {
-                future.cancel(false);
-                timerFuture.compareAndSet(future, null);
-                nextScheduledAt.compareAndSet(scheduledAt, null);
+                timerRegistration.compareAndSet(registration, null);
+                registration.cancel();
             }
+            return registration;
         }
 
-        private void clearElapsedTimer() {
-            timerFuture.set(null);
-            nextScheduledAt.set(null);
+        private boolean clearElapsedTimer(final SchedulerTimerRegistration registration) {
+            return timerRegistration.compareAndSet(registration, null);
         }
 
         private boolean markSubmitted() {
@@ -1263,11 +1260,10 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
             if (!terminal.compareAndSet(false, true)) {
                 return;
             }
-            ScheduledFuture<?> current = timerFuture.getAndSet(null);
+            SchedulerTimerRegistration current = timerRegistration.getAndSet(null);
             if (current != null) {
-                current.cancel(false);
+                current.cancel();
             }
-            nextScheduledAt.set(null);
             activeTasks.remove(taskId, this);
             taskSlots.release();
         }
