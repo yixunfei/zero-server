@@ -28,7 +28,7 @@ jobs:
           java scripts/VerifyApiCompatibilityConsumer.java | tee target/api-compatibility/consumer.log
       - name: Upload API compatibility evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: api-compatibility
           path: target/api-compatibility
@@ -48,7 +48,7 @@ jobs:
         run: java scripts/ZeroAcceptanceEvidence.java --level full
       - name: Upload acceptance evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: acceptance-evidence
           path: target/acceptance-evidence
@@ -132,7 +132,7 @@ jobs:
         run: java scripts/ZeroStage0Acceptance.java --level full
       - name: Upload Stage 0 logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: stage0-acceptance-logs
           path: target/stage0-acceptance/logs
@@ -182,7 +182,7 @@ jobs:
           java scripts\ZeroUnifiedEntryVerifier.java --full-smoke *>&1 | Tee-Object -FilePath target\cross-platform\windows-verifier.log
       - name: Upload cross-platform evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unified-entry-${{ matrix.os }}
           path: target/cross-platform
@@ -211,7 +211,7 @@ jobs:
           java scripts/ZeroPlatformProductionGate.java --platform-transaction
       - name: Upload platform transaction evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: platform-transaction-${{ matrix.os }}
           path: target/production-gate
@@ -268,7 +268,7 @@ jobs:
           java scripts/ZeroReleaseArtifactEvidence.java | tee target/release-evidence/run.log
       - name: Upload release evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-artifact-evidence
           path: target/acceptance-evidence/release-artifact
