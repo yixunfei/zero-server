@@ -28,7 +28,7 @@
 | `.github/ISSUE_TEMPLATE/` | 已有 | bug、feature、design 有结构化输入 | Issue 流程能替代高风险用户确认 |
 | `.github/workflows/ci.yml` | 已有 | Java 21、validate、test、quality、示例与脚手架命令已声明 | GitHub Actions 当前提交已经在线通过 |
 | `zero-parent/pom.xml` | 已有 | Java 21 与 quality / integration / external profile 已声明 | 阈值、真实中间件矩阵或 release profile 已冻结 |
-| `ZeroBuildSmokeVerifier` | 维护者本地材料，未随公开仓库发布 | 仅作历史材料检查；公开检出可直接执行 `mvn -B -ntp -DskipTests validate` | 单元测试、质量门禁、性能或生产验收通过 |
+| `ZeroUnifiedEntryVerifier` | 随公开仓库发布 | 统一命令入口可用；`--full-smoke` 显式执行本地原型闭环 | 真实中间件、性能或生产验收通过 |
 | [发布检查单](release-checklist.zh-CN.md) | 已有 | 发布前检查维度被统一列出 | 检查项已经由维护者逐项签字 |
 | [迁移说明模板](../migrations/template.zh-CN.md) | 已有 | 破坏性变更有最低记录结构 | 某个具体版本已经完成迁移说明 |
 
@@ -36,7 +36,7 @@
 
 | 层级 | 典型入口 | 当前自动程度 | 本 readiness 是否执行 | 说明 |
 |---|---|---:|---:|---|
-| `validate` | `mvn -DskipTests validate` / `ZeroBuildSmokeVerifier` | CI + 可选本地 | 否 | 只验证 Maven 模型和基础插件阶段 |
+| `validate` | `mvn -DskipTests validate` | CI + 可选本地 | 否 | 只验证 Maven 模型和基础插件阶段 |
 | `default-tests` | `mvn test` | CI | 否 | 无真实外部中间件的默认测试 |
 | `quality` | `mvn -Pquality verify` | CI | 否 | Checkstyle、PMD、SpotBugs、JaCoCo 报告；当前不宣称覆盖率阈值已冻结 |
 | `integration-tests` | `mvn -Pintegration-tests verify` | 按改动选择 | 否 | 本地集成测试，需在任务 `VERIFY.md` 记录 |
@@ -51,12 +51,12 @@
 从仓库根目录使用 Java 21 运行：
 
 ```powershell
-java scripts/ZeroReleaseHardeningReadiness.java --allow-missing-evidence
+java scripts/ZeroReleaseHardeningReadiness.java
 java scripts/ZeroReleaseHardeningReadiness.java --listChecks
 java scripts/ZeroReleaseHardeningReadiness.java --help
 ```
 
-完整维护者环境中的摘要示意（计数以实际输出为准）：
+完整公开检出中的摘要示意（计数以实际输出为准）：
 
 ```text
 zero-release-hardening-readiness=ok|paths=19/19|markers=32/32|levels=7|requiresConfirmation=true|warnings=0
@@ -70,7 +70,7 @@ zero-release-hardening-readiness=ok|paths=19/19|markers=32/32|levels=7|requiresC
 - Changelog 存在 `Unreleased`，发布检查单和迁移模板具备最低章节。
 - readiness 明确 `partial-evidence`、`requiresConfirmation=true` 与七层边界。
 
-公开检出不包含部分维护者脚本与本机协作规则，因此使用 `--allow-missing-evidence` 并检查逐项 `[FAIL]`、`paths` 和 `markers` 的实际计数。当前宽松模式即使存在缺项，摘要仍可能输出 `ok` 和 `warnings=0`，不能据此判断材料完整或 CI 通过。严格模式仅适用于材料齐全的维护者环境。验证器不会启动 Maven 或子进程，不会访问网络，也不会修改仓库。
+严格模式只依赖公开跟踪文件：贡献规范、Git 工作流、发布检查单和统一入口验证器；不要求 `.codex/`、`tasks/` 或本机私有脚本。CI 使用严格模式，任何必需材料缺失仍会失败。`--allow-missing-evidence` 仅作缺项诊断，其 `ok` 摘要不表示材料完整。验证器不会启动 Maven 或子进程，不会访问网络，也不会修改仓库。
 
 - 本地 release artifact rehearsal 已可生成源码包、SHA-256、CycloneDX 结构化 SBOM、临时 Ed25519 签名、篡改拒绝和 v1/v2/v1 回滚证据；这不等于受信任身份签名、制品仓库发布或生产回滚演练。
 

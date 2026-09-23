@@ -19,7 +19,7 @@ public final class ZeroReleaseHardeningReadiness {
      * 发布准备所需路径。
      */
     private static final List<RequiredPath> REQUIRED_PATHS = List.of(
-            path("agents", ".codex", "AGENTS.md"),
+            path("release-policy", "docs", "git-workflow.zh-CN.md"),
             path("changelog", "CHANGELOG.md"),
             path("contributing", "CONTRIBUTING.md"),
             path("security", "SECURITY.md"),
@@ -33,7 +33,7 @@ public final class ZeroReleaseHardeningReadiness {
             path("parent-pom", "zero-parent", "pom.xml"),
             path("git-workflow", "docs", "git-workflow.zh-CN.md"),
             path("module-map", "docs", "module-map.md"),
-            path("build-smoke", "scripts", "ZeroBuildSmokeVerifier.java"),
+            path("build-smoke", "scripts", "ZeroUnifiedEntryVerifier.java"),
             path("framework-boundary", "scripts", "ZeroFrameworkBoundaryGuard.java"),
             path("release-readiness", "docs", "operations", "release-hardening-readiness.zh-CN.md"),
             path("release-checklist", "docs", "operations", "release-checklist.zh-CN.md"),
@@ -43,8 +43,8 @@ public final class ZeroReleaseHardeningReadiness {
      * 发布准备材料中的稳定 marker。
      */
     private static final List<RequiredMarker> REQUIRED_MARKERS = List.of(
-            marker("agents-release-rule", ".codex/AGENTS.md", "zero-release-rule=requires-confirmation"),
-            marker("agents-zero-x-rule", ".codex/AGENTS.md", "0.x"),
+            marker("release-authorization", "docs/operations/release-checklist.zh-CN.md", "releaseAuthorization=false"),
+            marker("zero-x-rule", "docs/git-workflow.zh-CN.md", "0.x"),
             marker("changelog-unreleased", "CHANGELOG.md", "## Unreleased"),
             marker("contributing-quality", "CONTRIBUTING.md", "zero-contributing-quality=required"),
             marker("security-reporting", "SECURITY.md", "zero-security-reporting=private-channel"),
@@ -65,8 +65,8 @@ public final class ZeroReleaseHardeningReadiness {
             marker("maven-external", "zero-parent/pom.xml", "<id>external-tests</id>"),
             marker("git-verification", "docs/git-workflow.zh-CN.md", "zero-git-verification=required"),
             marker("module-map-core", "docs/module-map.md", "zero-core"),
-            marker("build-smoke-summary", "scripts/ZeroBuildSmokeVerifier.java",
-                    "zero-build-smoke-verifier=ok"),
+            marker("build-smoke-summary", "scripts/ZeroUnifiedEntryVerifier.java",
+                    "zero-unified-entry-verifier=ok"),
             marker("framework-boundary-summary", "scripts/ZeroFrameworkBoundaryGuard.java",
                     "zero-framework-boundary-guard=ok"),
             marker("readiness-state", "docs/operations/release-hardening-readiness.zh-CN.md", "partial-evidence"),
@@ -177,7 +177,7 @@ public final class ZeroReleaseHardeningReadiness {
         System.out.println("Next:");
         System.out.println("  Read docs/operations/release-checklist.zh-CN.md");
         System.out.println("  Copy docs/migrations/template.zh-CN.md for a concrete breaking release");
-        System.out.println("  java scripts/ZeroBuildSmokeVerifier.java");
+        System.out.println("  java scripts/ZeroUnifiedEntryVerifier.java --full-smoke");
         System.out.println("  mvn -B -ntp test");
         System.out.println("  mvn -B -ntp -Pquality verify");
         System.out.println();
