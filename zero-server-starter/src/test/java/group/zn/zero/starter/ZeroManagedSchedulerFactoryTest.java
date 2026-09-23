@@ -183,7 +183,7 @@ class ZeroManagedSchedulerFactoryTest {
         assertTrue(business.startedWithScheduler.get());
         assertTrue(business.stoppedWithScheduler.get());
         assertSame(LifecycleState.STOPPED, scheduler.state());
-        assertFalse(hasLiveThread("scheduler-l1-timer-"));
+        assertThreadsStopped("scheduler-l1-timer-");
     }
 
     /**
@@ -289,9 +289,13 @@ class ZeroManagedSchedulerFactoryTest {
         assertSame(expected, handle.snapshot().state());
     }
 
-    private static boolean hasLiveThread(final String prefix) {
-        return Thread.getAllStackTraces().keySet().stream()
-                .anyMatch(thread -> thread.isAlive() && thread.getName().startsWith(prefix));
+    private static void assertThreadsStopped(final String prefix) throws InterruptedException {
+        // awaitTermination 可在线程退出前的清理尾部返回；仍要求实际线程在有界时间内退出。
+        for (Thread thread : Thread.getAllStackTraces().keySet()) {
+            if (thread.getName().startsWith(prefix)) {
+                assertTrue(thread.join(Duration.ofSeconds(3)), "timer thread did not exit: " + thread.getName());
+            }
+        }
     }
 
     /**
