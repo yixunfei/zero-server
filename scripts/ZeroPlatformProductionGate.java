@@ -25,8 +25,11 @@ public final class ZeroPlatformProductionGate {
         Path output = root.resolve("target/production-gate").resolve(UUID.randomUUID().toString().replace("-", ""));
         Files.createDirectories(output);
         List<Result> results = switch (mode) {
-            case PLATFORM_TRANSACTION -> List.of(run(root, output, "platform-transaction", List.of(maven(), "-B", "-ntp", "-pl", "zero-codegen",
-                    "-Dtest=ProjectScaffoldGeneratorTest,ScaffoldManifestContractTest,ScaffoldCliValidationTest", "test"), "BUILD SUCCESS"));
+            case PLATFORM_TRANSACTION -> List.of(
+                    run(root, output, "platform-dependencies", List.of(maven(), "-B", "-ntp", "-pl", "zero-codegen", "-am",
+                            "-DskipTests", "install"), "BUILD SUCCESS"),
+                    run(root, output, "platform-transaction", List.of(maven(), "-B", "-ntp", "-pl", "zero-codegen",
+                            "-Dtest=ProjectScaffoldGeneratorTest,ScaffoldManifestContractTest,ScaffoldCliValidationTest", "test"), "BUILD SUCCESS"));
             case LOCAL_PRODUCTION_FOCUSED -> List.of(
                     run(root, output, "network-focused", List.of(maven(), "-B", "-ntp", "-pl", "zero-net,zero-runtime-net,zero-server-starter-production", "-am",
                             "-Dtest=ProductionNetworkLifecycleFocusedTest,ProductionNetworkTelemetryObserverTest,ProductionNetworkProviderTest",
@@ -95,8 +98,11 @@ public final class ZeroPlatformProductionGate {
         String home = System.getProperty("java.home");
         if (home != null) {
             builder.environment().put("JAVA_HOME", home);
-            builder.environment().put("PATH", Path.of(home, "bin") + java.io.File.pathSeparator
-                    + builder.environment().getOrDefault("PATH", ""));
+            // Windows 环境可能保存为 Path；保留原键，避免新建 PATH 后丢失 Maven/系统工具目录。
+            String pathKey = builder.environment().keySet().stream()
+                    .filter(key -> key.equalsIgnoreCase("PATH")).findFirst().orElse("PATH");
+            builder.environment().put(pathKey, Path.of(home, "bin") + java.io.File.pathSeparator
+                    + builder.environment().getOrDefault(pathKey, ""));
         }
     }
 
