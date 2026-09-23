@@ -44,3 +44,5 @@ java scripts/ZeroAcceptanceEvidence.java --level full --local-only --no-stage0
 ```
 
 Stage 0 复验另发现快速 bind 已完成时 Netty `sync()` 不检查预先中断，导致启动是否取消取决于时序。共享 TCP/HTTP/UDP 资源入口现显式检查中断，调用层保留 `START_FAILED` 与中断状态，并关闭本次 listener、不关闭借用 IO 组；增加已完成 future 的确定性回归用例。业务不需要迁移。
+
+受管调度器示例用显式异步完成信号替换固定 80ms sleep，观察到运行中跳过后才完成模拟响应；fixed-delay 等待成功计数发布后再取消，避免慢 CI 或不同调度顺序造成误报。生产调度算法未改变。

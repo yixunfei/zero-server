@@ -135,6 +135,7 @@ final class ManagedSchedulerDemoTasks {
                     completed.countDown();
                 }));
         await(completed, "two fixed-delay executions");
+        awaitCondition(() -> handle.snapshot().successCount() >= 2, "fixed-delay completion accounting");
         boolean firstCancel = handle.cancel();
         boolean secondCancel = handle.cancel();
         awaitState(handle, ScheduledTaskState.CANCELLED, "fixed-delay cancellation");
@@ -147,16 +148,21 @@ final class ManagedSchedulerDemoTasks {
         CountDownLatch remoteStarted = new CountDownLatch(1);
         CountDownLatch remoteCompleted = new CountDownLatch(1);
         AtomicReference<String> remoteThread = new AtomicReference<>();
+        CompletableFuture<Void> remoteResponse = new CompletableFuture<>();
         ScheduledTaskHandle handle = scheduler.scheduleAtFixedRate(
                 ScheduledTaskDefinition.defaults("example-fixed-rate-slow"),
                 Duration.ZERO,
                 Duration.ofMillis(5),
-                context -> simulateRemoteIo(remoteStarted, remoteCompleted, remoteThread));
-        await(remoteStarted, "fixed-rate remote IO start");
-        awaitCondition(
-                () -> handle.snapshot().skippedRunningCount() > 0,
-                "fixed-rate running skip");
-        handle.cancel();
+                context -> simulateRemoteIo(remoteStarted, remoteCompleted, remoteThread, remoteResponse));
+        try {
+            await(remoteStarted, "fixed-rate remote IO start");
+            awaitCondition(
+                    () -> handle.snapshot().skippedRunningCount() > 0,
+                    "fixed-rate running skip");
+        } finally {
+            handle.cancel();
+            remoteResponse.complete(null);
+        }
         await(remoteCompleted, "fixed-rate remote IO completion");
         awaitState(handle, ScheduledTaskState.CANCELLED, "fixed-rate cancellation");
         return new FixedRateResult(
@@ -167,19 +173,14 @@ final class ManagedSchedulerDemoTasks {
     private CompletionStage<Void> simulateRemoteIo(
             final CountDownLatch started,
             final CountDownLatch completed,
-            final AtomicReference<String> threadName) {
+            final AtomicReference<String> threadName,
+            final CompletableFuture<Void> response) {
+        // 由示例主线程在观察到跳过节拍后完成响应，避免固定 sleep 依赖机器调度速度。
         return CompletableFuture.runAsync(() -> {
             threadName.set(Thread.currentThread().getName());
             started.countDown();
-            try {
-                TimeUnit.MILLISECONDS.sleep(80);
-            } catch (InterruptedException ex) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("simulated remote IO was interrupted", ex);
-            } finally {
-                completed.countDown();
-            }
-        }, remoteIoExecutor);
+        }, remoteIoExecutor).thenCompose(ignored -> response)
+                .whenComplete((ignored, failure) -> completed.countDown());
     }
 
     private boolean runDefaultFailure() {
