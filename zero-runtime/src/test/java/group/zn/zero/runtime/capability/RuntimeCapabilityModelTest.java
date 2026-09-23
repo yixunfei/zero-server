@@ -108,7 +108,7 @@ class RuntimeCapabilityModelTest {
         RuntimeCapabilityModel model = StandardRuntimeCapabilityModel.instance();
 
         assertEquals("zero.standard", model.id());
-        assertEquals(22, model.capabilities().size());
+        assertEquals(23, model.capabilities().size());
         assertEquals(22, model.providers().size());
         assertEquals(
                 BindingCardinality.MULTIPLE,

@@ -125,7 +125,7 @@ public final class NettyConnection implements IConnection {
                     "Netty TCP connection only supports ProtocolFrame",
                     null));
         }
-        return outbound.send(java.util.List.of(frame));
+        return outbound.send(frame);
     }
 
     /**

@@ -35,6 +35,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @author zn
  */
 public final class InMemoryEventBus implements EventBus {
+    /** 框架自有的只读成功结果；转换为 CompletableFuture 时由 JDK 创建调用方私有副本。 */
+    private static final CompletionStage<Void> SUCCESS = CompletableFuture.completedStage(null);
 
     /**
      * 处理器序号生成器。
@@ -157,7 +159,7 @@ public final class InMemoryEventBus implements EventBus {
         try {
             for (InterceptorRegistration registration : registrations.interceptors()) {
                 if (!registration.interceptor().beforePublish(event)) {
-                    return CompletableFuture.completedFuture(null);
+                    return SUCCESS;
                 }
             }
         } catch (RuntimeException | Error ex) {
@@ -166,7 +168,7 @@ public final class InMemoryEventBus implements EventBus {
             return CompletableFuture.failedFuture(zeroException);
         }
 
-        if (handlerSnapshot.isEmpty()) return CompletableFuture.completedFuture(null);
+        if (handlerSnapshot.isEmpty()) return SUCCESS;
         return dispatch(event, handlerSnapshot, 0, null, null);
     }
 
@@ -177,6 +179,7 @@ public final class InMemoryEventBus implements EventBus {
             CompletionStage<Void> stage;
             try {
                 stage = Objects.requireNonNull(registrations.get(index).handler().handle(event), "handler result");
+                if (stage == SUCCESS) continue;
                 // 仅优化标准 CompletableFuture；不调用通用 stage 的 toCompletableFuture 或阻塞未完成结果。
                 if (stage.getClass() == CompletableFuture.class && ((CompletableFuture<?>) stage).isDone()) {
                     ((CompletableFuture<?>) stage).join();
@@ -206,6 +209,7 @@ public final class InMemoryEventBus implements EventBus {
     }
 
     private CompletionStage<Void> finish(final List<ZeroException> failures, final CompletableFuture<Void> completion) {
+        if (failures == null && completion == null) return SUCCESS;
         CompletableFuture<Void> result = completion == null ? new CompletableFuture<>() : completion;
         if (failures == null) {
             result.complete(null);

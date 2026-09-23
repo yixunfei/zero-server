@@ -90,7 +90,7 @@ handler、Executor 提交和 completion 回调均在段锁外执行。异步完�
 - 完整本地 demo 可以显式使用 starter 管理的单线程逻辑执行器，验证业务 handler 不运行在 Netty IO 线程中。
 - `localPrototype` 可以创建 logic、actor、remote IO 和 background 执行域，供阶段 3 业务模块直接接入。
 - `singleThreaded` 为避免自等待，Actor 执行仍使用 direct executor；需要独立 actor 线程池时应使用 `localPrototype`。
-- 该装配点不替代生产级统一线程管理；Netty IO、Kafka consumer worker、Kafka pending 时间轮、Actor 队列背压、持久化 flush 调度和虚拟线程策略仍必须在后续专项中统一设计。
+- 该装配点管理业务执行域；Netty IO 由 `NettyIoResources` 管理，runtime 通过可选 `NetworkRuntime.ioModule` 登记拥有权。Kafka consumer worker、Kafka pending 时间轮和持久化 flush 调度仍保留各自生命周期。
 
 阶段 3 原型默认绑定：
 
@@ -155,6 +155,9 @@ Java 21 虚拟线程允许用于：
 - 重连若涉及玩家在线状态，只允许由 `coordinateReconnect` 实现向 player actor 发送消息，不允许网络线程或 remote IO 线程直接修改玩家状态。
 - observer、鉴权或业务完成回调必须先投递回 EventLoop，再修改连接生命周期状态或释放 in-flight 预算。
 
-该实现没有在 `zero-net` 中创建业务线程池，但 `NettyTcpServer` 当前仍自行管理 Netty IO 线程组；把 Netty EventLoop 纳入 starter 全局线程资源管理属于后续独立高风险任务。
+`zero-net` 不创建业务线程池。TCP/HTTP/UDP 共用 `NettyIoResources` 的 IO 创建/关闭实现，默认每服务独占，组合根可显式注入共享组。
+服务器停止时先停止接入，再关闭自身连接并终结在途写，最后释放自有组；借用组由 runtime/组合根关闭。
+同一共享组中的其他服务器不受单个 server.stop 影响。IO 线程发起停止不等待自身终止，外部调用者可通过资源的 `termination()` 等待。
+标准实现和可选装配的 API、关闭期限及迁移见[第三轮迁移说明](migrations/20260923-performance-third.md)。
 
 当前预算、取消/关闭释放规则、队列观察语义和内部消息 ID 的 0.x 变化见[迁移说明](migrations/20260923-performance-plan.md)。

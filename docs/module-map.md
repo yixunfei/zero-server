@@ -92,7 +92,7 @@ flowchart TB
 
 | 模块 | 职责 | 核心入口 | 常见修改位置 | 禁止依赖与主要风险 |
 | --- | --- | --- | --- | --- |
-| `zero-net` | TCP / UDP / HTTP、frame 编解码、连接生命周期、准入与限流 | `NettyTcpServer`、`NettyUdpServer`、`NettyHttpServer`、`ProductionNetworkLifecycle` | `zero-net/src/main/java/group/zn/zero/net` | IO 线程禁止执行阻塞业务；frame、限流、鉴权、连接关闭和 buffer 生命周期是高风险路径 |
+| `zero-net` | TCP / UDP / HTTP、frame 编解码、IO 资源拥有权、连接生命周期、准入与限流 | `NettyIoResources`、`NettyTcpServer`、`NettyUdpServer`、`NettyHttpServer`、`ProductionNetworkLifecycle` | `zero-net/src/main/java/group/zn/zero/net` | IO 线程禁止执行阻塞业务；借用组由组合根关闭，各 server 独立关闭连接和出站预算 |
 | `zero-rpc-common` | 最小 RPC 调用契约与调用模式 | `RpcClient`、`RpcCallOptions`、`RpcCallMode`、`RpcResult` | `zero-rpc-common/src/main/java/group/zn/zero/rpc/common` | 禁止绑定 Kafka 或服务发现；公共调用语义变化会影响所有 transport |
 | `zero-rpc` | 服务描述、绑定、路由、codec、transport SPI 与远程 Actor 桥接 | `RpcClientFactory`、`RpcServiceBinder`、`RpcTransport`、`RpcRemoteActorGateway` | `zero-rpc/src/main/java/group/zn/zero/rpc` | 禁止反向依赖 `zero-rpc-kafka` 或 Nacos；超时、幂等、路由和 request/response 语义属于高风险契约 |
 | `zero-rpc-kafka` | Kafka RPC envelope、gateway、pending 请求与超时轮 | `KafkaRpcAdapter`、`KafkaRpcClientFactory`、`ApacheKafkaRpcMessageGateway`、`KafkaRpcSettings` | `zero-rpc-kafka/src/main/java/group/zn/zero/rpc/kafka` | 必须保持 `correlationId`、`replyTopic`、`traceId`、`timeoutAt` 等语义；关注资源关闭、积压和过期拒绝 |
@@ -207,6 +207,8 @@ mvn -B -ntp -Pquality verify
 - `zero-actor/scheduler`：`ActorSchedulerConfig`、`ActorSchedulerStatistics` 与 `OrderedActorHandlers`；Local 委托同一 Executor 调度内核，仍由调用线程推进，不依赖网络/监控 Adapter。
 - `zero-protocol`：`ProtocolFrame` 长度/只读视图、`ProtocolFrameCodec` 缓冲入口；Netty 依赖仍仅位于 `zero-net`。
 - `zero-net`：`NetworkTuning`、`NettyTransportFactory`、`NettyZeroBuffer`、`NettyOutbound`/`OutboundBudget`，分别负责配置、transport、缓冲桥和出站准入。EPOLL 类依赖及显式 `linux-native` 运行库只在本模块引入。
+- `zero-net/netty/NettyIoResources` 统一创建和关闭 IO 组；`NettyServerResources` 负责单次启动的监听/子连接回收。所有服务器默认独占，也可显式借用兼容组。单帧出站完成协调同时等待写 promise 和 flush 屏障。
+- `zero-runtime-net/NetworkRuntime.ioResources` / `ioModule` 是可选装配入口，使用 `ResourceRegistrar` 执行回滚和关闭；中立能力 `zero.net.io-resources` 位于 runtime，实际实现仍在 net。依赖维持 `runtime-net -> net/runtime-production`，bootstrap/core 不依赖 Netty。示例及拥有权见[迁移说明](migrations/20260923-performance-third.md)。
 - `zero-aoi`：`observe/forgetObserver` 管理观察生命周期；`zero-frame-sync` 使用有序参与者目录，公开 batch 不复用。
 - `zero-scene`：外层并发目录与私有 `SceneState` 分离；内部实体表只在 Scene Lane 读写。
 - `zero-benchmarks` 的精确直接模块依赖为 protocol/ranking/actor/cache/aoi/frame-sync/scene/log/monitor/net/server-starter-production，架构守卫同步此集合；运行时禁止反向依赖 JMH。`benchmark/performance` 与 `scripts/performance/RunTcpLoad.ps1` 是本地测量入口。

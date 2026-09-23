@@ -183,3 +183,14 @@ java -jar zero-benchmarks/target/benchmarks.jar `
 当前微基准位于 `zero-benchmarks/.../performance`，覆盖 Ranking、缓存、协议、Actor、AOI 与帧同步。独立 TCP 服务/客户端使用 `TargetRateEchoServer` / `TargetRateTcpLoad`，脚本为 `scripts/performance/RunTcpLoad.ps1`；计时从目标发送时间到完整响应，明确报告 planned/offered/completed/failed/timeouts/rejected/pending。详见[本轮报告](../reports/performance-plan-20260923.zh-CN.md)。
 
 默认准入预算是内存边界而非容量承诺；实际可写水位、allocator/TLS/socket 资源需要一起测量。JMH 纳秒均值不等于真实服务 p99；只有完成响应直方图用于报告请求分位延迟。长稳、Linux 原生和跨机 RPC 证据分别记录，不能互相替代。
+
+## 2026-09-23 第三轮证据入口
+
+[第三轮报告](../reports/performance-third-20260923.zh-CN.md)记录单帧实际出站完成、AOI 精确少量变化、
+默认 ActorMessage/ActorContext 构造、EventBus 调用者消费方式，以及条件候选的采用/拒绝证据。
+JMH 的 GC profiler 与不带 profiler 的 CPU 对照分别保存；前文“本轮没有启用 GC profiler”仅描述当时历史批次。
+
+`scripts/performance/CompileGeneratedLoad.ps1` 运行真实生成器并编译 DTO/dispatcher/BO 负载适配。
+`RunTcpLoad.ps1` 可显式选择 G1/Java 21 分代 ZGC、backlog、flush、生成 DTO、预热和 JFR；
+没有 DriverClasses 时直接使用指定 jar，避免历史 load-classes 遮蔽新制品。
+建连突发分别报告 connect 与首业务响应，OS 队列上限不可观测时不从单机结果反推监听队列溢出。

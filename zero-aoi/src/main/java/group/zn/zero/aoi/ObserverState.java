@@ -33,15 +33,18 @@ final class ObserverState {
         return ++generation;
     }
 
-    void commit(final List<AoiEntity> changes, final long currentGeneration) {
+    void commit(final AoiEntity first, final List<AoiEntity> changes, final long currentGeneration) {
+        if (first != null) commit(first, currentGeneration);
         if (changes == null) return;
-        for (AoiEntity entity : changes) {
-            Seen seen = entities.get(entity.entityId());
-            if (seen == null) entities.put(entity.entityId(), new Seen(entity, currentGeneration));
-            else {
-                seen.entity = entity;
-                seen.generation = currentGeneration;
-            }
+        for (AoiEntity entity : changes) commit(entity, currentGeneration);
+    }
+
+    private void commit(final AoiEntity entity, final long currentGeneration) {
+        Seen seen = entities.get(entity.entityId());
+        if (seen == null) entities.put(entity.entityId(), new Seen(entity, currentGeneration));
+        else {
+            seen.entity = entity;
+            seen.generation = currentGeneration;
         }
     }
 

@@ -4,6 +4,7 @@
 
 | 报告 | 用途 |
 | --- | --- |
+| [第三轮性能与 IO 治理（2026-09-23）](performance-third-20260923.zh-CN.md) | 单帧/AOI/身份/事件完成对照、条件候选取舍、共享 IO 生命周期与生成 DTO 负载 |
 | [性能增量（2026-09-23）](performance-incremental-20260923.zh-CN.md) | 共享竞争、多观察者、只读 payload 和批量搬移对照；契约与未实施项 |
 | [性能方案 S0-S3（2026-09-23）](performance-plan-20260923.zh-CN.md) | JMH 前后对照、独立 TCP 负载、资源与验证边界 |
 | [性能反馈优化（2026-09-22）](performance-feedback-20260922.zh-CN.md) | Actor 分段、AOI 网格、编码分配和 FFM 决策；本地对照基准与验证边界 |

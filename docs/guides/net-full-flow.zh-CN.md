@@ -22,6 +22,12 @@
 - `zero-net` 只负责传输层 server、connection、frame 收发和 HTTP 最小请求响应，不保存玩家、账号或场景业务 session。
 - `zero-logic` 承载业务示例、业务 session 示例和跨模块 smoke flow，可依赖 `zero-net`、`zero-protocol` 和 test scope 的 `zero-codegen`。
 
+IO 资源由 `zero-net` 的 `NettyIoResources` 统一创建和回收。默认构造保持每服务独占，
+需要 runtime 管理时在组合根安装 `NetworkRuntime.ioModule(options)`，server provider 声明
+`require(NetworkRuntime.IO_RESOURCES)` 并通过新增构造参数借用资源；业务 BO 不接触 EventLoop。
+共享组的服务器各自跟踪并关闭自己的连接，IO 资源最后由 runtime 释放。完整 API 与停止语义见
+[资源治理迁移说明](../migrations/20260923-performance-third.md)。
+
 ## 2. 当前完整请求流程
 
 1. 使用 `.si` 和 `protoId.txt` 定义协议。
@@ -91,7 +97,7 @@
 
 ## 5. 后续风险
 
-- 业务 executor 可通过 `ZeroRuntimeExecutors` 统一管理并由应用关闭；当前 Netty server 内部创建 IO 线程组，业务 executor 由调用方传入。
+- 业务 executor 可通过 `ZeroRuntimeExecutors` 统一管理并由应用关闭；Netty IO 由 `NettyIoResources` 统一管理，默认独占或由 runtime 显式装配。业务 executor 由调用方传入。
 - 生成 dispatcher 当前同步调用 BO，响应生成仍由 handler 或业务层负责。
 - 真实 KCP、WebSocket、JSON/Protobuf 和生产 HTTP 路由都需要独立 Design Proposal 与针对性验证。
 - 如果后续修改 dispatcher 返回值、异步语义或协议线格式，属于高风险协议契约变更，必须单独确认。
@@ -120,3 +126,33 @@ ACCEPTED
 握手、鉴权、心跳、队列预算或限流失败时，连接绑定 `NetErrorCode`、发出 observer 事件并关闭；首轮实现不会新增客户端错误响应 frame，因此不改变现有协议线格式。默认握手/鉴权超时分别为 5 秒和 10 秒，心跳间隔 15 秒、允许丢失 2 次，重连窗口 30 秒，单连接入站 frame 预算 1024；这些值均可配置，正式部署必须按游戏类型和容量测试覆盖。
 
 当前切片只覆盖 TCP 最小治理，不包含真实账号/token 鉴权、TLS、WAF、DDoS 防护、完整网关、UDP/KCP/WebSocket 生命周期或生产容量承诺。
+
+## 7. 将 IO 资源交给组合根
+
+已有 server 构造无需修改。需要多个服务显式共享 IO 时，应用组合根可以使用以下 provider 模式。
+`frameCodec`、`handler`、`listener` 和 `managedLogicExecutor` 来自应用现有装配；BO 不访问资源句柄。
+
+```java
+var options = ServerOptions.tcp("127.0.0.1", 9000).withIoThreads(1, 4);
+var serverKey = ComponentKey.single("app.tcp", NettyTcpServer.class);
+var serverProvider = RuntimeProviders.create(
+        ComponentDescriptor.builder(ComponentId.of("app.tcp"))
+                .provide(serverKey).require(NetworkRuntime.IO_RESOURCES).build(),
+        context -> {
+            var server = new NettyTcpServer(options, frameCodec, handler, listener,
+                    managedLogicExecutor, null, null,
+                    context.require(NetworkRuntime.IO_RESOURCES));
+            return ComponentContribution.builder().bind(serverKey, server)
+                    .lifecycle(server).build();
+        });
+var runtime = ProductionAssembly.builder(config)
+        .install(NetworkRuntime.ioModule(options))
+        .install(RuntimeModule.of("app.tcp", List.of(serverProvider), serverKey))
+        .build();
+runtime.start();
+```
+
+应用退出时调用 `runtime.close()`。依赖声明让 runtime 先停止 server、关闭它接受的连接，再释放 IO 组；
+创建后续组件失败也会回滚。需要生产鉴权/TLS 时仍显式传入既有 lifecycle/TLS 参数。
+`ioModule` 是可选扩展，最小 local/bootstrap 不会因此自动增加 Netty 线程。
+直接嵌入使用 `NettyIoResources.open(options)` 时，由组合根按相同顺序关闭所有借用服务器和 IO 资源。

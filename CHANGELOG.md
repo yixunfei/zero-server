@@ -6,6 +6,15 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 2026-09-23 第三轮性能与 IO 资源治理
+
+- 单帧出站省去批次包装并统一写/flush 完成屏障，修复同步写成功后漏报 flush 失败；AOI 少量变化减少临时集合。
+- EventBus 同步成功使用可隔离转换的只读 CompletionStage，默认 Actor ID 保留字符串格式并减少构造中间表示。
+- TCP/HTTP/UDP 统一通过 NettyIoResources 管理 IO 组；可选 runtime 装配支持资源登记、共享拥有权、回滚和独立连接回收。
+- 绑定失败统一为 START_FAILED 并保留底层 cause。业务接入、可选资源拥有权及验证见[迁移说明](docs/migrations/20260923-performance-third.md)。
+- 真实生成 DTO、GC/flush/TLS/建连参数对照及 2h 长稳证据见[第三轮报告](docs/reports/performance-third-20260923.zh-CN.md)；保留未采用候选和资源趋势边界，不调整部署默认值。
+- 合并前审查修复负载驱动在最后响应移出在途表后、完成计数发布前提前汇总的竞态；最终结果等待计数结算，超时明确失败。历史样本保持原测量身份。
+
 ### 2026-09-23 codegen 对接修复
 
 - Java 生成分发器的帧和数组入口统一使用只读 reader，在执行 BO 前拒绝对象外尾随数据；保持 DSL、线格式和业务签名。

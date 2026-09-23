@@ -24,6 +24,8 @@ import java.util.concurrent.locks.LockSupport;
 public final class TargetRateTcpLoad {
     /** 帧编解码器。 */
     private final ZeroBinaryFrameCodec codec = new ZeroBinaryFrameCodec();
+    /** 显式选择的 echo/生成 DTO 消息负载。 */
+    private final LoadPayload payloadCodec = LoadPayload.configured();
     /** 全局在途表。 */
     private final ConcurrentHashMap<Long, Pending> pending = new ConcurrentHashMap<>();
     /** 实测延迟。 */
@@ -40,7 +42,13 @@ public final class TargetRateTcpLoad {
     private final LongAdder unexpectedResponses = new LongAdder();
     /** 成功重建连接次数。 */
     private long reconnects;
-    private TargetRateTcpLoad() { }
+    /** 显式慢消费者实验；默认不延迟读取，不改变生产代码。 */
+    private final long readDelayNanos = Long.getLong("zero.load.readDelayMillis", 0L) * 1_000_000L;
+    /** 预热和测量在同一 JVM 内使用独立计数，保留客户端 JIT 状态。 */
+    private final boolean warmup;
+    /** 实际发送阶段的墙钟起点，用于对齐独立 OS/GC 采样。 */
+    private long startedAtMillis;
+    private TargetRateTcpLoad(final boolean warmup) { this.warmup = warmup; }
 
     /**
      * 执行独立客户端负载并输出 JSONL；固定请求截止 3 秒。
@@ -48,7 +56,12 @@ public final class TargetRateTcpLoad {
      * @throws Exception 建连、协议或关闭失败，结果必须与服务端日志一起分析。
      */
     public static void main(final String[] args) throws Exception {
-        new TargetRateTcpLoad().run(Integer.parseInt(args[0]), Integer.parseInt(args[1]),
+        int warmupSeconds = Integer.getInteger("zero.load.warmupSeconds", 0);
+        if (warmupSeconds > 0) {
+            new TargetRateTcpLoad(true).run(Integer.parseInt(args[0]), Integer.parseInt(args[1]),
+                    Integer.parseInt(args[2]), warmupSeconds, Integer.parseInt(args[4]), false);
+        }
+        new TargetRateTcpLoad(false).run(Integer.parseInt(args[0]), Integer.parseInt(args[1]),
                 Integer.parseInt(args[2]), Integer.parseInt(args[3]), Integer.parseInt(args[4]), Boolean.parseBoolean(args[5]));
     }
 
@@ -61,10 +74,12 @@ public final class TargetRateTcpLoad {
         long sendingFinished = 0;
         try {
             for (int i = 0; i < connectionCount; i++) clients.add(new Client(port));
-            LoadResources.sample("client-ready");
+            LoadResources.sample(warmup ? "client-warmup-ready" : "client-ready");
+            startedAtMillis = System.currentTimeMillis();
             started = System.nanoTime();
             long deadline = started + seconds * 1_000_000_000L;
             long nextSample = started;
+            long nextExpiry = started + 100_000_000L;
             long nextChurn = started + 5_000_000_000L;
             while (System.nanoTime() < deadline) {
                 long due = started + offered * 1_000_000_000L / rate;
@@ -80,9 +95,13 @@ public final class TargetRateTcpLoad {
                 long sequence = offered++;
                 if (pending.size() >= 16384 || client.closed.get()) rejected.increment();
                 else send(client, sequence, due, payloadSize);
-                if (System.nanoTime() >= nextSample) {
+                long now = System.nanoTime();
+                if (now >= nextExpiry) {
                     expire();
-                    LoadResources.sample("client");
+                    nextExpiry = now + 100_000_000L;
+                }
+                if (now >= nextSample) {
+                    LoadResources.sample(warmup ? "client-warmup" : "client");
                     progress(offered);
                     nextSample = System.nanoTime() + 10_000_000_000L;
                 }
@@ -93,22 +112,22 @@ public final class TargetRateTcpLoad {
             }
             sendingFinished = System.nanoTime();
             long drainDeadline = sendingFinished + 4_000_000_000L;
-            while (!pending.isEmpty() && System.nanoTime() < drainDeadline) {
+            // 在途移除发生在读线程提交统计之前，不能仅以 pending 为空判断汇总已稳定。
+            while (accounted() != offered && System.nanoTime() < drainDeadline) {
                 expire();
                 Thread.sleep(10);
             }
+            if (accounted() != offered) throw new IllegalStateException("load result accounting did not settle");
             double elapsed = (System.nanoTime() - started) / 1_000_000_000.0;
             report(offered, seconds * (long) rate, elapsed, (sendingFinished - started) / 1_000_000_000.0);
         } finally {
             for (Client client : clients) client.close();
-            LoadResources.sample("client-final");
+            LoadResources.sample(warmup ? "client-warmup-final" : "client-final");
         }
     }
 
     private void send(final Client client, final long sequence, final long due, final int payloadSize) {
-        byte[] payload = new byte[payloadSize];
-        ByteBuffer.wrap(payload).putLong(sequence).putLong(due);
-        byte[] encoded = codec.encode(new ProtocolFrame(1, 1, 0, null, payload));
+        byte[] encoded = codec.encode(payloadCodec.request(sequence, due, payloadSize));
         byte[] wire = ByteBuffer.allocate(encoded.length + 4).putInt(encoded.length).put(encoded).array();
         Pending request = new Pending(client, due);
         pending.put(sequence, request);
@@ -121,20 +140,28 @@ public final class TargetRateTcpLoad {
 
     private void received(final byte[] encoded) {
         ProtocolFrame frame = codec.decode(encoded);
-        long sequence = frame.payloadView().getLong();
+        long sequence = payloadCodec.sequence(frame);
         Pending request = pending.get(sequence);
         if (request == null || !remove(sequence, request)) {
             unexpectedResponses.increment();
             return;
         }
-        latency.record(System.nanoTime() - request.due);
-        completed.increment();
+        long elapsed = System.nanoTime() - request.due;
+        if (elapsed > 3_000_000_000L) timedOut.increment();
+        else {
+            latency.record(elapsed);
+            completed.increment();
+        }
     }
 
     private boolean remove(final long sequence, final Pending request) {
         if (!pending.remove(sequence, request)) return false;
         request.client.inFlight.decrementAndGet();
         return true;
+    }
+
+    private long accounted() {
+        return completed.sum() + failed.sum() + timedOut.sum() + rejected.sum();
     }
 
     private void expire() {
@@ -154,17 +181,19 @@ public final class TargetRateTcpLoad {
     }
 
     private void progress(final long offered) {
-        System.out.printf("{\"kind\":\"progress\",\"offered\":%d,\"completed\":%d,\"failed\":%d,"
+        System.out.printf("{\"kind\":\"%s\",\"offered\":%d,\"completed\":%d,\"failed\":%d,"
                 + "\"timeouts\":%d,\"rejected\":%d,\"pending\":%d,\"reconnects\":%d}%n",
-                offered, completed.sum(), failed.sum(), timedOut.sum(), rejected.sum(), pending.size(), reconnects);
+                warmup ? "warmup-progress" : "progress", offered, completed.sum(), failed.sum(), timedOut.sum(),
+                rejected.sum(), pending.size(), reconnects);
     }
 
     private void report(final long offered, final long planned, final double seconds, final double sendingSeconds) {
         System.out.printf(java.util.Locale.ROOT,
-                "{\"kind\":\"result\",\"planned\":%d,\"offered\":%d,\"completed\":%d,\"failed\":%d,"
+                "{\"kind\":\"%s\",\"startedAtMillis\":%d,\"finishedAtMillis\":%d,\"planned\":%d,\"offered\":%d,\"completed\":%d,\"failed\":%d,"
                 + "\"timeouts\":%d,\"rejected\":%d,\"pending\":%d,\"unexpectedResponses\":%d,\"reconnects\":%d,"
                 + "\"seconds\":%.6f,\"sendingSeconds\":%.6f,\"completedPerSecond\":%.3f,\"p50ns\":%d,"
                 + "\"p95ns\":%d,\"p99ns\":%d,\"p999ns\":%d,\"maxNs\":%d}%n",
+                warmup ? "warmup-result" : "result", startedAtMillis, System.currentTimeMillis(),
                 planned, offered, completed.sum(), failed.sum(), timedOut.sum(), rejected.sum(), pending.size(),
                 unexpectedResponses.sum(), reconnects, seconds, sendingSeconds, completed.sum() / seconds,
                 latency.percentile(.5), latency.percentile(.95), latency.percentile(.99), latency.percentile(.999), latency.maximum());
@@ -186,15 +215,28 @@ public final class TargetRateTcpLoad {
         /** 精确在途数，驱动用于安全重连。 */
         private final AtomicInteger inFlight = new AtomicInteger();
         private Client(final int port) throws IOException {
-            socket = new Socket("127.0.0.1", port);
-            socket.setTcpNoDelay(true);
-            input = new DataInputStream(socket.getInputStream());
-            output = new DataOutputStream(socket.getOutputStream());
+            socket = LoadTls.socket();
+            try {
+                int receiveBuffer = Integer.getInteger("zero.load.receiveBufferBytes", 0);
+                if (receiveBuffer > 0) socket.setReceiveBufferSize(receiveBuffer);
+                socket.connect(new java.net.InetSocketAddress("127.0.0.1", port), 3000);
+                socket.setSoTimeout(3000);
+                if (socket instanceof javax.net.ssl.SSLSocket tls) tls.startHandshake();
+                socket.setSoTimeout(0);
+                socket.setTcpNoDelay(true);
+                input = new DataInputStream(socket.getInputStream());
+                output = new DataOutputStream(socket.getOutputStream());
+            } catch (IOException failure) {
+                try { socket.close(); }
+                catch (IOException closeFailure) { failure.addSuppressed(closeFailure); }
+                throw failure;
+            }
             Thread.ofVirtual().name("tcp-load-reader").start(this::read);
         }
         private void read() {
             try {
                 while (!closed.get()) {
+                    if (readDelayNanos > 0) LockSupport.parkNanos(readDelayNanos);
                     int length = input.readInt();
                     if (length < 0 || length > 1024 * 1024) throw new IOException("invalid response length");
                     byte[] bytes = new byte[length];

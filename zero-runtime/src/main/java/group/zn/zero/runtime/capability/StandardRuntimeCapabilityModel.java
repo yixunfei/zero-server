@@ -37,6 +37,8 @@ public final class StandardRuntimeCapabilityModel {
     public static final String SERVICE_DISCOVERY = "zero.discovery.service";
     public static final String RPC_SERVICE_RESOLVER = "zero.rpc.service-resolver";
     public static final String NETWORK_LIFECYCLE = "zero.net.connection-lifecycle";
+    /** 可选网络 IO 组；中立能力词汇不引用 Netty 类型。 */
+    public static final String NETWORK_IO = "zero.net.io-resources";
     public static final String INFRASTRUCTURE_LIFECYCLES = "zero.lifecycle.infrastructure";
     public static final String APPLICATION_LIFECYCLES = "zero.lifecycle.application";
 
@@ -53,6 +55,8 @@ public final class StandardRuntimeCapabilityModel {
     public static final ComponentId LOCAL_REPOSITORIES = ComponentId.of("zero.local.repositories");
     public static final ComponentId LOCAL_CACHE = ComponentId.of("zero.local.cache");
     public static final ComponentId LOCAL_MONITOR = ComponentId.of("zero.local.monitor");
+    /** 显式选择的 IO 资源 provider，不加入默认最小装配。 */
+    public static final ComponentId NETWORK_IO_PROVIDER = ComponentId.of("zero.net.io-provider");
     public static final ComponentId PRODUCTION_KAFKA_RPC = ComponentId.of("zero.production.kafka-rpc");
     public static final ComponentId PRODUCTION_MONGO_DATA = ComponentId.of("zero.production.mongo-data");
     public static final ComponentId PRODUCTION_NACOS_DISCOVERY =
@@ -113,6 +117,7 @@ public final class StandardRuntimeCapabilityModel {
         add(model, PERSISTENCE_MANAGER, List.of(), "zero-data");
         add(model, CACHE_SERVICE, List.of(), "zero-cache");
         add(model, MONITOR_RUNTIME, List.of(), "zero-monitor");
+        add(model, NETWORK_IO, List.of(), "zero-net");
         addMultiple(model, DATA_SERVICES, List.of(), "zero-data", EXTERNAL_PROFILES);
         addMultiple(model, REPOSITORY_SOURCES, List.of(), "zero-data");
         add(model, REPOSITORIES, List.of(REPOSITORY_SOURCES), "zero-data");

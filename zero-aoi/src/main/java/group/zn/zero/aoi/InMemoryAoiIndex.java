@@ -118,12 +118,20 @@ public final class InMemoryAoiIndex implements AoiIndex {
         List<AoiEntity> entered = null;
         List<AoiEntity> updated = null;
         List<AoiEntity> left = null;
+        AoiEntity firstEntered = null;
+        AoiEntity firstUpdated = null;
+        AoiEntity firstLeft = null;
         boolean stableIdentity = true;
         // equals 可能执行用户代码；先完成比较，再变更快照，异常不会吞掉尚未发送的事件。
         for (AoiEntity current : next) {
             ObserverState.Seen previous = state.entities.get(current.entityId());
-            if (previous == null) entered = append(entered, current);
-            else if (!current.equals(previous.entity)) updated = append(updated, current);
+            if (previous == null) {
+                if (firstEntered == null) firstEntered = current;
+                else entered = append(entered, current);
+            } else if (!current.equals(previous.entity)) {
+                if (firstUpdated == null) firstUpdated = current;
+                else updated = append(updated, current);
+            }
             else if (current != previous.entity) stableIdentity = false;
         }
         long generation = state.nextGeneration();
@@ -135,21 +143,29 @@ public final class InMemoryAoiIndex implements AoiIndex {
         while (iterator.hasNext()) {
             ObserverState.Seen entry = iterator.next();
             if (entry.generation != generation) {
-                left = append(left, entry.entity);
+                if (firstLeft == null) firstLeft = entry.entity;
+                else left = append(left, entry.entity);
                 iterator.remove();
             }
         }
-        state.commit(entered, generation);
-        state.commit(updated, generation);
+        state.commit(firstEntered, entered, generation);
+        state.commit(firstUpdated, updated, generation);
         state.center = center;
         state.range = range;
         state.sceneSequence = version;
         state.stableIdentity = stableIdentity;
-        if (entered == null && updated == null && left == null) return List.of();
-        List<VisibilityEvent> result = new ArrayList<>();
-        appendEvents(result, entered, VisibilityEvent.Type.ENTER, observer, state);
-        appendEvents(result, updated, VisibilityEvent.Type.UPDATE, observer, state);
-        appendEvents(result, left, VisibilityEvent.Type.LEAVE, observer, state);
+        int count = count(firstEntered, entered) + count(firstUpdated, updated) + count(firstLeft, left);
+        if (count == 0) return List.of();
+        if (count == 1) {
+            AoiEntity entity = firstEntered != null ? firstEntered : firstUpdated != null ? firstUpdated : firstLeft;
+            VisibilityEvent.Type type = firstEntered != null ? VisibilityEvent.Type.ENTER
+                    : firstUpdated != null ? VisibilityEvent.Type.UPDATE : VisibilityEvent.Type.LEAVE;
+            return List.of(new VisibilityEvent(type, observer, entity, sceneSequence, ++state.syncSequence));
+        }
+        List<VisibilityEvent> result = new ArrayList<>(count);
+        appendEvents(result, firstEntered, entered, VisibilityEvent.Type.ENTER, observer, state);
+        appendEvents(result, firstUpdated, updated, VisibilityEvent.Type.UPDATE, observer, state);
+        appendEvents(result, firstLeft, left, VisibilityEvent.Type.LEAVE, observer, state);
         return List.copyOf(result);
     }
 
@@ -159,9 +175,18 @@ public final class InMemoryAoiIndex implements AoiIndex {
         return result;
     }
 
-    private void appendEvents(final List<VisibilityEvent> result, final List<AoiEntity> entities,
+    private static int count(final AoiEntity first, final List<AoiEntity> rest) {
+        return first == null ? 0 : 1 + (rest == null ? 0 : rest.size());
+    }
+
+    private void appendEvents(final List<VisibilityEvent> result, final AoiEntity first, final List<AoiEntity> entities,
             final VisibilityEvent.Type type, final String observer, final ObserverState state) {
-        if (entities == null) return;
+        if (first == null) return;
+        if (entities == null) {
+            result.add(new VisibilityEvent(type, observer, first, sceneSequence, ++state.syncSequence));
+            return;
+        }
+        entities.add(first);
         entities.sort(java.util.Comparator.comparing(AoiEntity::entityId));
         for (AoiEntity entity : entities) {
             result.add(new VisibilityEvent(type, observer, entity, sceneSequence, ++state.syncSequence));

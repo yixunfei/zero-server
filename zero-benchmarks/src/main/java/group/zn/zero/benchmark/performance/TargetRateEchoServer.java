@@ -26,20 +26,30 @@ public final class TargetRateEchoServer {
         Path stopFile = Path.of(args[1]);
         var workers = Executors.newFixedThreadPool(4);
         var scheduler = new ExecutorActorScheduler(workers);
+        LoadPayload payload = LoadPayload.configured();
         scheduler.register(Request.class, (context, message) -> {
             Request request = (Request) message.payload();
-            request.result.complete(List.of(request.frame));
+            request.result.complete(List.of(payload.response(request.frame)));
             return CompletableFuture.completedFuture(null);
         });
-        var server = new NettyTcpServer(ServerOptions.tcp("127.0.0.1", 0).withIoThreads(1, 4)
-                .withMaxFrameLength(1024 * 1024), (connection, frame) -> {
+        var defaults = group.zn.zero.net.NetworkTuning.defaults();
+        var tuning = new group.zn.zero.net.NetworkTuning(defaults.transport(), Integer.getInteger("zero.load.backlog", 128),
+                defaults.writeLowWaterMark(), defaults.writeHighWaterMark(), defaults.maxPendingBytesPerConnection(),
+                defaults.maxPendingBytesTotal(), Integer.getInteger("zero.load.flush", 0));
+        var options = ServerOptions.tcp("127.0.0.1", 0).withIoThreads(1, 4)
+                .withTuning(tuning).withMaxFrameLength(1024 * 1024);
+        group.zn.zero.net.ServerFrameHandler handler = (connection, frame) -> {
                     var result = new CompletableFuture<List<ProtocolFrame>>();
                     scheduler.dispatch(new ActorMessage(LaneKey.custom(connection.connectionId()), new Request(frame, result)))
                             .whenComplete((ignored, failure) -> {
                                 if (failure != null) result.completeExceptionally(failure);
                             });
                     return result;
-                }, Runnable::run);
+                };
+        var tls = LoadTls.serverContext();
+        var server = tls == null ? new NettyTcpServer(options, handler, Runnable::run)
+                : new NettyTcpServer(options, new group.zn.zero.protocol.codec.ZeroBinaryFrameCodec(), handler,
+                        new group.zn.zero.net.ConnectionListener() { }, Runnable::run, null, tls);
         try {
             server.start();
             Files.writeString(portFile, Integer.toString(server.boundPort()));

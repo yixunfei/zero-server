@@ -20,7 +20,6 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
-import io.netty.channel.EventLoopGroup;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
@@ -70,20 +69,10 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
      */
     private final AtomicReference<InetSocketAddress> boundAddress = new AtomicReference<>();
 
-    /**
-     * boss 线程组。
-     */
-    private EventLoopGroup bossGroup;
-
-    /**
-     * worker 线程组。
-     */
-    private EventLoopGroup workerGroup;
-
-    /**
-     * 服务端 channel。
-     */
-    private Channel serverChannel;
+    /** 组合根借用的 IO 资源；为空时每次启动创建独占组。 */
+    private final NettyIoResources borrowedResources;
+    /** 本次启动独占的监听与连接生命周期。 */
+    private NettyServerResources resources;
 
     /**
      * 创建 HTTP 服务器。
@@ -112,6 +101,23 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
             final HttpRequestHandler handler,
             final Executor handlerExecutor,
             final SecurityMetadataVerifier securityMetadataVerifier) {
+        this(options, handler, handlerExecutor, securityMetadataVerifier, null);
+    }
+
+    /**
+     * 创建借用 IO 组的 HTTP 服务；构造不启动线程，停止时只关闭本服务连接。
+     * @param options HTTP 配置，transport 必须匹配借用组。
+     * @param handler 业务处理器，不可为空。
+     * @param handlerExecutor 受管执行器，不可为空。
+     * @param securityMetadataVerifier 安全校验器，不可为空。
+     * @param ioResources 借用组；为空时创建独占组，非空由调用方负责关闭。
+     * @throws NullPointerException 必填参数为空。
+     * @throws IllegalArgumentException 配置类型不是 HTTP。
+     */
+    public NettyHttpServer(final ServerOptions options, final HttpRequestHandler handler,
+            final Executor handlerExecutor, final SecurityMetadataVerifier securityMetadataVerifier,
+            final NettyIoResources ioResources) {
+        this.borrowedResources = ioResources;
         this.options = Objects.requireNonNull(options, "options");
         if (options.serverType() != ServerType.HTTP) {
             throw new IllegalArgumentException("NettyHttpServer only supports HTTP options");
@@ -164,10 +170,10 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
     @Override
     protected void doStart() {
         try {
-            bossGroup = NettyTransportFactory.eventLoops(options.tuning().transport(), options.bossThreads());
-            workerGroup = NettyTransportFactory.eventLoops(options.tuning().transport(), options.workerThreads());
+            NettyServerResources current = new NettyServerResources(options, borrowedResources);
+            resources = current;
             ServerBootstrap bootstrap = new ServerBootstrap()
-                    .group(bossGroup, workerGroup)
+                    .group(current.io().boss(), current.io().workers())
                     .channel(NettyTransportFactory.serverChannel(options.tuning().transport()))
                     .option(ChannelOption.SO_BACKLOG, options.tuning().backlog())
                     .childOption(ChannelOption.WRITE_BUFFER_WATER_MARK, new io.netty.channel.WriteBufferWaterMark(
@@ -176,6 +182,7 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
                     .childHandler(new ChannelInitializer<SocketChannel>() {
                         @Override
                         protected void initChannel(final SocketChannel channel) {
+                            current.track(channel);
                             channel.pipeline()
                                     .addLast("httpCodec", new HttpServerCodec())
                                     .addLast("aggregator", new HttpObjectAggregator(options.maxFrameLength()))
@@ -183,13 +190,13 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
                                             handler, handlerExecutor, securityMetadataVerifier));
                         }
                     });
-            serverChannel = bootstrap.bind(options.host(), options.port()).sync().channel();
+            Channel serverChannel = current.bind(bootstrap.bind(options.host(), options.port()));
             boundAddress.set((InetSocketAddress) serverChannel.localAddress());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             shutdownGroups();
             throw ZeroException.of(NetErrorCode.START_FAILED, "start netty http server interrupted", ex);
-        } catch (RuntimeException ex) {
+        } catch (Exception ex) {
             shutdownGroups();
             throw ZeroException.of(NetErrorCode.START_FAILED, "start netty http server failed", ex);
         }
@@ -202,28 +209,14 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
      */
     @Override
     protected void doStop() {
-        try {
-            if (serverChannel != null) {
-                serverChannel.close().sync();
-            }
-            shutdownGroups();
-            boundAddress.set(null);
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw ZeroException.of(NetErrorCode.STOP_FAILED, "stop netty http server interrupted", ex);
-        } catch (RuntimeException ex) {
-            throw ZeroException.of(NetErrorCode.STOP_FAILED, "stop netty http server failed", ex);
-        }
+        try { shutdownGroups(); }
+        finally { boundAddress.set(null); }
     }
 
     private void shutdownGroups() {
-        if (workerGroup != null) {
-            workerGroup.shutdownGracefully().syncUninterruptibly();
-            workerGroup = null;
-        }
-        if (bossGroup != null) {
-            bossGroup.shutdownGracefully().syncUninterruptibly();
-            bossGroup = null;
+        if (resources != null) {
+            resources.close();
+            resources = null;
         }
     }
 

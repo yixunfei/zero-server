@@ -27,6 +27,8 @@ public class EventBusBenchmark {
     @Param({"0", "1", "8"}) public int handlers;
     /** 完成方式。 */
     @Param({"sync", "completed", "async", "failure"}) public String completion;
+    /** 调用者的实际消费方式。 */
+    @Param({"join", "ignore", "then", "when"}) public String consumption;
     /** 所有发布线程共享。 */
     private InMemoryEventBus bus;
     /** 不可变事件。 */
@@ -52,7 +54,18 @@ public class EventBusBenchmark {
 
     /** @return 完整派发的结果或异常；失败路径不保留死信。 */
     @Benchmark public Object publish() {
-        try { return bus.publish(event).toCompletableFuture().join(); }
+        try {
+            var result = bus.publish(event);
+            return switch (consumption) {
+                case "ignore" -> {
+                    if (completion.equals("async")) result.toCompletableFuture().join();
+                    yield result;
+                }
+                case "then" -> result.thenRun(() -> { }).toCompletableFuture().join();
+                case "when" -> result.whenComplete((value, failure) -> { }).toCompletableFuture().join();
+                default -> result.toCompletableFuture().join();
+            };
+        }
         catch (java.util.concurrent.CompletionException failure) { return failure; }
     }
 

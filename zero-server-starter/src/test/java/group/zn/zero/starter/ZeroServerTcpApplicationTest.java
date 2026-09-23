@@ -1,6 +1,7 @@
 package group.zn.zero.starter;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import group.zn.zero.core.config.MapZeroConfig;
@@ -55,7 +56,9 @@ class ZeroServerTcpApplicationTest {
         GameRuntime runtime = LocalRuntime.create(new MapZeroConfig(Map.of("zero.mode", "test")), new InMemoryLogSink());
         ZeroServerTcpApplication application = new ZeroServerTcpApplication(runtime, second);
         try {
-            org.junit.jupiter.api.Assertions.assertThrows(java.net.BindException.class, application::start);
+            var failure = org.junit.jupiter.api.Assertions.assertThrows(group.zn.zero.core.error.ZeroException.class, application::start);
+            assertEquals(group.zn.zero.net.error.NetErrorCode.START_FAILED, failure.errorCode());
+            assertTrue(failure.getCause() instanceof java.net.BindException);
             assertFalse(application.running());
         } finally {
             first.stop();

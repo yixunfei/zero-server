@@ -242,8 +242,11 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
 
     private void writeResponses(final ChannelHandlerContext context, final List<ProtocolFrame> responses) {
         try {
-            List<ProtocolFrame> frames = List.copyOf(Objects.requireNonNull(responses, "responses"));
-            connection.sendFrames(frames).exceptionally(cause -> {
+            Objects.requireNonNull(responses, "responses");
+            CompletionStage<Void> sent = responses.size() == 1
+                    ? connection.sendFrame(Objects.requireNonNull(responses.getFirst(), "response"))
+                    : connection.sendFrames(List.copyOf(responses));
+            sent.exceptionally(cause -> {
                 fireException(context, asHandlerException(cause));
                 return null;
             });
