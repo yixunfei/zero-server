@@ -86,8 +86,8 @@ public final class DefaultRedisCacheKeyStrategy implements RedisCacheKeyStrategy
      */
     @Override
     public String indexKey(final String namespace, final String cacheName) {
-        return "zero:cacheidx:{" + requireSegment(namespace, "namespace")
-                + ":" + requireSegment(cacheName, "cacheName") + "}:buckets";
+        return "zero:cacheidx:{" + requireSlotSegment(namespace, "namespace")
+                + ":" + requireSlotSegment(cacheName, "cacheName") + "}:buckets";
     }
 
     /**
@@ -103,9 +103,18 @@ public final class DefaultRedisCacheKeyStrategy implements RedisCacheKeyStrategy
     }
 
     private String slotTag(final String namespace, final String cacheName, final String encodedKey) {
-        return "{" + requireSegment(namespace, "namespace")
-                + ":" + requireSegment(cacheName, "cacheName")
+        return "{" + requireSlotSegment(namespace, "namespace")
+                + ":" + requireSlotSegment(cacheName, "cacheName")
                 + ":" + bucketLabel(encodedKey) + "}";
+    }
+
+    /** 校验 hash-tag 分段，避免冒号分隔后的逻辑名称发生缓存 key 别名碰撞。 */
+    private String requireSlotSegment(final String value, final String name) {
+        String current = requireSegment(value, name);
+        if (current.indexOf(':') >= 0) {
+            throw new IllegalArgumentException(name + " must not contain redis slot separator ':'");
+        }
+        return current;
     }
 
     private String requireSegment(final String value, final String name) {

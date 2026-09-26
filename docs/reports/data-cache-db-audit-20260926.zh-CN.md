@@ -15,6 +15,7 @@
 | --- | --- | --- |
 | Redis 数据安全 | envelope namespace/collection 直接进入 key 组合；花括号可改变 Cluster hash tag 边界 | 构造阶段拒绝 `{`、`}`，保持合法 key 格式不变 |
 | Redis 租户隔离 | `namespace:collection` hash-tag 分隔符允许出现在逻辑名称中，会产生 key 别名碰撞 | 构造阶段拒绝 namespace/collection 中的 `:`，阻断跨租户 key 别名 |
+| Redis 缓存隔离 | 缓存 namespace/cacheName 使用相同冒号分隔 hash-tag，存在缓存空间别名碰撞 | 构造阶段拒绝 namespace/cacheName 中的 `:`，保持缓存与数据空间隔离 |
 | 本地 journal 安全 | 路径片段可包含控制字符、Windows ADS 冒号和非法文件名字符 | 构造阶段拒绝危险字符，避免越界/特殊文件语义 |
 | Adapter 注册并发 | `registerRepository` 可能静默替换运行中的实例 | 使用 `putIfAbsent`，重复注册显式失败 |
 | Repository 分页 | `offset + limit` 使用 `int`，极大参数会溢出并导致非法 `subList` | 使用 `long` 计算并裁剪到结果大小；增加两套仓库回归 |

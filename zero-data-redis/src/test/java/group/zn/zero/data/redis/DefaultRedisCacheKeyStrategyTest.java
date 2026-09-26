@@ -43,5 +43,7 @@ class DefaultRedisCacheKeyStrategyTest {
 
         assertThrows(IllegalArgumentException.class, () -> strategy.valueKey("game", "cache", "{bad}"));
         assertThrows(IllegalArgumentException.class, () -> strategy.valueKey(" ", "cache", "key"));
+        assertThrows(IllegalArgumentException.class, () -> strategy.valueKey("game:tenant", "cache", "key"));
+        assertThrows(IllegalArgumentException.class, () -> strategy.valueKey("game", "cache:profile", "key"));
     }
 }
