@@ -170,6 +170,8 @@ CacheService / LayeredCacheService
 
 当前落库路径的容量观察项需要纳入后续 benchmark：`ZeroDataEnvelopeCrudRepository` 的同步方法会把数据库 IO 包在 repository monitor 内；`findByIds`、`saveAll` 和 Redis `findAll` 仍是逐对象/逐 key 编排；分页在 envelope repository 中先读取全量再内存切片；PostgreSQL 默认构造非池化 `PGSimpleDataSource` 连接。上述行为保持现有 API 和一致性语义，本轮未猜测性重构；生产装配应由调用方提供连接池、限流和批量策略，并用真实 workload 单独测量。
 
+Redis 数据与缓存 key 的 namespace/collection/cacheName 不得包含 `{`、`}` 或 `:`，避免 hash-tag 边界和分隔符造成跨空间别名；本地 journal 路径片段拒绝控制字符、路径分隔符、点段和 Windows 特殊文件名字符。
+
 本轮还修复了分页结束位置的 `int` 加法溢出。超大 `offset + limit` 现在按 `long` 计算后裁剪到结果大小，避免非法 `subList` 范围；正常分页结果和游标格式保持不变。
 
 - `zero-data` 当前提供 `VersionedEntity`、`PageRequest`、`PageResult`、`Repository`、`CrudRepository`、`InMemoryCrudRepository` 和 `AbstractRepositoryAdapter`。
