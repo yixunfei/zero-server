@@ -102,9 +102,18 @@ public final class DefaultRedisDataKeyStrategy implements RedisDataKeyStrategy {
     }
 
     private String slotTag(final String namespace, final String collection, final String id) {
-        return "{" + requireSegment(namespace, "namespace")
-                + ":" + requireSegment(collection, "collection")
+        return "{" + requireSlotSegment(namespace, "namespace")
+                + ":" + requireSlotSegment(collection, "collection")
                 + ":" + bucketLabel(id) + "}";
+    }
+
+    /** 校验 hash-tag 分段，避免冒号分隔后的逻辑名称发生 key 别名碰撞。 */
+    private String requireSlotSegment(final String value, final String name) {
+        String current = requireSegment(value, name);
+        if (current.indexOf(':') >= 0) {
+            throw new IllegalArgumentException(name + " must not contain redis slot separator ':'");
+        }
+        return current;
     }
 
     private String requireSegment(final String value, final String name) {

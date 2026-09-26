@@ -59,6 +59,10 @@ class RedisDriverEnvelopeStoreTest {
                     "game{tenant}", "player", client, new DefaultRedisDataKeyStrategy(16), null));
             assertThrows(IllegalArgumentException.class, () -> new RedisDriverEnvelopeStore(
                     "game", "player}", client, new DefaultRedisDataKeyStrategy(16), null));
+            assertThrows(IllegalArgumentException.class, () -> new RedisDriverEnvelopeStore(
+                    "game:tenant", "player", client, new DefaultRedisDataKeyStrategy(16), null));
+            assertThrows(IllegalArgumentException.class, () -> new RedisDriverEnvelopeStore(
+                    "game", "player:archive", client, new DefaultRedisDataKeyStrategy(16), null));
         }
     }
 }

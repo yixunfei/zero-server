@@ -362,6 +362,9 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
         if (current.indexOf('{') >= 0 || current.indexOf('}') >= 0) {
             throw new IllegalArgumentException(name + " must not contain redis hash tag braces");
         }
+        if (current.indexOf(':') >= 0) {
+            throw new IllegalArgumentException(name + " must not contain redis slot separator ':'");
+        }
         return current;
     }
 }

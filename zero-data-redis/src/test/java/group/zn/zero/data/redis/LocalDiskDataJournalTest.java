@@ -72,5 +72,7 @@ class LocalDiskDataJournalTest {
         assertThrows(IllegalArgumentException.class, () -> journal.journalPath("game:logs", "player"));
         assertThrows(IllegalArgumentException.class, () -> journal.journalPath("game", "player\u0000"));
         assertThrows(IllegalArgumentException.class, () -> journal.journalPath("game", "player?"));
+        assertThrows(IllegalArgumentException.class, () -> journal.journalPath(".", "player"));
+        assertThrows(IllegalArgumentException.class, () -> journal.journalPath("game", "player."));
     }
 }

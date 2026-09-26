@@ -194,9 +194,12 @@ public final class LocalDiskDataJournal {
     private String safeSegment(final String value, final String name) {
         String current = Objects.requireNonNull(value, name);
         if (current.isBlank()
+                || current.equals(".")
                 || current.contains("/")
                 || current.contains("\\")
                 || current.contains("..")
+                || current.endsWith(".")
+                || current.endsWith(" ")
                 || current.chars().anyMatch(Character::isISOControl)
                 || current.indexOf(':') >= 0
                 || current.indexOf('"') >= 0
