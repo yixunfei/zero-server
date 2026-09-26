@@ -21,7 +21,7 @@ public final class InMemoryStateSync {
         }
         Observer observer = new Observer(envelope.sceneId(), envelope.observerId());
         Baseline known = baselines.get(observer);
-        if (known != null && (envelope.syncSeq() <= known.sequence() || envelope.stateVersion() < known.version())) {
+        if (known != null && (envelope.syncSeq() <= known.sequence() || envelope.stateVersion() <= known.version())) {
             return new Result(Status.IGNORED, known.version());
         }
         if (envelope.kind() == SyncEnvelope.Kind.DELTA

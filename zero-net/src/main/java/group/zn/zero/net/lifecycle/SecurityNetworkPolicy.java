@@ -8,6 +8,7 @@ import group.zn.zero.security.ReplayProtection;
 import group.zn.zero.security.SecurityChain;
 import group.zn.zero.security.SecurityContext;
 import java.security.MessageDigest;
+import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -86,7 +87,7 @@ public final class SecurityNetworkPolicy implements ProductionNetworkPolicy {
         Objects.requireNonNull(frame, "frame");
         Objects.requireNonNull(context, "context");
         ReplayProtection.ReplayRequest request = new ReplayProtection.ReplayRequest(
-                digest(frame.extension()),
+                digestFrame(frame),
                 Instant.now(),
                 Integer.toUnsignedLong(frame.protocolId()),
                 context.correlationId(),
@@ -123,5 +124,18 @@ public final class SecurityNetworkPolicy implements ProductionNetworkPolicy {
         } catch (java.security.NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 unavailable", exception);
         }
+    }
+
+    private static String digestFrame(final ProtocolFrame frame) {
+        byte[] extension = frame.extension();
+        byte[] payload = frame.payload();
+        ByteBuffer canonical = ByteBuffer.allocate(16 + extension.length + payload.length);
+        canonical.putInt(frame.protocolId())
+                .putInt(frame.protocolVersion())
+                .putInt(frame.flags())
+                .putInt(extension.length)
+                .put(extension)
+                .put(payload);
+        return digest(canonical.array());
     }
 }

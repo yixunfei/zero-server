@@ -29,9 +29,11 @@ public interface GmSourceIpPolicy {
                 return false;
             }
             try {
-                InetAddress address = InetAddress.getByName(sourceIp);
+                String literal = sourceIp.trim();
+                CidrBlock.requireLiteral(literal);
+                InetAddress address = InetAddress.getByName(literal);
                 return blocks.stream().anyMatch(block -> block.contains(address));
-            } catch (UnknownHostException exception) {
+            } catch (IllegalArgumentException | UnknownHostException exception) {
                 return false;
             }
         };

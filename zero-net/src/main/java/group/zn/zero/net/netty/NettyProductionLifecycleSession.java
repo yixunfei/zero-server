@@ -513,15 +513,16 @@ final class NettyProductionLifecycleSession {
         if (cause != null || replay == null || replay != ReplayProtection.ReplayDecision.ACCEPTED) {
             ReplayProtection.ReplayDecision decision = replay == null
                     ? ReplayProtection.ReplayDecision.INVALID : replay;
-            reject(
-                    ConnectionLifecycleEventType.CONNECTION_REJECTED,
-                    decision == ReplayProtection.ReplayDecision.EXPIRED
-                            ? NetErrorCode.AUTHENTICATION_EXPIRED : NetErrorCode.REPLAY_DETECTED,
+            emit(
+                    ConnectionLifecycleEventType.FRAME_REJECTED,
+                    ConnectionLifecycleResult.REJECTED,
                     decision == ReplayProtection.ReplayDecision.EXPIRED
                             ? ConnectionRejectionReason.AUTHENTICATION_EXPIRED
                             : ConnectionRejectionReason.REPLAY_DETECTED,
                     NetworkRateLimitScope.FRAME,
-                    cause);
+                    decision == ReplayProtection.ReplayDecision.EXPIRED
+                            ? NetErrorCode.AUTHENTICATION_EXPIRED : NetErrorCode.REPLAY_DETECTED,
+                    0L);
             return;
         }
         if (admitEstablishedFrame(frame)) {

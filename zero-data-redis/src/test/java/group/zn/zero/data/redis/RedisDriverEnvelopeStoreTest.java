@@ -27,7 +27,7 @@ class RedisDriverEnvelopeStoreTest {
      * 验证 Redis 不可用时，本地 zlog 只保留故障现场，不能使条件写报告成功。
      */
     @Test
-    void storeShouldAppendLocalJournalWhenRedisUnavailable() {
+    void storeShouldNotJournalAWriteThatNeverReachedRedis() {
         LocalDiskDataJournal localJournal = new LocalDiskDataJournal(tempDir);
         try (RedisClient client = RedisClient.create("redis://127.0.0.1:1/0")) {
             RedisDriverEnvelopeStore store = new RedisDriverEnvelopeStore(
@@ -47,7 +47,7 @@ class RedisDriverEnvelopeStoreTest {
                     new byte[] {1, 2});
 
             assertThrows(ZeroException.class, () -> store.saveIfVersion(envelope, 0L));
-            assertEquals(1, localJournal.readAll("game", "player").size());
+            assertEquals(0, localJournal.readAll("game", "player").size());
         }
     }
 }

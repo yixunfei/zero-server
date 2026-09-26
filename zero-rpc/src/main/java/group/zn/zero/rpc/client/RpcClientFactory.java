@@ -344,12 +344,18 @@ public final class RpcClientFactory {
                 final long timeoutNanos) {
             try {
                 long remaining = timeoutNanos - (System.nanoTime() - startedAt);
-                if (remaining <= 0) return RpcResult.failure(RpcErrorCode.REQUEST_TIMEOUT, "rpc invocation timed out");
-                return stage.toCompletableFuture().get(remaining, TimeUnit.NANOSECONDS);
+                java.util.concurrent.CompletableFuture<RpcResult<Object>> future = stage.toCompletableFuture();
+                if (remaining <= 0) {
+                    future.cancel(true);
+                    return RpcResult.failure(RpcErrorCode.REQUEST_TIMEOUT, "rpc invocation timed out");
+                }
+                return future.get(remaining, TimeUnit.NANOSECONDS);
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
+                stage.toCompletableFuture().cancel(true);
                 return RpcResult.failure(RpcErrorCode.REQUEST_TIMEOUT, "rpc invocation interrupted");
             } catch (java.util.concurrent.TimeoutException ex) {
+                stage.toCompletableFuture().cancel(true);
                 return RpcResult.failure(RpcErrorCode.REQUEST_TIMEOUT, "rpc invocation timed out");
             } catch (java.util.concurrent.ExecutionException ex) {
                 return failureResult(descriptor, null, unwrap(ex));

@@ -17,6 +17,10 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 /**
  * 本地玩家基础服务。
@@ -135,7 +139,18 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
      * @return 本地玩家服务；不可为空；线程安全。
      */
     public static LocalPlayerService withStableHashUid(final ActorScheduler actorScheduler) {
-        return new LocalPlayerService(actorScheduler, request -> Math.abs((long) request.accountId().hashCode()));
+        return new LocalPlayerService(actorScheduler, request -> stableUid(request.accountId()));
+    }
+
+    private static long stableUid(final String accountId) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(accountId.getBytes(StandardCharsets.UTF_8));
+            long value = ByteBuffer.wrap(digest).getLong() & Long.MAX_VALUE;
+            return value == 0L ? 1L : value;
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
     }
 
     /**

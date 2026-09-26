@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class FrameMatchRuntimeTest {
@@ -25,5 +26,19 @@ class FrameMatchRuntimeTest {
         runtime.tick().toCompletableFuture().join();
         assertThrows(CompletionException.class, () -> runtime.submit(new FrameInput("u", 1, 0, 1, new byte[] {1}, "t")).toCompletableFuture().join());
         assertThrows(CompletionException.class, () -> runtime.submit(new FrameInput("u", 2, 2, 0, new byte[] {1, 2}, "t")).toCompletableFuture().join());
+    }
+
+    @Test void failedSimulationDoesNotAdvanceFrameOrConsumeInput() {
+        AtomicBoolean fail = new AtomicBoolean(true);
+        FrameMatchRuntime runtime = new FrameMatchRuntime("retry", FrameMatchConfig.defaults(),
+                (frame, batch) -> { if (fail.getAndSet(false)) throw new IllegalStateException("simulation"); },
+                event -> { }, event -> { });
+        FrameInput input = new FrameInput("u", 1, 1, 0, new byte[] {1}, "t");
+        runtime.submit(input).toCompletableFuture().join();
+        assertThrows(CompletionException.class, () -> runtime.tick().toCompletableFuture().join());
+        assertEquals(0, runtime.frameNo());
+        runtime.submit(input).toCompletableFuture().join();
+        runtime.tick().toCompletableFuture().join();
+        assertEquals(1, runtime.frameNo());
     }
 }

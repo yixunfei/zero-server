@@ -20,6 +20,7 @@ public final class RuntimeProfile {
     private final Set<ComponentKind> forbiddenKinds;
     private final Set<ComponentKind> startupHealthRequiredKinds;
     private final Map<BindingKey<?>, Set<ComponentKind>> forbiddenKindsByCapability;
+    private final Map<String, Set<ComponentKind>> forbiddenKindsByCapabilityId;
 
     private RuntimeProfile(final Builder builder) {
         name = builder.name;
@@ -28,6 +29,9 @@ public final class RuntimeProfile {
         Map<BindingKey<?>, Set<ComponentKind>> copied = new LinkedHashMap<>();
         builder.forbiddenKindsByCapability.forEach((key, value) -> copied.put(key, Set.copyOf(value)));
         forbiddenKindsByCapability = Map.copyOf(copied);
+        Map<String, Set<ComponentKind>> idCopied = new LinkedHashMap<>();
+        builder.forbiddenKindsByCapabilityId.forEach((key, value) -> idCopied.put(key, Set.copyOf(value)));
+        forbiddenKindsByCapabilityId = Map.copyOf(idCopied);
     }
 
     public static Builder builder(final String name) {
@@ -61,6 +65,14 @@ public final class RuntimeProfile {
         return builder.build();
     }
 
+    /** Production policy variant for modules that cannot depend on concrete capability key types. */
+    public static RuntimeProfile productionByCapabilityId(final Set<String> criticalCapabilityIds) {
+        Builder builder = builder("production").requireStartupHealth(ComponentKind.EXTERNAL);
+        Objects.requireNonNull(criticalCapabilityIds, "criticalCapabilityIds")
+                .forEach(id -> builder.forbidKindForId(id, ComponentKind.LOCAL));
+        return builder.build();
+    }
+
     public String name() {
         return name;
     }
@@ -74,7 +86,8 @@ public final class RuntimeProfile {
     }
 
     boolean allowsFor(final BindingKey<?> key, final ComponentKind kind) {
-        return !forbiddenKindsByCapability.getOrDefault(key, Set.of()).contains(kind);
+        return !forbiddenKindsByCapability.getOrDefault(key, Set.of()).contains(kind)
+                && !forbiddenKindsByCapabilityId.getOrDefault(key.id(), Set.of()).contains(kind);
     }
 
     @Override
@@ -91,6 +104,7 @@ public final class RuntimeProfile {
         private final Set<ComponentKind> forbiddenKinds = EnumSet.noneOf(ComponentKind.class);
         private final Set<ComponentKind> startupHealthRequiredKinds = EnumSet.noneOf(ComponentKind.class);
         private final Map<BindingKey<?>, Set<ComponentKind>> forbiddenKindsByCapability = new LinkedHashMap<>();
+        private final Map<String, Set<ComponentKind>> forbiddenKindsByCapabilityId = new LinkedHashMap<>();
 
         private Builder(final String name) {
             this.name = RuntimeIdentifiers.requireStableId(name, "profileName");
@@ -109,6 +123,14 @@ public final class RuntimeProfile {
         public Builder forbidKindFor(final BindingKey<?> key, final ComponentKind kind) {
             forbiddenKindsByCapability
                     .computeIfAbsent(Objects.requireNonNull(key, "key"), ignored -> EnumSet.noneOf(ComponentKind.class))
+                    .add(Objects.requireNonNull(kind, "kind"));
+            return this;
+        }
+
+        public Builder forbidKindForId(final String capabilityId, final ComponentKind kind) {
+            forbiddenKindsByCapabilityId
+                    .computeIfAbsent(RuntimeIdentifiers.requireStableId(capabilityId, "capabilityId"),
+                            ignored -> EnumSet.noneOf(ComponentKind.class))
                     .add(Objects.requireNonNull(kind, "kind"));
             return this;
         }

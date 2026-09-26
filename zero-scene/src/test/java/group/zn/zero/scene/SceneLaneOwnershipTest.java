@@ -17,6 +17,9 @@ class SceneLaneOwnershipTest {
         var scheduler = new ExecutorActorScheduler(workers);
         try (var scenes = new LocalSceneService(scheduler)) {
             List<CompletableFuture<?>> pending = new ArrayList<>();
+            for (int scene = 0; scene < 32; scene++) {
+                scenes.enterScene(new SceneEnterRequest(1, "s" + scene, "trace")).toCompletableFuture().join();
+            }
             for (int step = 0; step < 100; step++) {
                 for (int scene = 0; scene < 32; scene++) pending.add(scenes.moveWithResult(new SceneMoveRequest(
                         1, "s" + scene, new ScenePosition(step, scene), "trace")).toCompletableFuture());
@@ -30,7 +33,7 @@ class SceneLaneOwnershipTest {
                 scenes.leaveScene(new SceneLeaveRequest(1, id, "trace")).toCompletableFuture().join();
                 assertEquals(List.of(), scenes.listEntities(id, "trace").toCompletableFuture().join());
                 scenes.enterScene(new SceneEnterRequest(1, id, "trace")).toCompletableFuture().join();
-                assertEquals(new ScenePosition(99, scene), snapshot.getFirst().position());
+                assertEquals(new ScenePosition(0, 0), scenes.listEntities(id, "trace").toCompletableFuture().join().getFirst().position());
             }
         } finally { scheduler.close(); workers.shutdownNow(); }
     }

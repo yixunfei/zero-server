@@ -29,6 +29,8 @@ public enum ConnectionLifecycleEventType {
     INBOUND_OVERFLOW,
     /** 连接或协议帧被限流。 */
     RATE_LIMIT_EXCEEDED,
+    /** 已认证连接上的单帧安全检查被拒绝。 */
+    FRAME_REJECTED,
     /** 状态发生单调迁移。 */
     STATE_TRANSITION,
     /** 连接被明确拒绝。 */

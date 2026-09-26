@@ -16,7 +16,9 @@ class GmOperationAuthorizerTest {
         AtomicReference<GmAuthorizationAuditEvent> audit = new AtomicReference<>();
         GmOperationAuthorizer authorizer = new GmOperationAuthorizer(
                 new GmOperationAuthorizationPolicy(Set.of("gm-admin"), Set.of("gm:mail"),
-                        Set.of("192.0.2.0/24"), true, true), audit::set);
+                        Set.of("192.0.2.0/24"), true, true),
+                GmSourceIpPolicy.of(Set.of("192.0.2.0/24")),
+                GmApprovalVerifier.contextState(), audit::set);
         GmCommandContext context = new GmCommandContext("alice", "192.0.2.10", "trace",
                 Set.of("gm-admin"), Set.of("gm:mail"), "approval", "APPROVED", Map.of());
         authorizer.authorize(context, "player-1", "token", "bob");

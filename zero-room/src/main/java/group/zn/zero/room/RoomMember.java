@@ -9,6 +9,8 @@ public record RoomMember(String playerId, PlayerSlot slot, long disconnectedAtMi
         Objects.requireNonNull(slot, "slot");
     }
     public boolean reconnectable(long now, long windowMillis) {
-        return slot == PlayerSlot.DISCONNECTED && now - disconnectedAtMillis <= windowMillis;
+        return slot == PlayerSlot.DISCONNECTED
+                && now >= disconnectedAtMillis
+                && now - disconnectedAtMillis <= windowMillis;
     }
 }

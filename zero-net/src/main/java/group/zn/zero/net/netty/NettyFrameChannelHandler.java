@@ -64,6 +64,9 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
      */
     private boolean listenerOpened;
 
+    /** Production lifecycle is delayed until an optional TLS handshake succeeds. */
+    private boolean productionStarted;
+
     /**
      * 创建 Netty 协议帧处理器。
      *
@@ -119,18 +122,7 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
     public void channelActive(final ChannelHandlerContext context) {
         connection = new NettyConnection(context.channel().id().asLongText(), context.channel(), codec, options, outboundBudget);
         io.netty.handler.ssl.SslHandler sslHandler = context.pipeline().get(io.netty.handler.ssl.SslHandler.class);
-        if (sslHandler != null) {
-            sslHandler.handshakeFuture().addListener(future -> {
-                if (future.isSuccess()) {
-                    connection.attributes().put(ProductionNetworkConnectionAttributes.TLS_ESTABLISHED, Boolean.TRUE);
-                } else {
-                    context.close();
-                }
-            });
-        }
-        if (productionLifecycle == null) {
-            openListener();
-        } else {
+        if (productionLifecycle != null) {
             productionSession = new NettyProductionLifecycleSession(
                     context,
                     connection,
@@ -138,7 +130,21 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
                     frame -> submitAcceptedFrame(context, frame),
                     this::openListener,
                     cause -> notifyListenerException(context, cause));
-            productionSession.start();
+        }
+        if (sslHandler != null) {
+            sslHandler.handshakeFuture().addListener(future -> {
+                if (future.isSuccess()) {
+                    connection.attributes().put(ProductionNetworkConnectionAttributes.TLS_ESTABLISHED, Boolean.TRUE);
+                    context.executor().execute(this::startProductionLifecycle);
+                } else {
+                    context.close();
+                }
+            });
+        }
+        if (productionLifecycle == null) {
+            openListener();
+        } else if (sslHandler == null) {
+            startProductionLifecycle();
         }
         context.fireChannelActive();
     }
@@ -176,7 +182,8 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
                     null));
             return;
         }
-        if (productionSession != null && !productionSession.onFrame(frame)) {
+        if (productionLifecycle != null && (!productionStarted
+                || productionSession == null || !productionSession.onFrame(frame))) {
             return;
         }
         submitAcceptedFrame(context, frame);
@@ -288,6 +295,14 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
         }
         listenerOpened = true;
         safeOpen(connection);
+    }
+
+    private void startProductionLifecycle() {
+        if (productionStarted || productionSession == null) {
+            return;
+        }
+        productionStarted = true;
+        productionSession.start();
     }
 
     private void safeClose(final NettyConnection current) {

@@ -8,6 +8,8 @@ import group.zn.zero.actor.handler.ActorHandler;
 import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Consumer;
@@ -86,7 +88,16 @@ public final class LocalRoomService {
                 "room",
                 new Command(id, operation))); } catch (RuntimeException ex) { CompletableFuture<Void> f = new CompletableFuture<>(); f.completeExceptionally(ex); return f; }
     }
-    private void apply(Command command) { command.apply(room(command.id)); }
+    private void apply(Command command) {
+        MutableRoom current = room(command.id);
+        RoomCheckpoint checkpoint = current.checkpoint();
+        try {
+            command.apply(current);
+        } catch (RuntimeException failure) {
+            current.restore(checkpoint);
+            throw failure;
+        }
+    }
     private MutableRoom room(RoomId id) { MutableRoom room = rooms.get(id); if (room == null) throw failure("room not found: " + id.value()); return room; }
     private static String player(String value) { return nonBlank(value, "player id"); }
     private static String nonBlank(String value, String name) { Objects.requireNonNull(value, name); if (value.isBlank()) throw new IllegalArgumentException(name + " must not be blank"); return value; }
@@ -135,6 +146,35 @@ public final class LocalRoomService {
                         "room event consumer failed after state transition", failure);
             }
         }
+        RoomCheckpoint checkpoint() {
+            synchronized (events) {
+                return new RoomCheckpoint(state, new HashMap<>(members), new ArrayDeque<>(events),
+                        droppedEvents, seq, settlementId, settlementResult, stats);
+            }
+        }
+        void restore(RoomCheckpoint checkpoint) {
+            members.clear();
+            members.putAll(checkpoint.members());
+            synchronized (events) {
+                events.clear();
+                events.addAll(checkpoint.events());
+            }
+            state = checkpoint.state();
+            droppedEvents = checkpoint.droppedEvents();
+            seq = checkpoint.seq();
+            settlementId = checkpoint.settlementId();
+            settlementResult = checkpoint.settlementResult();
+            stats = checkpoint.stats();
+        }
         RoomSnapshot snapshot(){return new RoomSnapshot(id,state,capacity,members.values().stream().sorted(Comparator.comparing(RoomMember::playerId)).toList(),seq,settlementId,settlementResult);}
     }
+    private record RoomCheckpoint(
+            RoomState state,
+            Map<String, RoomMember> members,
+            ArrayDeque<RoomEvent> events,
+            long droppedEvents,
+            long seq,
+            String settlementId,
+            String settlementResult,
+            RoomStats stats) { }
 }

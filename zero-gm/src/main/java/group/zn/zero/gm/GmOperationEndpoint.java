@@ -44,7 +44,8 @@ public final class GmOperationEndpoint {
                 return claim.response();
             }
             if (claim.state() == GmIdempotencyStore.State.CONFLICT
-                    || claim.state() == GmIdempotencyStore.State.IN_PROGRESS) {
+                    || claim.state() == GmIdempotencyStore.State.IN_PROGRESS
+                    || claim.state() == GmIdempotencyStore.State.FAILED) {
                 return GmOperationResponse.rejected(GmErrorCode.COMMAND_REJECTED, request.context().traceId());
             }
         }

@@ -51,12 +51,12 @@ public final class LocalSceneService implements SceneService, AutoCloseable {
         this.subscriptions = List.of(
                 scheduler.register(EnterSceneCommand.class, ActorHandler.sync((context, message) -> {
                     EnterSceneCommand command = (EnterSceneCommand) message.payload();
-                    SceneEntityState state = new SceneEntityState(
-                            command.request().uid(),
-                            command.request().sceneId(),
-                            new ScenePosition(0, 0));
-                    scenes.computeIfAbsent(command.request().sceneId(), ignored -> new SceneState()).entities
-                            .put(command.request().uid(), state);
+                    Map<Long, SceneEntityState> entities = scenes
+                            .computeIfAbsent(command.request().sceneId(), ignored -> new SceneState()).entities;
+                    SceneEntityState existing = entities.get(command.request().uid());
+                    SceneEntityState state = existing == null ? new SceneEntityState(
+                            command.request().uid(), command.request().sceneId(), new ScenePosition(0, 0)) : existing;
+                    entities.putIfAbsent(command.request().uid(), state);
                     command.result().complete(state);
                 })),
                 scheduler.register(MoveCommand.class, ActorHandler.sync((context, message) -> {
@@ -65,6 +65,10 @@ public final class LocalSceneService implements SceneService, AutoCloseable {
                             command.request().sceneId(),
                             ignored -> new SceneState()).entities;
                     Optional<SceneEntityState> previous = Optional.ofNullable(entities.get(command.request().uid()));
+                    if (previous.isEmpty()) {
+                        command.result().completeExceptionally(new IllegalStateException("scene entity has not entered"));
+                        return;
+                    }
                     SceneEntityState state = new SceneEntityState(
                             command.request().uid(),
                             command.request().sceneId(),

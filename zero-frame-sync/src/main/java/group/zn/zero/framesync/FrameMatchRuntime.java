@@ -118,27 +118,48 @@ public final class FrameMatchRuntime implements AutoCloseable {
     private record InputSequence(String uid, long sequence) { }
 
     private void advance() {
-        long currentFrame = frameNo.incrementAndGet();
+        long currentFrame = frameNo.get() + 1;
         List<FrameInput> inputs = new ArrayList<>();
+        List<FrameInput> consumed = new ArrayList<>();
+        Map<String, FrameInput> nextLastInputs = new HashMap<>(lastInputs);
         for (Map.Entry<String, Map<Long, FrameInput>> entry : pending.entrySet()) {
-            FrameInput input = entry.getValue().remove(currentFrame);
+            FrameInput input = entry.getValue().get(currentFrame);
             if (input != null) {
                 inputs.add(input);
-                buffered--;
-                lastInputs.put(entry.getKey(), input);
+                consumed.add(input);
+                nextLastInputs.put(entry.getKey(), input);
             } else if (missingPolicy == MissingInputPolicy.REPEAT_LAST && lastInputs.containsKey(entry.getKey())) {
                 inputs.add(lastInputs.get(entry.getKey()));
             }
         }
-        if (missingPolicy == MissingInputPolicy.EMPTY) {
-            pending.values().removeIf(Map::isEmpty);
-            lastInputs.clear();
-        }
         FrameInputBatch batch = new FrameInputBatch(currentFrame, inputs);
-        simulation.advance(currentFrame, batch);
-        FrameCommitted committed = new FrameCommitted(matchId, currentFrame, batch, inputs.isEmpty() ? "" : inputs.getFirst().traceId());
-        events.publish(committed);
-        broadcaster.broadcast(committed);
+        try {
+            simulation.advance(currentFrame, batch);
+            FrameCommitted committed = new FrameCommitted(matchId, currentFrame, batch,
+                    inputs.isEmpty() ? "" : inputs.getFirst().traceId());
+            events.publish(committed);
+            broadcaster.broadcast(committed);
+        } catch (RuntimeException failure) {
+            consumed.forEach(input -> seenSequences.remove(new InputSequence(input.uid(), input.inputSeq())));
+            throw failure;
+        }
+
+        for (FrameInput input : consumed) {
+            Map<Long, FrameInput> playerInputs = pending.get(input.uid());
+            if (playerInputs != null && playerInputs.remove(currentFrame) != null) {
+                buffered--;
+                if (playerInputs.isEmpty() && missingPolicy == MissingInputPolicy.EMPTY) {
+                    pending.remove(input.uid());
+                }
+            }
+        }
+        frameNo.set(currentFrame);
+        if (missingPolicy == MissingInputPolicy.EMPTY) {
+            lastInputs.clear();
+        } else {
+            lastInputs.clear();
+            lastInputs.putAll(nextLastInputs);
+        }
     }
 
     @Override public void close() { closed.set(true); }

@@ -6,6 +6,13 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 2026-09-24 代码审计核实与边界修复
+
+- 修复 Redis 条件写跨槽脚本和失败本地 journal 误记录；world 状态、房间事件回滚、缓存失效和帧推进改为失败可重试的提交顺序。
+- GM 审批默认 fail-closed，REST 幂等键贯通请求，失败幂等状态终止重试；production runtime 禁止 data/cache/RPC 的隐式 LOCAL provider。
+- 修复同步 RPC 本地超时取消、TLS 握手启动时序、完整帧 replay 摘要、UDP 帧长边界、HTTP 重复头覆盖、状态同步同版本回退、IP 字面量解析、稳定 UID 和场景进入/移动契约。
+- NPC 重复 spawn 与 tick 旧快照覆盖被拒绝；重连时间回绕被阻止。报告误报和未改动设计边界记录于[迁移说明](docs/migrations/20260924-code-audit-20260924.md)及任务验证记录。
+
 ### 2026-09-23 依赖升级与验收修复
 
 - 合入已通过完整本机门禁的 MongoDB Driver 5.9.2、Netty 4.2.17.Final、Nacos Client 3.2.3、Jedis 8.0.0，以及 Actions setup-java v6 / upload-artifact v7。

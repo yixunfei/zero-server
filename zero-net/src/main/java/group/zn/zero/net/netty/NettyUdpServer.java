@@ -21,7 +21,6 @@ import io.netty.channel.socket.DatagramPacket;
 import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -202,10 +201,26 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
 
         @Override
         protected void channelRead0(final ChannelHandlerContext context, final DatagramPacket packet) {
+            if (packet.content().readableBytes() > options.maxFrameLength()) {
+                context.fireExceptionCaught(ZeroException.of(
+                        NetErrorCode.INVALID_MESSAGE,
+                        "UDP datagram exceeds maxFrameLength",
+                        null));
+                return;
+            }
             byte[] bytes = ByteBufUtil.getBytes(packet.content());
-            ProtocolFrame frame = frameCodec.decode(bytes);
+            ProtocolFrame frame;
+            try {
+                frame = frameCodec.decode(bytes);
+            } catch (RuntimeException failure) {
+                context.fireExceptionCaught(ZeroException.of(
+                        NetErrorCode.INVALID_MESSAGE,
+                        "decode UDP frame failed",
+                        failure));
+                return;
+            }
             NettyUdpConnection connection = new NettyUdpConnection(
-                    UUID.randomUUID().toString(),
+                    udpConnectionId(packet.sender()),
                     context.channel(),
                     packet.sender(),
                     frameCodec);
@@ -219,6 +234,10 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
                         "submit UDP net handler failed",
                         ex));
             }
+        }
+
+        private String udpConnectionId(final java.net.InetSocketAddress sender) {
+            return "udp-" + sender.getAddress().getHostAddress() + ":" + sender.getPort();
         }
 
         @Override

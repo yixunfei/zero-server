@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import group.zn.zero.gm.GmCommandContext;
 import group.zn.zero.gm.GmIdentityProvider;
 import group.zn.zero.gm.GmOperationResponse;
+import group.zn.zero.gm.GmOperationRequest;
 import group.zn.zero.gm.GmTransportAdapter;
 import group.zn.zero.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
@@ -39,13 +40,16 @@ class GmRestTransportAdapterTest {
     @Test
     void validRequestUsesApplicationIdentityAndBoundedMetadata() {
         GmCommandContext context = GmCommandContext.simple("alice", "192.0.2.1", "t");
+        String[] operationKey = {null};
         GmRestTransportAdapter adapter = new GmRestTransportAdapter(
                 (operation, metadata) -> {
                     assertFalse(!metadata.authenticated());
                     assertEquals("t", metadata.traceId());
+                    operationKey[0] = ((GmOperationRequest) operation).idempotencyKey();
                     return GmOperationResponse.success(null, metadata.traceId());
                 }, GmIdentityProvider.from(request -> context), 1024);
         HttpRequest request = request("{\"traceId\":\"t\",\"correlationId\":\"c\",\"idempotencyKey\":\"i\",\"command\":\"ping\",\"target\":\"server\"}");
         assertEquals(200, adapter.handle(request).status());
+        assertEquals("i", operationKey[0]);
     }
 }

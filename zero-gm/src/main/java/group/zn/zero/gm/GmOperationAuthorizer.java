@@ -13,7 +13,7 @@ public final class GmOperationAuthorizer {
 
     public GmOperationAuthorizer(final GmOperationAuthorizationPolicy policy,
                                  final Consumer<GmAuthorizationAuditEvent> audit) {
-        this(policy, policy.sourceIpPolicy(), GmApprovalVerifier.contextState(), audit);
+        this(policy, policy.sourceIpPolicy(), GmApprovalVerifier.failClosed(), audit);
     }
 
     /** Creates an authorizer with application-provided source and approval policies. */

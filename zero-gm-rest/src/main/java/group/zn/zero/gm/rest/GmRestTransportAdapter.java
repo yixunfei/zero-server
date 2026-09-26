@@ -63,6 +63,7 @@ public final class GmRestTransportAdapter {
             }
             GmOperationResponse result = delegate.handle(new GmOperationRequest(context, command, target,
                     fields.getOrDefault("approvalToken", ""), fields.getOrDefault("secondReviewer", ""),
+                    idempotencyKey,
                     Boolean.parseBoolean(fields.getOrDefault("dryRun", "false"))),
                     new GmTransportMetadata(traceId, correlationId, idempotencyKey,
                             context.operatorIp(), context.attributes(), true));

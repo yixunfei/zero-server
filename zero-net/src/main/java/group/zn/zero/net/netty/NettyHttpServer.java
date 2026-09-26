@@ -252,6 +252,10 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
 
         @Override
         protected void channelRead0(final ChannelHandlerContext context, final FullHttpRequest request) {
+            if (hasDuplicateHeaders(request.headers())) {
+                writeUnauthorized(context);
+                return;
+            }
             HttpRequest zeroRequest = toZeroRequest(request);
             if (request.headers().getAll(SecurityMetadataHttpCodec.HEADER).size() > 1) {
                 writeUnauthorized(context);
@@ -319,6 +323,17 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
             HttpHeaders nettyHeaders = request.headers();
             nettyHeaders.forEach(entry -> headers.put(entry.getKey(), entry.getValue()));
             return new HttpRequest(request.method().name(), request.uri(), headers, body);
+        }
+
+        private boolean hasDuplicateHeaders(final HttpHeaders headers) {
+            java.util.Set<String> names = new java.util.HashSet<>();
+            for (String name : headers.names()) {
+                String normalized = name.toLowerCase(java.util.Locale.ROOT);
+                if (!names.add(normalized)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private void invokeHandler(

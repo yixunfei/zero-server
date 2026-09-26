@@ -181,14 +181,16 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
      */
     @Override
     public CompletionStage<Void> invalidate(final K key) {
-        l1Cache.invalidate(key);
         if (l2Store == null) {
+            l1Cache.invalidate(key);
             return CompletableFuture.completedFuture(null);
         }
-        return l2Store.invalidate(key).exceptionally(throwable -> {
-            markBackendFailure();
-            throw wrapCompletion(throwable);
-        });
+        return l2Store.invalidate(key)
+                .thenRun(() -> l1Cache.invalidate(key))
+                .exceptionally(throwable -> {
+                    markBackendFailure();
+                    throw wrapCompletion(throwable);
+                });
     }
 
     /**

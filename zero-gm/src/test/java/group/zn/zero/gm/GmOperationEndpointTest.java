@@ -51,6 +51,23 @@ class GmOperationEndpointTest {
         assertTrue(calls.get() == 0);
     }
 
+    @Test
+    void failedIdempotentClaimIsTerminal() {
+        AtomicInteger authorizationAudits = new AtomicInteger();
+        GmOperationEndpoint endpoint = new GmOperationEndpoint(
+                GmCommandExecutor.systemClock(registry(new AtomicInteger()), event -> { }),
+                new GmOperationAuthorizer(
+                        new GmOperationAuthorizationPolicy(Set.of("admin"), Set.of(), Set.of(), false, false),
+                        event -> authorizationAudits.incrementAndGet()),
+                new InMemoryGmIdempotencyStore());
+        GmOperationRequest request = new GmOperationRequest(
+                GmCommandContext.simple("alice", "192.0.2.10", "trace-failed"),
+                "/ping", "server", "", "", "failed-key", false);
+        assertEquals(GmErrorCode.OPERATION_AUTHORIZATION_DENIED.code(), endpoint.handle(request).code());
+        assertEquals(GmErrorCode.COMMAND_REJECTED.code(), endpoint.handle(request).code());
+        assertEquals(1, authorizationAudits.get());
+    }
+
     private static GmCommandRegistry registry(final AtomicInteger calls) {
         GmCommandRegistry registry = new GmCommandRegistry();
         registry.register(new GmCommandDefinition(List.of("ping"), List.of(), "ping", GmCommandRisk.LOW, "", false),

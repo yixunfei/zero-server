@@ -21,10 +21,13 @@ public final class TrustedProxyResolver {
         if (hops.length == 0 || hops.length > maxForwardedHops) throw new IllegalArgumentException("forwarded address chain is not trusted");
         String source = hops[0].trim();
         SecurityValues.require(source, "sourceAddress", 128);
+        if (!source.matches("[0-9a-fA-F:.]+")) {
+            throw new IllegalArgumentException("forwarded address is invalid");
+        }
         try {
             java.net.InetAddress address = java.net.InetAddress.getByName(source);
             if (!(address instanceof Inet4Address || address instanceof Inet6Address)
-                    || !source.matches("[0-9a-fA-F:.]+")) {
+                    || source.isBlank()) {
                 throw new IllegalArgumentException("forwarded address is invalid");
             }
         } catch (java.net.UnknownHostException e) {

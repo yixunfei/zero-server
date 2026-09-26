@@ -24,7 +24,7 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
      * Redis 条件保存脚本。
      */
     private static final byte[] SAVE_IF_VERSION_SCRIPT = """
-            local types = {'string', 'string', 'set', 'set', 'list'}
+            local types = {'string', 'string', 'set', 'list'}
             for i = 1, #KEYS do
               local actual = redis.call('TYPE', KEYS[i]).ok
               if actual ~= 'none' and actual ~= types[i] then
@@ -44,8 +44,7 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
             redis.call('SET', KEYS[1], ARGV[3])
             redis.call('SET', KEYS[2], ARGV[2])
             redis.call('SADD', KEYS[3], ARGV[4])
-            redis.call('SADD', KEYS[4], KEYS[3])
-            redis.call('RPUSH', KEYS[5], ARGV[5])
+            redis.call('RPUSH', KEYS[4], ARGV[5])
             return 1
             """.getBytes(StandardCharsets.UTF_8);
 
@@ -212,7 +211,6 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
                             bytes(snapshot.dataKey()),
                             bytes(versionKey(snapshot.id())),
                             bytes(snapshot.indexKey()),
-                            bytes(collectionIndexKey()),
                             bytes(snapshot.journalKey())),
                     List.of(
                             bytes(String.valueOf(expectedVersion)),
@@ -220,15 +218,12 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
                             snapshot.envelopeBytes(),
                             bytes(snapshot.id()),
                             journalEntryCodec.encode(entry)));
-            return result instanceof Number number && number.longValue() == 1L;
-        } catch (RuntimeException ex) {
-            if (localJournal != null) {
-                try {
-                    appendLocal(entry);
-                } catch (RuntimeException journalFailure) {
-                    ex.addSuppressed(journalFailure);
-                }
+            boolean saved = result instanceof Number number && number.longValue() == 1L;
+            if (saved) {
+                client.sadd(collectionIndexKey(), snapshot.indexKey());
             }
+            return saved;
+        } catch (RuntimeException ex) {
             throw ZeroException.of(DataErrorCode.WRITE_FAILED, "redis conditional write failed", ex);
         }
     }
