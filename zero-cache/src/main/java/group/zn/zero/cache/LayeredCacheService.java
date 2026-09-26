@@ -45,7 +45,10 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
     /**
      * 加载协调器。
      */
-    private final CacheLoadCoordinator<K, V> loadCoordinator;
+    private final CacheLoadCoordinator<CacheKeyOperations.Token<K>, V> loadCoordinator;
+
+    /** 同键写顺序和在途读取代际；后端调用不在其锁内执行。 */
+    private final CacheKeyOperations<K> operations = new CacheKeyOperations<>();
 
     /**
      * 缓存版本生成器。
@@ -130,7 +133,9 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
             return CompletableFuture.completedFuture(l1Entry.orElseThrow().optionalValue());
         }
         missCount.incrementAndGet();
-        return readL2(key);
+        var token = operations.read(key);
+        return readL2Entry(key, token).thenApply(entry -> entry.flatMap(CacheStoreEntry::optionalValue))
+                .whenComplete((value, failure) -> operations.release(token)).toCompletableFuture().copy();
     }
 
     /**
@@ -157,19 +162,16 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
         if (entityVersion < 0L) {
             throw new IllegalArgumentException("entityVersion must be non-negative");
         }
-        CacheStoreEntry<V> entry = normalStoreEntry(value, entityVersion);
-        if (l2Store == null) {
-            storeL1FromL2(key, entry);
-            return CompletableFuture.completedFuture(null);
-        }
-        return l2Store.putIfVersion(key, entry).thenAccept(saved -> {
-            if (!saved) {
-                throw ZeroException.of(CacheErrorCode.VERSION_CONFLICT, "cache version conflict", null);
-            }
-            storeL1FromL2(key, entry);
-        }).exceptionally(throwable -> {
-            markBackendFailure();
-            throw wrapCompletion(throwable);
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(value, "value");
+        return operations.mutate(key, token -> {
+            CacheStoreEntry<V> entry = normalStoreEntry(value, entityVersion);
+            return backend(() -> l2Store == null ? CompletableFuture.completedFuture(true)
+                    : l2Store.putIfVersion(key, entry)).thenAccept(saved -> {
+                        if (!saved) throw ZeroException.of(CacheErrorCode.VERSION_CONFLICT,
+                                "cache version conflict", null);
+                        operations.commit(token, () -> storeL1FromL2(key, entry));
+                    });
         });
     }
 
@@ -181,16 +183,10 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
      */
     @Override
     public CompletionStage<Void> invalidate(final K key) {
-        if (l2Store == null) {
-            l1Cache.invalidate(key);
-            return CompletableFuture.completedFuture(null);
-        }
-        return l2Store.invalidate(key)
-                .thenRun(() -> l1Cache.invalidate(key))
-                .exceptionally(throwable -> {
-                    markBackendFailure();
-                    throw wrapCompletion(throwable);
-                });
+        Objects.requireNonNull(key, "key");
+        return operations.mutate(key, token -> backend(() -> l2Store == null
+                ? CompletableFuture.<Void>completedFuture(null) : l2Store.invalidate(key))
+                .thenRun(() -> operations.commit(token, () -> l1Cache.invalidate(key))));
     }
 
     /**
@@ -204,24 +200,17 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
         if (entityVersion < 0L) {
             throw new IllegalArgumentException("entityVersion must be non-negative");
         }
-        CacheEntry<V> expected = l1Cache.entryOf(key).orElse(null);
-        if (expected != null && expected.entityVersion() > entityVersion) {
-            return CompletableFuture.completedFuture(false);
-        }
-        if (l2Store == null) {
-            return CompletableFuture.completedFuture(l1Cache.invalidateEntry(key, expected, entityVersion));
-        }
-        return l2Store.invalidateIfVersion(key, entityVersion)
-                .thenApply(invalidated -> {
-                    if (Boolean.TRUE.equals(invalidated)) {
-                        return l1Cache.invalidateEntry(key, expected, entityVersion);
-                    }
-                    return invalidated;
-                })
-                .exceptionally(throwable -> {
-                    markBackendFailure();
-                    throw wrapCompletion(throwable);
-                });
+        Objects.requireNonNull(key, "key");
+        return operations.mutate(key, token -> {
+            CacheEntry<V> expected = l1Cache.entryOf(key).orElse(null);
+            if (expected != null && expected.entityVersion() > entityVersion) {
+                return CompletableFuture.completedFuture(false);
+            }
+            return backend(() -> l2Store == null ? CompletableFuture.completedFuture(true)
+                    : l2Store.invalidateIfVersion(key, entityVersion)).thenApply(invalidated ->
+                            Boolean.TRUE.equals(invalidated) && operations.commit(token,
+                                    () -> l1Cache.invalidateEntry(key, expected, entityVersion)));
+        });
     }
 
     /**
@@ -238,21 +227,24 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
             hitCount.incrementAndGet();
             return CompletableFuture.completedFuture(l1Entry.orElseThrow().optionalValue());
         }
-        return readL2Entry(key).thenCompose(entry -> {
+        var token = operations.read(key);
+        return readL2Entry(key, token).thenCompose(entry -> {
             if (entry.isPresent()) {
                 hitCount.incrementAndGet();
                 return CompletableFuture.completedFuture(entry.orElseThrow().optionalValue());
             }
             missCount.incrementAndGet();
-            return loadCoordinator.getOrLoad(key, () -> loader.load(key), value -> {
+            return loadCoordinator.getOrLoad(token, () -> loader.load(key), value -> {
                         loadCount.incrementAndGet();
-                        return storeLoaded(key, value);
+                        return operations.backfill(token, () -> storeLoaded(key, value, token),
+                                () -> CompletableFuture.completedFuture(localValue(key)));
                     }).whenComplete((ignored, failure) -> {
                         if (failure != null) {
                             loadFailureCount.incrementAndGet();
+                            operations.abandon(token);
                         }
                     });
-        });
+        }).whenComplete((value, failure) -> operations.release(token)).toCompletableFuture().copy();
     }
 
     /**
@@ -326,20 +318,25 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
         return degraded;
     }
 
-    private CompletionStage<Optional<V>> readL2(final K key) {
-        return readL2Entry(key).thenApply(entry -> entry.flatMap(CacheStoreEntry::optionalValue));
-    }
-
-    private CompletionStage<Optional<CacheStoreEntry<V>>> readL2Entry(final K key) {
+    private CompletionStage<Optional<CacheStoreEntry<V>>> readL2Entry(final K key,
+            final CacheKeyOperations.Token<K> token) {
         if (l2Store == null) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
-        return l2Store.get(key)
-                .thenApply(entry -> entry.flatMap(current -> storeL1FromL2(key, current)))
-                .exceptionally(throwable -> {
-                    markBackendFailure();
-                    return Optional.empty();
-                });
+        return backend(() -> l2Store.get(key))
+                .thenApply(entry -> entry.flatMap(current -> storeL1IfCurrent(key, current, token)))
+                .exceptionally(throwable -> Optional.empty());
+    }
+
+    private Optional<CacheStoreEntry<V>> storeL1IfCurrent(final K key, final CacheStoreEntry<V> entry,
+            final CacheKeyOperations.Token<K> token) {
+        return operations.select(token, () -> storeL1FromL2(key, entry), () -> l1Cache.entryOf(key)
+                .map(current -> new CacheStoreEntry<>(current.value(), current.version(), current.entityVersion(),
+                        current.expiresAt(), current.negative())));
+    }
+
+    private Optional<V> localValue(final K key) {
+        return l1Cache.entryOf(key).flatMap(CacheEntry::optionalValue);
     }
 
     private Optional<CacheStoreEntry<V>> storeL1FromL2(final K key, final CacheStoreEntry<V> entry) {
@@ -353,29 +350,51 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
                 selected.entityVersion(), selected.expiresAt(), selected.negative()));
     }
 
-    private CompletionStage<Optional<V>> storeLoaded(final K key, final Optional<V> value) {
+    private CompletionStage<Optional<V>> storeLoaded(final K key, final Optional<V> value,
+            final CacheKeyOperations.Token<K> token) {
         Objects.requireNonNull(value, "value");
-        if (value.isEmpty()) {
-            l1Cache.putNegative(key);
-            return writeL2BestEffort(key, negativeStoreEntry()).thenApply(ignored -> Optional.empty());
+        CacheStoreEntry<V> entry = value.map(current -> normalStoreEntry(current, 0L)).orElseGet(this::negativeStoreEntry);
+        if (!operations.select(token, () -> true, () -> false)) {
+            return CompletableFuture.completedFuture(localValue(key));
         }
-        V current = value.orElseThrow();
-        CacheStoreEntry<V> entry = normalStoreEntry(current, 0L);
-        l1Cache.putVersioned(key, current, entry.cacheVersion());
-        return writeL2BestEffort(key, entry).thenApply(ignored -> value);
+        CompletionStage<Boolean> write;
+        try {
+            write = l2Store == null ? CompletableFuture.completedFuture(true)
+                    : Objects.requireNonNull(l2Store.putIfVersion(key, entry), "backend result");
+        } catch (RuntimeException failure) {
+            markBackendFailure();
+            storeL1IfCurrent(key, entry, token);
+            return CompletableFuture.completedFuture(value);
+        }
+        CompletableFuture<Optional<V>> result = new CompletableFuture<>();
+        write.whenComplete((saved, failure) -> {
+            if (failure != null && !(failure instanceof java.util.concurrent.CancellationException)) {
+                markBackendFailure();
+            }
+            // 后端不可用时保留既有降级能力；明确版本拒绝则不得污染 L1。
+            if (!result.isCancelled()
+                    && !(failure instanceof java.util.concurrent.CancellationException)
+                    && (failure != null || Boolean.TRUE.equals(saved))) {
+                storeL1IfCurrent(key, entry, token);
+            }
+            result.complete(value);
+        });
+        result.whenComplete((ignored, failure) -> {
+            if (result.isCancelled()) {
+                write.toCompletableFuture().cancel(true);
+            }
+        });
+        return result;
     }
 
-    private CompletionStage<Void> writeL2BestEffort(final K key, final CacheStoreEntry<V> entry) {
-        if (l2Store == null) {
-            return CompletableFuture.completedFuture(null);
+    private <T> CompletionStage<T> backend(final java.util.function.Supplier<CompletionStage<T>> operation) {
+        CompletionStage<T> stage;
+        try {
+            stage = Objects.requireNonNull(operation.get(), "backend result");
+        } catch (RuntimeException failure) {
+            stage = CompletableFuture.failedFuture(failure);
         }
-        return l2Store.putIfVersion(key, entry)
-                .handle((ignored, throwable) -> {
-                    if (throwable != null) {
-                        markBackendFailure();
-                    }
-                    return null;
-                });
+        return stage.whenComplete((ignored, failure) -> { if (failure != null) markBackendFailure(); });
     }
 
     private CacheStoreEntry<V> normalStoreEntry(final V value, final long entityVersion) {

@@ -32,6 +32,31 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class RpcRemoteActorGatewayTest {
+    /** 远程网关必须签名当前可信上下文，无上下文时不得发送。 */
+    @Test void signedGatewayCarriesAuthenticatedMetadata() {
+        var assertion = group.zn.zero.security.SecurityMetadataAssertion.digest(new byte[]{1, 2, 3});
+        var transport = new InMemoryRpcTransport();
+        var captured = new AtomicReference<group.zn.zero.rpc.RpcRequest>();
+        transport.register("actor", RpcRemoteActorGateway.DEFAULT_METHOD_NAME, request -> {
+            captured.set(request);
+            return java.util.concurrent.CompletableFuture.completedFuture(new group.zn.zero.rpc.RpcResponse(
+                    request.correlationId(), request.traceId(), group.zn.zero.core.error.SystemErrorCode.OK, "ok", new byte[0]));
+        });
+        var gateway = new RpcRemoteActorGateway(transport, new RpcActorMessageCodec(codecRegistry()), assertion);
+        var lane = LaneKey.player("p");
+        var route = ActorRoute.remote(ActorAddress.remote(lane, "actor", 1, "node", "zone"),
+                RpcRemoteActorGateway.DEFAULT_METHOD_NAME, "memory", "", "", "p", Map.of());
+        var message = new ActorMessage(lane, new RemoteCommand("touch"));
+        org.junit.jupiter.api.Assertions.assertThrows(group.zn.zero.core.error.ZeroException.class,
+                () -> gateway.dispatch(message, route, ActorDispatchOptions.defaults()));
+        var now = java.time.Instant.now();
+        var identity = new group.zn.zero.security.SecurityContext("service", now, now.plusSeconds(60),
+                "rpc", "peer", "trusted", "trace", "session", java.util.Set.of("rpc.invoke"), Map.of());
+        group.zn.zero.security.SecurityContextBridge.with(identity,
+                () -> gateway.dispatch(message, route, ActorDispatchOptions.defaults())).toCompletableFuture().join();
+        org.junit.jupiter.api.Assertions.assertTrue(assertion.verify(captured.get().securityMetadata()));
+        assertEquals("service", captured.get().securityMetadata().subject());
+    }
 
     /**
      * 验证 RPC oneway 能把 Actor 消息投递到接收端调度器。

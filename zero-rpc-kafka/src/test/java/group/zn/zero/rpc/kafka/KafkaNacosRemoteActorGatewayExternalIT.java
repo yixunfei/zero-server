@@ -33,12 +33,17 @@ import group.zn.zero.rpc.discovery.ServiceDiscoveryRpcServiceResolver;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import group.zn.zero.security.SecurityContext;
+import group.zn.zero.security.SecurityContextBridge;
+import group.zn.zero.security.SecurityMetadataAssertion;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.junit.jupiter.api.Test;
 
@@ -169,12 +174,13 @@ public class KafkaNacosRemoteActorGatewayExternalIT {
                             serviceResolver,
                             ignored -> ServiceDiscoveryRpcServiceResolver.kafkaQuery(serviceName, 1),
                             RpcRemoteActorGateway.DEFAULT_METHOD_NAME),
-                    new RpcRemoteActorGateway(caller, new RpcActorMessageCodec(codecRegistry)),
+                    new RpcRemoteActorGateway(caller, new RpcActorMessageCodec(codecRegistry), securityAssertion()),
                     ActorDispatchOptions.defaults().withReplyTopic(replyTopic));
-            gateway.dispatch(
+            SecurityContext context = actorSecurityContext(suffix);
+            SecurityContextBridge.with(context, () -> gateway.dispatch(
                             GameRequestContext.client("trace-s4b04-" + suffix),
                             LaneKey.scene("scene-" + suffix),
-                            new RemoteActorTouchCommand(10086L, "touch-" + suffix))
+                            new RemoteActorTouchCommand(10086L, "touch-" + suffix)))
                     .toCompletableFuture()
                     .get();
         } finally {
@@ -217,6 +223,7 @@ public class KafkaNacosRemoteActorGatewayExternalIT {
                     consumerGroup,
                     topicPrefix(suffix),
                     "reply-provider-" + suffix));
+            provider.securityMetadataVerifier(SecurityMetadataAssertion.verifier(securityAssertion()));
             registration = new RpcRemoteActorReceiver(provider, scheduler, messageCodec)
                     .register(serviceName, RpcRemoteActorGateway.DEFAULT_METHOD_NAME, requestTopic, consumerGroup);
             discovery = nacos(nacosServerAddr);
@@ -266,6 +273,27 @@ public class KafkaNacosRemoteActorGatewayExternalIT {
                 new ProtocolDefinition(9301, "external.actor.touch", ProtocolDirection.CLIENT_TO_SERVER, 1),
                 new GeneratedProtocolCodec<>(RemoteActorTouchCommandCodec.INSTANCE));
         return registry;
+    }
+
+    /** 跨 JVM Actor 外测使用的固定断言密钥；测试环境不承载生产凭据。 */
+    private static SecurityMetadataAssertion securityAssertion() {
+        return SecurityMetadataAssertion.digest("zero-s4b04-actor-test-secret".getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** 创建带有效期和权限的 Actor 调用身份。 */
+    private static SecurityContext actorSecurityContext(final String suffix) {
+        Instant now = Instant.now();
+        return new SecurityContext(
+                "external-actor-caller-" + suffix,
+                now,
+                now.plusSeconds(60),
+                "kafka-nacos-actor",
+                "provider",
+                "trusted",
+                "trace-s4b04-" + suffix,
+                "actor-correlation-" + suffix,
+                java.util.Set.of("rpc.invoke"),
+                Map.of());
     }
 
     private static KafkaRpcSettings settings(

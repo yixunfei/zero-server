@@ -76,6 +76,7 @@ final class DefaultGameRuntime implements GameRuntime {
             setState(RuntimeState.RUNNING);
         } catch (Throwable failure) {
             RuntimeAssemblyException primary = normalizeStartFailure(failure);
+            setState(RuntimeState.STOPPING);
             primary = startedComponents.stopAll(primary, tracker);
             primary = resources.closeAll(primary);
             fail(primary);
@@ -85,6 +86,8 @@ final class DefaultGameRuntime implements GameRuntime {
 
     @Override
     public synchronized void stop() {
+        if (runtimeState == RuntimeState.STARTING) throw reuseFailure();
+        if (runtimeState == RuntimeState.STOPPING) return;
         if (runtimeState == RuntimeState.STOPPED || runtimeState == RuntimeState.CLOSED) {
             return;
         }
@@ -99,6 +102,8 @@ final class DefaultGameRuntime implements GameRuntime {
 
     @Override
     public synchronized void close() {
+        if (runtimeState == RuntimeState.STARTING) throw reuseFailure();
+        if (runtimeState == RuntimeState.STOPPING) return;
         if (runtimeState == RuntimeState.CLOSED) {
             return;
         }

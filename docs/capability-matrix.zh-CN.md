@@ -2,6 +2,8 @@
 
 本文给出 `0.1.0-SNAPSHOT` 的实现状态和明确边界，核对日期为 2026-09-18。状态只描述当前仓库代码与测试，不等同于生产容量或稳定性承诺；`productionReady=false`。
 
+2026-09-26 增量复核了全仓质量基线、Production 按需装配与 `local + net` 入口，见[质量报告](reports/quality-baseline-20260926.zh-CN.md)。其余能力条目沿用上述盘点日期，不表示本轮逐项重新验收。
+
 ## 状态定义
 
 | 状态 | 定义 |
@@ -75,8 +77,8 @@
 | 能力 | 状态 | 已有 | 主要缺口 |
 | --- | --- | --- | --- |
 | 阶段 0 本地开箱验收 | implemented | quick/full 统一入口、确定性摘要、独立日志、首错停止、示例与七类脚手架黑盒验证 | 不覆盖真实中间件、容量、长稳或生产就绪 |
-| 本地 Starter | implemented | 无 Docker 默认装配、Builder 覆盖、执行域、诊断、生命周期；`ZeroServerTcpApplication` 管理显式 TCP 启停，已有 `local + net` Server 模板 | 新生成 net 工程装配 API 不匹配，当前编译失败；不是生产线程池/容量策略 |
-| Production Starter | minimum-slice | 严格 selector、必填配置、启动健康/预算、逆序资源事务、安全异常 | 周期健康、自动恢复、完整熔断、硬 wall-clock 取消 |
+| 本地 Starter | implemented | 无 Docker 默认装配、Builder 覆盖、执行域、诊断、生命周期；`ZeroServerTcpApplication` 管理显式 TCP 启停；新生成 `local + net` 工程已通过编译、3 项测试及真实本地 TCP 回显 | 响应仍是最小回显；真实认证与生产安全接线、线程池/容量策略待应用落实 |
+| Production Starter | minimum-slice | 按需显式 Adapter 选择、严格 selector、必填配置、启动健康/预算、逆序资源事务、安全异常；外部组件失败禁止本地回退 | 未启用的能力可使用本地实现，项目必须显式选择需要的持久/分布式能力；周期健康、自动恢复、完整熔断、硬 wall-clock 取消 |
 | 模块化运行时装配 | minimum-slice | 中立 `zero-runtime`、显式 catalog/preset/profile、typed config、最小依赖图、事务回滚、独立 assembly/startup deadline、启动健康、single-use、安全诊断、共享能力模型、Local Starter 与生成器迁移；Kafka RPC、MongoDB data、Redis shared resource/data/cache、PostgreSQL data、Nacos discovery/RPC resolver 和 network lifecycle provider 已正式接入；Production 门面直接实现 `GameRuntime` | 周期健康、自动恢复、每组件独立预算、完整 production policy 和真实中间件故障验证仍待后续阶段 |
 | Docker/编排 | minimum-slice | `deploy/docker-compose.yml` 提供可运行的 Compose 基线：环境变量、非 root、只读根文件系统、healthcheck、内部网络、资源上限、可选 Redis/PostgreSQL 和 secret 路径占位 | app 镜像必须由项目提供；不含 TLS/WAF/DDoS、滚动发布、自动恢复、跨主机灾备、容量或生产就绪证明 |
 | 备份与恢复流程 | design-boundary | 提供中文部署基线和备份恢复 Runbook 模板，覆盖 PostgreSQL/Redis 边界、外部依赖、校验与恢复演练清单 | 各项目仍需实现并演练实际备份、PITR、RPO/RTO、加密保留、权限和灾备方案 |
@@ -94,7 +96,8 @@
 
 ## 最近交付与验证边界
 
-- 2026-09-18 实测：默认七类本地模板与 `local + net` 必须分开验收；net 生成装配存在编译错误，详见[本轮核对报告](reports/documentation-audit-20260918.zh-CN.md)。
+- 2026-09-26：全仓质量与本地集成构建通过，修复 production 过度限制 LOCAL 造成的装配阻塞；新生成 `local + net` 完成编译、测试与真实 TCP 回显，见[质量报告](reports/quality-baseline-20260926.zh-CN.md)。
+- 2026-09-18 报告中的 net 生成装配编译错误已于 9 月 23 日修复，见[依赖与入口修复记录](migrations/20260923-dependency-upgrades.md)。默认业务模板与 `local + net` 仍分别验收，TCP 回显不代表生产安全链完整。
 
 - 脚手架已有 ownership manifest、plan/diff、升级事务与回滚；流程见[迁移说明](migrations/20260914-scaffold-ownership-manifest.md)。
 - Kafka 中心—逻辑三模块及双 JVM 验收脚本已存在；历史真实 broker 验收记录为 blocked，当前不能宣称外部链路通过，见[双进程说明](migrations/20260915-center-logic-kafka-two-process.md)。

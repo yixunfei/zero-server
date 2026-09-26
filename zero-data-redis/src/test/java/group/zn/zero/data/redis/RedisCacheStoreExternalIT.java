@@ -20,6 +20,20 @@ import redis.clients.jedis.RedisClient;
  * @author zn
  */
 class RedisCacheStoreExternalIT {
+    /** 全 long 范围的相邻版本不能经 Lua double 转换后混同。 */
+    @Test void adjacentLargeVersionsRemainDistinct() {
+        try (RedisClient client = new RedisDataAdapter().createClient(RedisDriverSettings.fromSystemProperties())) {
+            var store = new RedisCacheStore<String, String>(client, "audit", "large-versions", new StringCacheValueCodec());
+            String key = java.util.UUID.randomUUID().toString();
+            long base = 9_007_199_254_740_992L;
+            try {
+                assertTrue(store.putIfVersion(key, entry("old", base)).toCompletableFuture().join());
+                assertTrue(store.putIfVersion(key, entry("new", base + 1)).toCompletableFuture().join());
+                assertFalse(store.invalidateIfVersion(key, base).toCompletableFuture().join());
+                assertEquals("new", store.get(key).toCompletableFuture().join().orElseThrow().value());
+            } finally { store.invalidate(key).toCompletableFuture().join(); }
+        }
+    }
 
     /**
      * 验证真实 Redis L2 缓存的读写、版本写入和条件失效。

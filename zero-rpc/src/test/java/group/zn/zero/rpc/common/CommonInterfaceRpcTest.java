@@ -83,6 +83,20 @@ class CommonInterfaceRpcTest {
         assertEquals("player-7", response.name);
     }
 
+    /** 调用方取消异步 RPC 时，传输层响应必须同步取消，避免请求泄漏。 */
+    @Test
+    void asyncCancellationShouldCancelTransportResponse() {
+        RpcCodecRegistry codecRegistry = codecRegistry();
+        CancellationRpcTransport transport = new CancellationRpcTransport();
+        PlayerRemoteRpc client = new RpcClientFactory(transport, codecRegistry).create(PlayerRemoteRpc.class);
+
+        CompletionStage<RpcResult<PlayerQueryResponseDTO>> call =
+                client.queryPlayerAsync(new PlayerQueryRequestDTO(8L));
+
+        assertTrue(call.toCompletableFuture().cancel(true));
+        assertTrue(transport.response.isCancelled());
+    }
+
     /**
      * 验证业务失败说明不会在核心 RPC 链路中丢失。
      */
@@ -523,6 +537,28 @@ class CommonInterfaceRpcTest {
          */
         CopyOnWriteArrayList<RpcRequest> requests() {
             return requests;
+        }
+    }
+
+    /** 返回可观察响应阶段的最小 RPC 传输替身。 */
+    static final class CancellationRpcTransport implements RpcTransport {
+
+        /** 等待调用方取消的响应阶段。 */
+        private final CompletableFuture<RpcResponse> response = new CompletableFuture<>();
+
+        @Override
+        public String name() {
+            return "cancellation-test";
+        }
+
+        @Override
+        public CompletionStage<RpcResponse> request(final RpcRequest request) {
+            return response;
+        }
+
+        @Override
+        public CompletionStage<Void> oneway(final RpcRequest request) {
+            return CompletableFuture.completedFuture(null);
         }
     }
 }

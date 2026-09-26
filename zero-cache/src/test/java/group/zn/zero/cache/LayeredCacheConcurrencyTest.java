@@ -10,6 +10,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
@@ -35,9 +36,11 @@ class LayeredCacheConcurrencyTest {
         var cache = new LayeredCacheService<String, String>(CachePolicy.defaults(), store);
         cache.putVersioned("key", "old", 1).toCompletableFuture().join();
         var invalidation = cache.invalidateIfVersion("key", 1).toCompletableFuture();
-        cache.putVersioned("key", "new", 2).toCompletableFuture().join();
+        var write = cache.putVersioned("key", "new", 2).toCompletableFuture();
+        assertFalse(write.isDone());
         store.invalidation.complete(true);
-        assertFalse(invalidation.join());
+        assertTrue(invalidation.join());
+        write.join();
         assertEquals(Optional.of("new"), cache.get("key").toCompletableFuture().join());
         assertEquals(0, store.reads);
     }
@@ -84,6 +87,24 @@ class LayeredCacheConcurrencyTest {
         assertEquals(Optional.of("new"), local.get("key").toCompletableFuture().join());
     }
 
+    /** 回填阶段超时后，迟到的可取消写入不得复活 L1 或 L2。 */
+    @Test
+    void timedOutBackfillIsAbandonedBeforeItCanResurrectCache() throws Exception {
+        CachePolicy policy = new CachePolicy(Duration.ofMinutes(1), Duration.ofSeconds(1),
+                Duration.ZERO, 8, 1, false, Duration.ofMillis(50));
+        DelayedWriteStore store = new DelayedWriteStore();
+        var cache = new LayeredCacheService<String, String>(policy, store);
+        var loaded = cache.getOrLoad("key", CacheLoader.sync(key -> Optional.of("late"))).toCompletableFuture();
+        assertTrue(store.writeStarted.await(2, TimeUnit.SECONDS));
+        assertThrows(ExecutionException.class, () -> loaded.get(2, TimeUnit.SECONDS));
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!store.writeResult.isCancelled() && System.nanoTime() < deadline) {
+            Thread.yield();
+        }
+        assertTrue(store.writeResult.isCancelled());
+        assertTrue(cache.get("key").toCompletableFuture().join().isEmpty());
+    }
+
     /** 提供可控失效结果，读取计数用于证明 L1 未丢失。 */
     private static final class Store implements CacheStore<String, String> {
         /** 延迟的失效结果。 */
@@ -110,6 +131,36 @@ class LayeredCacheConcurrencyTest {
         /** 返回延迟结果。 */
         @Override public CompletionStage<Boolean> invalidateIfVersion(final String key, final long version) {
             return invalidation;
+        }
+    }
+
+    /** 支持取消传播断言的延迟写入存储。 */
+    private static final class DelayedWriteStore implements CacheStore<String, String> {
+        /** 写入开始闩锁。 */
+        private final CountDownLatch writeStarted = new CountDownLatch(1);
+        /** 可取消的后端写入。 */
+        private final CompletableFuture<Boolean> writeResult = new CompletableFuture<>();
+
+        @Override public CompletionStage<Optional<CacheStoreEntry<String>>> get(final String key) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+
+        @Override public CompletionStage<Void> put(final String key, final CacheStoreEntry<String> entry) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override public CompletionStage<Boolean> putIfVersion(
+                final String key, final CacheStoreEntry<String> entry) {
+            writeStarted.countDown();
+            return writeResult;
+        }
+
+        @Override public CompletionStage<Void> invalidate(final String key) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override public CompletionStage<Boolean> invalidateIfVersion(final String key, final long version) {
+            return CompletableFuture.completedFuture(true);
         }
     }
 }

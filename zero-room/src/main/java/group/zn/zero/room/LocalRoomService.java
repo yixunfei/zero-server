@@ -82,14 +82,15 @@ public final class LocalRoomService {
     }
     private CompletionStage<Void> dispatch(RoomId id, Operation operation) {
         Objects.requireNonNull(id, "id");
-        try { room(id); return scheduler.dispatch(new ActorMessage(
+        try { MutableRoom expected = room(id); return scheduler.dispatch(new ActorMessage(
                 "room-" + id.value(),
                 LaneKey.custom(id.value()),
                 "room",
-                new Command(id, operation))); } catch (RuntimeException ex) { CompletableFuture<Void> f = new CompletableFuture<>(); f.completeExceptionally(ex); return f; }
+                new Command(id, expected, operation))); } catch (RuntimeException ex) { CompletableFuture<Void> f = new CompletableFuture<>(); f.completeExceptionally(ex); return f; }
     }
     private void apply(Command command) {
         MutableRoom current = room(command.id);
+        if (current != command.expected) throw failure("room generation has changed");
         RoomCheckpoint checkpoint = current.checkpoint();
         try {
             command.apply(current);
@@ -103,7 +104,7 @@ public final class LocalRoomService {
     private static String nonBlank(String value, String name) { Objects.requireNonNull(value, name); if (value.isBlank()) throw new IllegalArgumentException(name + " must not be blank"); return value; }
     private static long time(long value) { if (value < 0) throw new IllegalArgumentException("time must not be negative"); return value; }
     private static IllegalStateException failure(String message) { return new IllegalStateException(message); }
-    private record Command(RoomId id, Operation operation) implements Operation { public void apply(MutableRoom room) { operation.apply(room); } }
+    private record Command(RoomId id, MutableRoom expected, Operation operation) implements Operation { public void apply(MutableRoom room) { operation.apply(room); } }
     private interface Operation { void apply(MutableRoom room); }
     private record Join(String player) implements Operation { public void apply(MutableRoom r) { r.join(player); } }
     private record Leave(String player) implements Operation { public void apply(MutableRoom r) { r.leave(player); } }

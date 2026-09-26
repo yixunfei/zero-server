@@ -324,9 +324,18 @@ public final class RpcClientFactory {
                     return transport.oneway(request)
                             .thenApply(ignored -> successResult(descriptor, null, request));
                 }
-                return transport.request(request)
-                        .thenApply(response -> responseResult(descriptor, request, response))
-                        .exceptionally(ex -> failureResult(descriptor, request, unwrap(ex)));
+                CompletableFuture<RpcResponse> response = transport.request(request).toCompletableFuture();
+                CompletableFuture<RpcResult<Object>> result = new CompletableFuture<>();
+                result.whenComplete((value, failure) -> { if (result.isCancelled()) response.cancel(false); });
+                response.whenComplete((value, failure) -> {
+                    try {
+                        result.complete(failure == null ? responseResult(descriptor, request, value)
+                                : failureResult(descriptor, request, unwrap(failure)));
+                    } catch (RuntimeException ex) {
+                        result.complete(failureResult(descriptor, request, ex));
+                    }
+                });
+                return result;
             } catch (RuntimeException ex) {
                 return CompletableFuture.completedFuture(failureResult(descriptor, request, ex));
             }

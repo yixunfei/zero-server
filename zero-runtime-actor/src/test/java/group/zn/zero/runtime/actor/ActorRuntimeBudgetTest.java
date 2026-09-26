@@ -17,6 +17,15 @@ import org.junit.jupiter.api.Test;
 
 /** 默认组合根必须装配预算并在执行器关闭前失败通知队列。 @author zn */
 class ActorRuntimeBudgetTest {
+    /** 创建后未启动也必须履行调度器关闭责任。 */
+    @Test void closeBeforeStartClosesActorAdmission() {
+        var runtime = RuntimeBasics.builder(new MapZeroConfig(Map.of())).install(ActorRuntime.module()).build();
+        var scheduler = (ExecutorActorScheduler) runtime.require(ActorRuntime.ACTOR_SCHEDULER);
+        scheduler.register(String.class, (context, message) -> CompletableFuture.completedFuture(null));
+        runtime.close();
+        assertCode(ActorErrorCode.SCHEDULER_CLOSED, scheduler.dispatch(
+                new ActorMessage(LaneKey.custom("before-start"), "payload")).toCompletableFuture());
+    }
     @Test void runtimeOwnsConfiguredSchedulerAndClosesAdmission() {
         var runtime = RuntimeBasics.builder(new MapZeroConfig(Map.of()))
                 .install(ActorRuntime.module(new ActorSchedulerConfig(2, 2, 1))).build();

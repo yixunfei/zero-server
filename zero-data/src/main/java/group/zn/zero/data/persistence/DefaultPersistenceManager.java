@@ -209,8 +209,8 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             if (stopping) {
                 throw ZeroException.of(DataErrorCode.PERSISTENCE_FLUSH_FAILED, "persistence is stopping", null);
             }
-            dirtyEntries.put(key, new DirtyEntry<>(key, currentTargetName, id, binding, snapshotSupplier));
-            dirtyMarkCount.incrementAndGet();
+            dirtyEntries.put(key, new DirtyEntry<>(key, currentTargetName, id, binding, snapshotSupplier,
+                    dirtyMarkCount.incrementAndGet()));
         }
     }
 
@@ -450,7 +450,7 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             String targetName,
             ID id,
             DataThreadBinding binding,
-            Supplier<T> snapshotSupplier) {
+            Supplier<T> snapshotSupplier, long generation) {
     }
 
     /**

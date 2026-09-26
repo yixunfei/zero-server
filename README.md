@@ -39,7 +39,7 @@ java scripts/NewLocalGame.java --template runtime --components event,actor --pro
 mvn -q -f target/my-runtime/pom.xml clean test exec:java
 ```
 
-环境切换、真实 TCP、中心—逻辑和外部 Adapter 的完整步骤见[快速上手](docs/quickstart.zh-CN.md)。默认示例执行一次验证流程；`local + net` 已有 Server 模板，但当前生成工程存在装配编译限制，详见快速上手。
+环境切换、真实 TCP、中心—逻辑和外部 Adapter 的完整步骤见[快速上手](docs/quickstart.zh-CN.md)。默认示例执行一次验证流程；`local + net` 可生成 Server 与客户端辅助类，支持本地 TCP 回显验收，真实鉴权与生产安全策略仍需应用显式接入。
 
 ## 文档
 

@@ -123,6 +123,8 @@ public final class CacheLoadCoordinator<K, V> {
             return previous;
         }
         AtomicBoolean permitReleased = new AtomicBoolean();
+        java.util.concurrent.atomic.AtomicReference<CompletionStage<Optional<V>>> loadedStage =
+                new java.util.concurrent.atomic.AtomicReference<>();
         CompletableFuture<Optional<V>> boundedLoad = new CompletableFuture<>();
         created.whenComplete((ignored, ignoredFailure) -> {
             if (created.isCancelled()) {
@@ -134,11 +136,18 @@ public final class CacheLoadCoordinator<K, V> {
         boundedLoad.orTimeout(loadTimeout.toNanos(), TimeUnit.NANOSECONDS)
                 .thenCompose(value -> created.isCancelled()
                         ? CompletableFuture.<Optional<V>>failedFuture(new java.util.concurrent.CancellationException())
-                        : onLoaded.apply(Objects.requireNonNull(value, "loader value")))
+                        : captureLoadedStage(loadedStage, onLoaded,
+                                Objects.requireNonNull(value, "loader value")))
                 .orTimeout(loadTimeout.toNanos(), TimeUnit.NANOSECONDS)
                 .whenComplete((value, failure) -> {
                     loading.remove(currentKey, created);
                     releasePermit(permitReleased);
+                    if (failure != null) {
+                        CompletionStage<Optional<V>> inFlight = loadedStage.get();
+                        if (inFlight != null) {
+                            inFlight.toCompletableFuture().cancel(true);
+                        }
+                    }
                     if (failure == null) {
                         created.complete(value);
                     } else {
@@ -158,6 +167,16 @@ public final class CacheLoadCoordinator<K, V> {
             boundedLoad.completeExceptionally(ex);
         }
         return created;
+    }
+
+    /** 记录回填阶段，使超时或取消时可以尽力取消可取消的后端操作。 */
+    private CompletionStage<Optional<V>> captureLoadedStage(
+            final java.util.concurrent.atomic.AtomicReference<CompletionStage<Optional<V>>> target,
+            final Function<Optional<V>, CompletionStage<Optional<V>>> onLoaded,
+            final Optional<V> value) {
+        CompletionStage<Optional<V>> stage = Objects.requireNonNull(onLoaded.apply(value), "onLoaded result");
+        target.set(stage);
+        return stage;
     }
 
     private void releasePermit(final AtomicBoolean permitReleased) {

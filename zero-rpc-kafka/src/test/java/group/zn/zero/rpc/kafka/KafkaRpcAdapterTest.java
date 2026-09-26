@@ -53,6 +53,39 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class KafkaRpcAdapterTest {
+    /** 编码在登记后同步失败必须释放唯一 pending 容量。 */
+    @Test void synchronousEncodingFailureReleasesPending() {
+        try (var caller = new KafkaRpcAdapter(settings("caller", "reply", 1), new HoldingKafkaRpcMessageGateway())) {
+            RpcRequest oversized = new RpcRequest("large", "reply", "svc", "method", "trace",
+                    Instant.now().plusSeconds(30), RpcMode.REQUEST_RESPONSE, new byte[17 * 1024 * 1024]);
+            var failed = caller.request(oversized).toCompletableFuture();
+            assertTrue(failed.isDone());
+            assertThrows(CompletionException.class, failed::join);
+            var next = caller.request(new RpcRequest("next", "reply", "svc", "method", "trace",
+                    Instant.now().plusSeconds(30), RpcMode.REQUEST_RESPONSE, new byte[0])).toCompletableFuture();
+            assertFalse(next.isDone());
+            next.cancel(false);
+        }
+    }
+
+    /** 异步认证期间关闭 adapter 后不能再调用业务处理器。 */
+    @Test void closedAdapterDoesNotDispatchLateAuthentication() {
+        var gateway = new InMemoryKafkaRpcMessageGateway();
+        var provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway);
+        var verified = new CompletableFuture<SecurityContext>();
+        var calls = new AtomicInteger();
+        provider.securityMetadataVerifier((metadata, now) -> verified);
+        provider.register("svc", "method", request -> {
+            calls.incrementAndGet();
+            return CompletableFuture.completedFuture(new RpcResponse(request.correlationId(), request.traceId(),
+                    SystemErrorCode.OK, "ok", new byte[0]));
+        });
+        gateway.emitRequest(new KafkaRpcEnvelopeCodec().encodeRequest(requestWith(
+                SecurityMetadataAssertion.signed(context(), "late", ASSERTION), "late")));
+        provider.close();
+        verified.complete(context());
+        assertEquals(0, calls.get());
+    }
     /** 本地测试签名器，不用于生产。 */
     private static final SecurityMetadataAssertion ASSERTION = SecurityMetadataAssertion.digest(new byte[] {1, 2, 3});
 

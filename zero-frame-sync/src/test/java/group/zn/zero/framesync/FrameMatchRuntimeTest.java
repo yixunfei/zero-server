@@ -9,6 +9,35 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class FrameMatchRuntimeTest {
+    /** 通知失败不能再次执行已经成功的模拟。 */
+    @Test void notificationFailureDoesNotReplayCommittedSimulation() {
+        for (boolean failEvent : new boolean[]{true, false}) {
+            List<Long> simulated = new ArrayList<>();
+            AtomicBoolean fail = new AtomicBoolean(true);
+            FrameMatchRuntime runtime = new FrameMatchRuntime("notify", FrameMatchConfig.defaults(),
+                    (frame, batch) -> simulated.add(frame),
+                    event -> { if (failEvent && fail.getAndSet(false)) throw new IllegalStateException("event"); },
+                    event -> { if (!failEvent && fail.getAndSet(false)) throw new IllegalStateException("broadcast"); });
+            assertThrows(CompletionException.class, () -> runtime.tick().toCompletableFuture().join());
+            assertEquals(1, runtime.frameNo());
+            runtime.tick().toCompletableFuture().join();
+            assertEquals(List.of(1L, 2L), simulated);
+        }
+    }
+
+    /** 有限历史淘汰不能驱逐仍未消费的输入身份。 */
+    @Test void pendingSequenceSurvivesHistoryEviction() {
+        List<Long> simulated = new ArrayList<>();
+        FrameMatchRuntime runtime = new FrameMatchRuntime("dedupe",
+                new FrameMatchConfig(InputTimingPolicy.REJECT, MissingInputPolicy.EMPTY, 8, 2),
+                (frame, batch) -> batch.inputs().forEach(input -> simulated.add(input.inputSeq())), event -> { }, event -> { });
+        for (long[] pair : new long[][]{{1, 1}, {2, 2}, {3, 2}, {1, 2}}) {
+            runtime.submit(new FrameInput("u", pair[0], pair[1], 0, new byte[]{1}, "t")).toCompletableFuture().join();
+        }
+        runtime.tick().toCompletableFuture().join();
+        runtime.tick().toCompletableFuture().join();
+        assertEquals(List.of(1L, 3L), simulated);
+    }
     @Test void frameClockAndOrderingAreAuthoritative() {
         List<FrameCommitted> committed = new ArrayList<>();
         FrameMatchRuntime runtime = new FrameMatchRuntime("m", FrameMatchConfig.defaults(), (f, b) -> {}, committed::add, committed::add);

@@ -119,8 +119,14 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
                 scheduler.register(LoadPlayerCommand.class, ActorHandler.sync((context, message) -> {
                     LoadPlayerCommand command = (LoadPlayerCommand) message.payload();
                     PlayerProfile profile = command.profile();
-                    players.put(profile.uid(), profile);
-                    command.result().complete(profile);
+                    if (profile.uid() != command.request().uid()) {
+                        throw group.zn.zero.core.error.ZeroException.of(
+                                group.zn.zero.data.error.DataErrorCode.INVALID_ENTITY, "player snapshot uid mismatch", null);
+                    }
+                    PlayerProfile existing = players.get(profile.uid());
+                    PlayerProfile selected = existing != null && existing.version() >= profile.version() ? existing : profile;
+                    players.put(profile.uid(), selected);
+                    command.result().complete(selected);
                 })),
                 scheduler.register(QueryPlayerCommand.class, ActorHandler.sync((context, message) -> {
                     QueryPlayerCommand command = (QueryPlayerCommand) message.payload();
@@ -186,10 +192,14 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
                 result.completeExceptionally(ex);
                 return;
             }
-            linkDispatch(actorGateway.dispatch(
-                    GameRequestContext.client(request.traceId()),
-                    LaneKey.player(Long.toString(request.uid())),
-                    new LoadPlayerCommand(request, profile, result)), result);
+            try {
+                linkDispatch(actorGateway.dispatch(
+                        GameRequestContext.client(request.traceId()),
+                        LaneKey.player(Long.toString(request.uid())),
+                        new LoadPlayerCommand(request, profile, result)), result);
+            } catch (RuntimeException failure) {
+                result.completeExceptionally(failure);
+            }
         });
         return result;
     }

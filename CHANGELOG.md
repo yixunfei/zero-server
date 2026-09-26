@@ -6,10 +6,25 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 2026-09-26 线程、缓存与分布式一致性专项审查
+
+- 修复 Actor lane 调度、运行时清理、事件完成、帧推进、网络生命周期和 World/Player/Room/NPC 状态边界中的可复现并发缺陷；异步完成、取消、关闭和旧版本状态不会再遗留不可回收队列或覆盖新状态。
+- 修复分层缓存迟到回填复活已失效条目、加载 action stage 未传播取消、版本化失效与突变并发覆盖问题；新增 key 代际和确定性竞态回归测试。
+- 修复 Redis 条件写/删除、驱动 envelope、持久化失败审计以及单实例外部验证路径；Redis 外部测试使用专用本地实例并保持失败显式。
+- 修复 RPC 调用方取消未终止 transport response、pending request 清理、服务发现轮询和 Kafka/Nacos 外部 Actor 测试认证边界；默认外部组件仍 fail-closed。
+- 修复 Production runtime 资源登记、关闭和外部 Adapter 失败回收路径，保持显式 provider 选择及失败不回退语义。
+- 完整验证、迁移步骤和剩余风险见[线程、缓存与分布式一致性专项迁移说明](docs/migrations/20260926-concurrency-distributed-audit-20260926.md)及[审查报告](docs/reports/concurrency-distributed-audit-20260926.zh-CN.md)。
+
+### 2026-09-26 质量基线与 Production 装配修复
+
+- 恢复 Production Starter 的显式 Adapter 选择，修复全局禁止 LOCAL 连唯一的持久化管理器也拒绝、导致默认及混合装配失败的回归。未启用的 Adapter 可使用本地组件；显式启用的外部组件仍必须通过配置、创建和启动健康检查，失败不得回退。
+- 补充外部组件缺健康声明、创建失败、启动健康失败的无回退及资源回收验证，默认 Starter 测试覆盖实际启动。
+- 校正 README 中已过期的 net 生成编译限制，并注明历史审计候选及 production 策略的后续纠正。验证、迁移和剩余边界见[迁移说明](docs/migrations/20260926-quality-baseline.md)。
+
 ### 2026-09-24 代码审计核实与边界修复
 
 - 修复 Redis 条件写跨槽脚本和失败本地 journal 误记录；world 状态、房间事件回滚、缓存失效和帧推进改为失败可重试的提交顺序。
-- GM 审批默认 fail-closed，REST 幂等键贯通请求，失败幂等状态终止重试；production runtime 禁止 data/cache/RPC 的隐式 LOCAL provider。
+- GM 审批默认 fail-closed，REST 幂等键贯通请求，失败幂等状态终止重试；本次 production 全局禁止 data/cache/RPC 的 LOCAL provider 策略已在 9 月 26 日纠正，见上方记录。
 - 修复同步 RPC 本地超时取消、TLS 握手启动时序、完整帧 replay 摘要、UDP 帧长边界、HTTP 重复头覆盖、状态同步同版本回退、IP 字面量解析、稳定 UID 和场景进入/移动契约。
 - NPC 重复 spawn 与 tick 旧快照覆盖被拒绝；重连时间回绕被阻止。报告误报和未改动设计边界记录于[迁移说明](docs/migrations/20260924-code-audit-20260924.md)及任务验证记录。
 

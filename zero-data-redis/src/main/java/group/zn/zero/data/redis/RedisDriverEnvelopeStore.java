@@ -205,6 +205,9 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
         RedisDataJournalEntry entry = RedisDataJournalEntry.put(current, envelopeCodec);
         try {
             RedisDataSnapshot snapshot = RedisDataSnapshot.fromEnvelope(current, keyStrategy, envelopeCodec);
+            // 先登记保守桶目录；目录失败不得发生在对象 CAS 已提交之后。
+            // CAS 拒绝可能留下空桶目录，扫描空桶不产生对象，也不破坏同槽原子写。
+            client.sadd(collectionIndexKey(), snapshot.indexKey());
             Object result = client.eval(
                     SAVE_IF_VERSION_SCRIPT,
                     List.of(
@@ -219,9 +222,6 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
                             bytes(snapshot.id()),
                             journalEntryCodec.encode(entry)));
             boolean saved = result instanceof Number number && number.longValue() == 1L;
-            if (saved) {
-                client.sadd(collectionIndexKey(), snapshot.indexKey());
-            }
             return saved;
         } catch (RuntimeException ex) {
             throw ZeroException.of(DataErrorCode.WRITE_FAILED, "redis conditional write failed", ex);

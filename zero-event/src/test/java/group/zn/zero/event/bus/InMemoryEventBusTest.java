@@ -77,7 +77,7 @@ class InMemoryEventBusTest {
         try {
             eventBus.publish(event()).toCompletableFuture().join();
         } catch (CompletionException ex) {
-            assertEquals(failure, ex.getCause());
+            assertEquals(failure, ex.getCause().getCause());
         }
 
         assertEquals(1, deadLetterSink.deadLetters().size());
@@ -102,7 +102,7 @@ class InMemoryEventBusTest {
         try {
             eventBus.publish(event()).toCompletableFuture().join();
         } catch (CompletionException ex) {
-            assertEquals(failure, ex.getCause());
+            assertEquals(failure, ex.getCause().getCause());
             assertEquals(sinkFailure, ex.getCause().getSuppressed()[0]);
         }
     }

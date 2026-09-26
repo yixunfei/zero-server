@@ -33,6 +33,8 @@ public final class FrameMatchRuntime implements AutoCloseable {
     private final Map<String, FrameInput> lastInputs = new HashMap<>();
     /** 有界的近期已接受输入窗口，仅在对局 lane 修改。 */
     private final LinkedHashSet<InputSequence> seenSequences = new LinkedHashSet<>();
+    /** 尚未消费的输入身份不能因近期历史淘汰而失去幂等保护。 */
+    private final java.util.Set<InputSequence> pendingSequences = new java.util.HashSet<>();
     /** 跨线程可读帧号；递增仍仅由对局 lane 执行。 */
     private final java.util.concurrent.atomic.AtomicLong frameNo = new java.util.concurrent.atomic.AtomicLong();
     private int buffered;
@@ -87,7 +89,7 @@ public final class FrameMatchRuntime implements AutoCloseable {
         Objects.requireNonNull(input, "input");
         if (input.payloadLength() > maxPayloadBytes) throw new IllegalArgumentException("payload exceeds capacity");
         InputSequence sequenceKey = new InputSequence(input.uid(), input.inputSeq());
-        if (seenSequences.contains(sequenceKey)) return;
+        if (seenSequences.contains(sequenceKey) || pendingSequences.contains(sequenceKey)) return;
         if (input.targetFrame() <= frameNo.get()) {
             if (timingPolicy == InputTimingPolicy.REJECT) throw new IllegalArgumentException("late input");
             if (timingPolicy == InputTimingPolicy.MARK) {
@@ -103,7 +105,9 @@ public final class FrameMatchRuntime implements AutoCloseable {
         }
         boolean replacement = playerInputs != null && playerInputs.containsKey(input.targetFrame());
         if (!replacement && buffered >= maxBufferedInputs) throw new IllegalStateException("input buffer capacity exceeded");
-        pending.computeIfAbsent(input.uid(), ignored -> new HashMap<>()).put(input.targetFrame(), input);
+        FrameInput replaced = pending.computeIfAbsent(input.uid(), ignored -> new HashMap<>()).put(input.targetFrame(), input);
+        if (replaced != null) pendingSequences.remove(new InputSequence(replaced.uid(), replaced.inputSeq()));
+        pendingSequences.add(sequenceKey);
         if (!replacement) buffered++;
         remember(sequenceKey);
     }
@@ -133,20 +137,12 @@ public final class FrameMatchRuntime implements AutoCloseable {
             }
         }
         FrameInputBatch batch = new FrameInputBatch(currentFrame, inputs);
-        try {
-            simulation.advance(currentFrame, batch);
-            FrameCommitted committed = new FrameCommitted(matchId, currentFrame, batch,
-                    inputs.isEmpty() ? "" : inputs.getFirst().traceId());
-            events.publish(committed);
-            broadcaster.broadcast(committed);
-        } catch (RuntimeException failure) {
-            consumed.forEach(input -> seenSequences.remove(new InputSequence(input.uid(), input.inputSeq())));
-            throw failure;
-        }
+        simulation.advance(currentFrame, batch);
 
         for (FrameInput input : consumed) {
             Map<Long, FrameInput> playerInputs = pending.get(input.uid());
             if (playerInputs != null && playerInputs.remove(currentFrame) != null) {
+                pendingSequences.remove(new InputSequence(input.uid(), input.inputSeq()));
                 buffered--;
                 if (playerInputs.isEmpty() && missingPolicy == MissingInputPolicy.EMPTY) {
                     pending.remove(input.uid());
@@ -160,6 +156,10 @@ public final class FrameMatchRuntime implements AutoCloseable {
             lastInputs.clear();
             lastInputs.putAll(nextLastInputs);
         }
+        FrameCommitted committed = new FrameCommitted(matchId, currentFrame, batch,
+                inputs.isEmpty() ? "" : inputs.getFirst().traceId());
+        events.publish(committed);
+        broadcaster.broadcast(committed);
     }
 
     @Override public void close() { closed.set(true); }

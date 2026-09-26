@@ -43,6 +43,30 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class ProductionNetworkLifecycleFocusedTest {
+    /** 异步 replay 完成时必须复核原鉴权代际，不能以替换或过期主体执行。 */
+    @Test void replayCompletionRejectsChangedIdentity() {
+        for (boolean expired : new boolean[]{true, false}) {
+            java.time.Instant now = java.time.Instant.now();
+            var identity = new group.zn.zero.security.SecurityContext("alice", now, now.plusSeconds(60),
+                    "tcp", "peer", "trusted", "trace", "session", java.util.Set.of("network.request"), java.util.Map.of());
+            var replay = new CompletableFuture<group.zn.zero.security.ReplayProtection.ReplayDecision>();
+            var chain = new group.zn.zero.security.SecurityChain(request -> CompletableFuture.completedFuture(
+                    group.zn.zero.security.AuthenticationProvider.AuthenticationResult.accepted(identity)), request -> replay, null, false);
+            var policy = new group.zn.zero.net.lifecycle.SecurityNetworkPolicy(acceptingPolicy(), chain);
+            try (Fixture fixture = new Fixture(fastConfig(), policy, NetworkRateLimiter.permitAll(), Runnable::run)) {
+                fixture.write(frame(1, 1, "handshake"));
+                assertTrue(fixture.listenerOpened.get());
+                fixture.write(frame(2, 1, "business"));
+                var replacement = new group.zn.zero.security.SecurityContext(expired ? "alice" : "bob",
+                        now.minusSeconds(120), expired ? now.minusSeconds(1) : now.plusSeconds(60),
+                        "tcp", "peer", "trusted", "trace", "session", java.util.Set.of("network.request"), java.util.Map.of());
+                fixture.connection.get().attributes().put(ProductionNetworkConnectionAttributes.SECURITY_CONTEXT, replacement);
+                replay.complete(group.zn.zero.security.ReplayProtection.ReplayDecision.ACCEPTED);
+                fixture.runPending();
+                assertEquals(0, fixture.businessCalls.get());
+            }
+        }
+    }
 
     /**
      * PNFT-01：验证握手超时会拒绝并关闭连接，且不会打开业务 listener。

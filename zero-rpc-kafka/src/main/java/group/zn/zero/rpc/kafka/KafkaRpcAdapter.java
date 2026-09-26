@@ -259,12 +259,16 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
         if (responseFuture.isDone()) {
             return responseFuture;
         }
-        sendRequest(current).whenComplete((ignored, throwable) -> {
+        CompletionStage<Void> sent;
+        try { sent = sendRequest(current); }
+        catch (RuntimeException failure) { sent = CompletableFuture.failedFuture(failure); }
+        sent.whenComplete((ignored, throwable) -> {
             if (throwable != null) {
                 observe(RpcTransportEventType.SEND_FAILED, current, topicResolver.requestTopic(current),
                         current.group(), RpcErrorCode.TRANSPORT_UNAVAILABLE, "send kafka rpc request failed");
                 pendingRequests.fail(
                         current.correlationId(),
+                        responseFuture,
                         RpcErrorCode.TRANSPORT_UNAVAILABLE,
                         "send kafka rpc request failed",
                         unwrap(throwable));
@@ -450,7 +454,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
         RpcRequest request = envelope.request();
         observe(RpcTransportEventType.REQUEST_RECEIVED, request, message.topic(), request.group(),
                 null, "kafka rpc request received");
-        if (request.timeoutAt().isBefore(Instant.now())) {
+        if (!request.timeoutAt().isAfter(Instant.now())) {
             observe(RpcTransportEventType.REQUEST_REJECTED, request, message.topic(), request.group(),
                     RpcErrorCode.REQUEST_TIMEOUT, "kafka rpc request already timed out");
             return reject(request, RpcErrorCode.REQUEST_TIMEOUT, "rpc request already timed out");
@@ -477,6 +481,13 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
         }
         return verified.handle((securityContext, failure) -> failure == null ? securityContext : null)
                 .thenCompose(securityContext -> {
+            if (closed.get()) {
+                return CompletableFuture.failedFuture(ZeroException.of(RpcErrorCode.TRANSPORT_UNAVAILABLE,
+                        "kafka rpc adapter closed during authentication", null));
+            }
+            if (!request.timeoutAt().isAfter(Instant.now())) {
+                return reject(request, RpcErrorCode.REQUEST_TIMEOUT, "rpc request expired during authentication");
+            }
             if (securityContext == null || securityContext.expired(Instant.now())) {
                 return reject(request, RpcErrorCode.INVALID_REQUEST, "rpc security metadata rejected");
             }

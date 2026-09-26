@@ -213,10 +213,13 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
             long waited = Math.max(0, System.nanoTime() - envelope.queuedAt());
             queueWait.add(waited);
             maxQueueWait.accumulate(waited);
-            CompletableFuture<Void> future = handle(envelope);
-            if (future.isDone()) {
-                completeEnvelope(envelope, future, stripe, laneQueue);
-            } else if (awaitCompletion(envelope, future, laneKey, stripe, laneQueue)) {
+            CompletionStage<Void> stage = handle(envelope);
+            if (stage.getClass() == CompletableFuture.class && ((CompletableFuture<?>) stage).isDone()) {
+                Throwable failure = null;
+                try { ((CompletableFuture<?>) stage).join(); }
+                catch (RuntimeException ex) { failure = ex; }
+                completeEnvelope(envelope, failure, stripe, laneQueue);
+            } else if (awaitCompletion(envelope, stage, laneKey, stripe, laneQueue)) {
                 return;
             }
         }
@@ -229,41 +232,38 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
         scheduleDrain(laneKey, stripe, laneQueue);
     }
 
-    private boolean awaitCompletion(final Envelope envelope, final CompletableFuture<Void> future,
+    private boolean awaitCompletion(final Envelope envelope, final CompletionStage<Void> stage,
             final LaneKey laneKey, final LaneStripe stripe, final LaneQueue laneQueue) {
         // 0=注册回调中，1=已交出执行权，2=完成。注册期间同步完成则由当前 drain 继续，
         // 避免 direct executor 在 isDone/whenComplete 竞态中不断递归续调并耗尽栈。
         AtomicInteger handoff = new AtomicInteger();
-        future.whenComplete((ignored, ex) -> {
-            completeEnvelope(envelope, future, stripe, laneQueue);
+        AtomicBoolean claimed = new AtomicBoolean();
+        java.util.function.BiConsumer<Void, Throwable> completion = (ignored, ex) -> {
+            if (!claimed.compareAndSet(false, true)) return;
+            completeEnvelope(envelope, ex, stripe, laneQueue);
             if (handoff.getAndSet(2) == 1) scheduleDrain(laneKey, stripe, laneQueue);
-        });
+        };
+        try { stage.whenComplete(completion); }
+        catch (RuntimeException | Error failure) { completion.accept(null, failure); }
         return handoff.compareAndSet(0, 1);
     }
 
-    private CompletableFuture<Void> handle(final Envelope envelope) {
+    private CompletionStage<Void> handle(final Envelope envelope) {
         ActorMessage message = envelope.message();
         try {
-            CompletionStage<Void> stage = Objects.requireNonNull(
+            return Objects.requireNonNull(
                     envelope.handler().handle(ActorContext.from(message), message),
                     "actor handler result");
-            return Objects.requireNonNull(stage.toCompletableFuture(), "actor handler future");
         } catch (RuntimeException | Error ex) {
             return CompletableFuture.failedFuture(asZeroException(ex));
         }
     }
 
-    private void completeEnvelope(final Envelope envelope, final CompletableFuture<Void> future,
+    private void completeEnvelope(final Envelope envelope, final Throwable failure,
             final LaneStripe stripe, final LaneQueue queue) {
         release(stripe, queue);
-        try {
-            future.join();
-            envelope.completion().complete(null);
-        } catch (CompletionException ex) {
-            envelope.completion().completeExceptionally(asZeroException(ex));
-        } catch (RuntimeException ex) {
-            envelope.completion().completeExceptionally(asZeroException(ex));
-        }
+        if (failure == null) envelope.completion().complete(null);
+        else envelope.completion().completeExceptionally(asZeroException(failure));
     }
 
     private void release(final LaneStripe stripe, final LaneQueue queue) {

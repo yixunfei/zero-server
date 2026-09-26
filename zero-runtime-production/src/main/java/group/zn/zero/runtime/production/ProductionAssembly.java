@@ -9,7 +9,6 @@ import group.zn.zero.runtime.assembly.RuntimeModule;
 import group.zn.zero.runtime.assembly.RuntimeProfile;
 import group.zn.zero.runtime.bootstrap.RuntimeBasics;
 import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
-import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
 import group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -185,13 +184,8 @@ public final class ProductionAssembly {
     private RuntimeComposition composition(final Resolved resolved) {
         RuntimeProfile policy = switch (profile) {
             case ZeroProductionRuntimeConfigKeys.MODE_STANDALONE -> RuntimeProfile.standalone();
-            case ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION -> RuntimeProfile.productionByCapabilityId(Set.of(
-                    StandardRuntimeCapabilityModel.PERSISTENCE_MANAGER,
-                    StandardRuntimeCapabilityModel.REPOSITORY_SOURCES,
-                    StandardRuntimeCapabilityModel.REPOSITORIES,
-                    StandardRuntimeCapabilityModel.CACHE_SERVICE,
-                    StandardRuntimeCapabilityModel.RPC_TRANSPORT,
-                    StandardRuntimeCapabilityModel.RPC_HANDLER_REGISTRY));
+            // Adapter 按显式选择启用；production 强制外部启动健康，不隐式要求全部能力外部化。
+            case ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION -> RuntimeProfile.production(Set.of());
             case ZeroProductionRuntimeConfigKeys.MODE_EXTERNAL_TEST -> RuntimeProfile.externalTest();
             default -> throw new IllegalArgumentException("unsupported production runtime profile");
         };

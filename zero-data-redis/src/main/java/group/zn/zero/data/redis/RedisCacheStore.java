@@ -35,7 +35,6 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
     private static final byte[] PUT_SCRIPT = """
             redis.call('PSETEX', KEYS[1], ARGV[2], ARGV[3])
             redis.call('PSETEX', KEYS[2], ARGV[2], ARGV[1])
-            redis.call('SADD', KEYS[3], ARGV[4])
             return 1
             """.getBytes(StandardCharsets.UTF_8);
 
@@ -44,12 +43,11 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
      */
     private static final byte[] PUT_IF_VERSION_SCRIPT = """
             local current = redis.call('GET', KEYS[2])
-            if current and tonumber(current) >= tonumber(ARGV[1]) then
+            if current and (#current > #ARGV[1] or (#current == #ARGV[1] and current >= ARGV[1])) then
               return 0
             end
             redis.call('PSETEX', KEYS[1], ARGV[2], ARGV[3])
             redis.call('PSETEX', KEYS[2], ARGV[2], ARGV[1])
-            redis.call('SADD', KEYS[3], ARGV[4])
             return 1
             """.getBytes(StandardCharsets.UTF_8);
 
@@ -58,7 +56,7 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
      */
     private static final byte[] INVALIDATE_IF_VERSION_SCRIPT = """
             local current = redis.call('GET', KEYS[2])
-            if (not current) or tonumber(current) <= tonumber(ARGV[1]) then
+            if (not current) or #current < #ARGV[1] or (#current == #ARGV[1] and current <= ARGV[1]) then
               redis.call('DEL', KEYS[1])
               redis.call('DEL', KEYS[2])
               return 1
@@ -346,12 +344,11 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
         String valueKey = valueKey(key);
         return client.eval(
                 script,
-                List.of(bytes(valueKey), bytes(versionKey(key)), bytes(keyStrategy.indexKey(namespace, cacheName))),
+                List.of(bytes(valueKey), bytes(versionKey(key))),
                 List.of(
                         bytes(String.valueOf(entry.entityVersion())),
                         bytes(String.valueOf(ttlMillis)),
-                        envelopeCodec.encode(envelope),
-                        bytes(valueKey)));
+                        envelopeCodec.encode(envelope)));
     }
 
     private RedisCacheEnvelope toEnvelope(final CacheStoreEntry<V> entry) {

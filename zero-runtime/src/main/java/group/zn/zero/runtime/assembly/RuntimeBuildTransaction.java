@@ -65,6 +65,7 @@ final class RuntimeBuildTransaction {
             components.add(new BuiltComponent(descriptor.id(), contribution));
             tracker.created(descriptor.id(), elapsed(startedAt), contribution.lifecycle().isPresent());
         } catch (Throwable failure) {
+            BuildResourceLedger.seal(registrar);
             tracker.createFailed(descriptor.id(), elapsed(startedAt));
             rollbackBuild(descriptor.id(), failure, resources, tracker);
         } finally {

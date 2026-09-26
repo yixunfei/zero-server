@@ -6,6 +6,9 @@
 
 | 日期 / 主题 | 适用范围 |
 | --- | --- |
+| [线程、缓存与分布式一致性专项审查（2026-09-26）](20260926-concurrency-distributed-audit-20260926.md) | Actor/事件/运行时并发、分层缓存代际与取消、RPC/Kafka/Nacos/Redis 一致性及 World/Frame/Network 边界修复 |
+| [质量基线与 Production 装配修复（2026-09-26）](20260926-quality-baseline.md) | 恢复显式 Adapter 选择；强制配置与健康校验、失败不回退的边界验证 |
+| [代码审计修复（2026-09-24）](20260924-code-audit-20260924.md) | 既有 GM、网络、数据与游戏域修复；production 禁止 LOCAL 策略已由 9 月 26 日说明纠正 |
 | [公开检出 CI 入口（2026-09-23）](20260923-public-ci-gates.md) | 能力/发布材料严格检查、平台事务依赖构建及 Windows Path 继承 |
 | [依赖升级与候选合并（2026-09-23）](20260923-dependency-upgrades.md) | MongoDB、Netty、Nacos、Jedis 与 Actions 升级；SpotBugs 4.10 拒绝原因及外部测试边界 |
 | [第三轮性能与 IO 资源治理（2026-09-23）](20260923-performance-third.md) | 单帧出站、只读成功 stage、IO 组拥有权与 runtime 可选装配 |

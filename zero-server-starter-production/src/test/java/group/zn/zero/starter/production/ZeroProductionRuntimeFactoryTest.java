@@ -12,6 +12,7 @@ import group.zn.zero.cache.CacheValueCodec;
 import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.core.error.SystemErrorCode;
 import group.zn.zero.core.error.ZeroException;
+import group.zn.zero.core.lifecycle.LifecycleState;
 import group.zn.zero.data.mongo.MongoDataAdapter;
 import group.zn.zero.data.mongo.MongoDriverSettings;
 import group.zn.zero.data.postgresql.PostgresqlDriverSettings;
@@ -237,6 +238,8 @@ class ZeroProductionRuntimeFactoryTest {
                                 ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION)))
                 .build();
         try {
+            runtime.start();
+            assertEquals(LifecycleState.RUNNING, runtime.state());
             assertFalse(runtime.plan().components().stream().anyMatch(component ->
                     component.componentId().value().startsWith("zero.production.")));
             assertEquals(

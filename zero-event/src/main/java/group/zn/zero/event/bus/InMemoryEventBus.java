@@ -191,7 +191,8 @@ public final class InMemoryEventBus implements EventBus {
             }
             Continuation continuation = new Continuation(event, registrations, index + 1, failures,
                     completion == null ? new CompletableFuture<>() : completion);
-            stage.whenComplete(continuation::completed);
+            try { stage.whenComplete(continuation::completed); }
+            catch (RuntimeException | Error failure) { continuation.completed(null, failure); }
             if (continuation.handoff.compareAndSet(0, 1)) return continuation.completion;
             // 注册回调期间已完成：原调用栈迭代处理，防止同步 CompletionStage 引起深层递归。
             failures = continuation.failuresAfterCompletion();
@@ -227,6 +228,8 @@ public final class InMemoryEventBus implements EventBus {
     private final class Continuation {
         /** 0=注册中，1=已交接，2=已完成。 */
         private final AtomicInteger handoff = new AtomicInteger();
+        /** 外部阶段可能完成后仍抛注册异常，只允许一次完成。 */
+        private final java.util.concurrent.atomic.AtomicBoolean claimed = new java.util.concurrent.atomic.AtomicBoolean();
         /** 当前事件。 */
         private final ZeroEvent event;
         /** 本次派发的固定注册快照。 */
@@ -250,6 +253,7 @@ public final class InMemoryEventBus implements EventBus {
         }
 
         private void completed(final Void ignored, final Throwable exception) {
+            if (!claimed.compareAndSet(false, true)) return;
             failure = exception;
             if (handoff.getAndSet(2) == 1) dispatch(event, registrations, next, failuresAfterCompletion(), completion);
         }
@@ -304,7 +308,7 @@ public final class InMemoryEventBus implements EventBus {
             current = current.getCause();
         }
         if (current instanceof ZeroException zeroException) {
-            return zeroException;
+            return ZeroException.of(zeroException.errorCode(), zeroException.getMessage(), zeroException);
         }
         ErrorCode errorCode = SystemErrorCode.SYSTEM_ERROR;
         return ZeroException.of(errorCode, current.getMessage() == null ? errorCode.message() : current.getMessage(), current);

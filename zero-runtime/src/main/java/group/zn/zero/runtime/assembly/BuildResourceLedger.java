@@ -18,21 +18,26 @@ final class BuildResourceLedger {
 
     private final List<Entry> entries = new ArrayList<>();
     private final Map<AutoCloseable, Entry> identities = new IdentityHashMap<>();
+    /** 清理开始后永久封闭登记，失败资源仍允许后续重试关闭。 */
+    private boolean sealed;
 
     synchronized ResourceRegistrar registrar(final ComponentId owner) {
         return new ScopedRegistrar(this, Objects.requireNonNull(owner, "owner"));
     }
 
-    synchronized RuntimeAssemblyException closeAll(final RuntimeAssemblyException original) {
+    /** 由 runtime 生命周期或 build 回滚串行调用，外部关闭不持有台账锁。 */
+    RuntimeAssemblyException closeAll(final RuntimeAssemblyException original) {
+        List<Entry> pending;
+        synchronized (this) {
+            sealed = true;
+            pending = entries.stream().filter(entry -> !entry.closed).toList();
+        }
         RuntimeAssemblyException primary = original;
-        for (int index = entries.size() - 1; index >= 0; index--) {
-            Entry entry = entries.get(index);
-            if (entry.closed) {
-                continue;
-            }
+        for (int index = pending.size() - 1; index >= 0; index--) {
+            Entry entry = pending.get(index);
             try {
                 entry.resource.close();
-                entry.closed = true;
+                synchronized (this) { entry.closed = true; }
             } catch (Throwable failure) {
                 RuntimeAssemblyException safeFailure = RuntimeAssemblyException.failure(
                         RuntimeErrorCode.RUNTIME_RESOURCE_CLOSE_FAILED,
@@ -61,7 +66,7 @@ final class BuildResourceLedger {
             final ComponentId owner,
             final T resource) {
         T checked = Objects.requireNonNull(resource, "resource");
-        if (identities.containsKey(checked)) {
+        if (sealed || identities.containsKey(checked)) {
             throw RuntimeAssemblyException.failure(
                     RuntimeErrorCode.RUNTIME_CONTRIBUTION_INVALID,
                     RuntimeFailurePhase.CREATE,

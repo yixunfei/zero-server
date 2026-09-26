@@ -85,7 +85,7 @@ java scripts/NewLocalGame.java --template local --components net --projectName t
 mvn -q -f target/tcp-demo/pom.xml clean test
 ```
 
-Server 源码定义了 `--port`、`--once` 和关闭流程，客户端类是没有独立 main 的 smoke 辅助类。响应设计仍是请求 DTO 的最小回显。认证、TLS、心跳、限流和断线重连需应用接入，见[网络完整链路](guides/net-full-flow.zh-CN.md)及[本轮核对报告](reports/documentation-audit-20260918.zh-CN.md)。
+Server 源码定义了 `--port`、`--once` 和关闭流程，客户端类是没有独立 main 的 smoke 辅助类。启动 Server 时请单独执行 `exec:java` 并传入启动参数，避免把 `-Dexec.args` 与 `clean test` 合并后误传给构建期协议生成器。响应设计仍是请求 DTO 的最小回显。认证、TLS、心跳、限流和断线重连需应用接入，见[网络完整链路](guides/net-full-flow.zh-CN.md)及[当前本地验收](reports/quality-baseline-20260926.zh-CN.md)。
 
 ## 4. 中心—逻辑服务器
 

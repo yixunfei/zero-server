@@ -50,13 +50,14 @@ public final class ActorRuntime {
         java.util.Objects.requireNonNull(config, "config");
         return List.of(RuntimeProviders.create(ComponentDescriptor.builder(StandardRuntimeCapabilityModel.LOCAL_ACTOR)
                 .provide(ACTOR_SCHEDULER).require(RuntimeBasics.EXECUTORS).kind(ComponentKind.LOCAL).build(), context -> {
-                    var scheduler = new ExecutorActorScheduler(context.require(RuntimeBasics.EXECUTORS).actorExecutor(), config);
+                    var scheduler = context.resources().register(new ExecutorActorScheduler(
+                            context.require(RuntimeBasics.EXECUTORS).actorExecutor(), config));
                     return ComponentContribution.builder().bind(ACTOR_SCHEDULER, scheduler)
                             .lifecycle(new SchedulerLifecycle(scheduler)).build();
                 }));
     }
 
-    /** Runtime component lifecycle wrapper，不把调度器重复登记为外部 AutoCloseable 资源。 @author zn */
+    /** 生命周期停止与创建期资源回滚共享幂等的调度器关闭责任。 @author zn */
     private static final class SchedulerLifecycle implements Lifecycle {
         /** 被管理的调度器。 */
         private final ExecutorActorScheduler scheduler;

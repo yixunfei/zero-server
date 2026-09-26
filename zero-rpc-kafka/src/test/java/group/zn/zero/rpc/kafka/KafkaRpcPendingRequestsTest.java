@@ -28,6 +28,20 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class KafkaRpcPendingRequestsTest {
+    /** 取消立即释放容量，迟到发送失败不能删除复用 ID 的新登记。 */
+    @Test void cancellationAndSendFailureAreRegistrationScoped() {
+        try (KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, Duration.ofMillis(5), 8)) {
+            var old = pending.register(request("same", 30_000));
+            old.cancel(false);
+            assertEquals(0, pending.size());
+            var current = pending.register(request("same", 30_000));
+            assertFalse(current.isDone());
+            assertFalse(pending.fail("same", old, RpcErrorCode.TRANSPORT_UNAVAILABLE, "old send failed", null));
+            assertFalse(current.isDone());
+            assertTrue(pending.complete(response("same")));
+            current.join();
+        }
+    }
 
     /**
      * 验证时间轮超时会失败 pending 请求并释放容量。

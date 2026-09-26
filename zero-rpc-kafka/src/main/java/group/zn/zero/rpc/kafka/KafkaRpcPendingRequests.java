@@ -214,6 +214,9 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
         }
         timeoutWheel.schedule(current.correlationId(), current.timeoutAt(), pending.token());
         registeredCount.incrementAndGet();
+        future.whenComplete((response, failure) -> {
+            if (pendingRequests.remove(current.correlationId(), pending)) finish(pending);
+        });
         observe(RpcTransportEventType.PENDING_REGISTERED, current, null, "pending request registered");
         return future;
     }
@@ -265,6 +268,20 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
                 currentMessage,
                 cause));
         observe(RpcTransportEventType.PENDING_FAILED, correlationId, pending, currentErrorCode, currentMessage);
+        return true;
+    }
+
+    /** 仅失败指定登记的发送；迟到 producer 回调不得删除复用关联 ID 的新请求。 */
+    boolean fail(final String correlationId, final CompletableFuture<RpcResponse> expected,
+            final ErrorCode errorCode, final String message, final Throwable cause) {
+        PendingRequest pending = pendingRequests.get(correlationId);
+        if (pending == null || pending.future() != expected || !pendingRequests.remove(correlationId, pending)) {
+            return false;
+        }
+        finish(pending);
+        failedCount.incrementAndGet();
+        pending.future().completeExceptionally(ZeroException.of(errorCode, message, cause));
+        observe(RpcTransportEventType.PENDING_FAILED, correlationId, pending, errorCode, message);
         return true;
     }
 

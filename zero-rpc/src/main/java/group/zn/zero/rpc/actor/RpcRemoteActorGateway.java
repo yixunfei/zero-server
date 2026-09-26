@@ -10,6 +10,9 @@ import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.rpc.RpcMode;
 import group.zn.zero.rpc.RpcRequest;
 import group.zn.zero.rpc.spi.RpcTransport;
+import group.zn.zero.security.SecurityContextBridge;
+import group.zn.zero.security.SecurityMetadataAssertion;
+import group.zn.zero.security.SecurityMetadataSnapshot;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.concurrent.CompletionStage;
@@ -38,6 +41,8 @@ public final class RpcRemoteActorGateway implements RemoteActorGateway {
      * Actor 消息编解码器。
      */
     private final RpcActorMessageCodec messageCodec;
+    /** 应用持有的跨进程身份签名器；本地无签名模式可为空。 */
+    private final SecurityMetadataAssertion assertion;
 
     /**
      * 创建 RPC 远程 Actor 投递网关。
@@ -47,8 +52,20 @@ public final class RpcRemoteActorGateway implements RemoteActorGateway {
      * @throws NullPointerException 当任一参数为空时抛出。
      */
     public RpcRemoteActorGateway(final RpcTransport transport, final RpcActorMessageCodec messageCodec) {
+        this(transport, messageCodec, null);
+    }
+
+    /**
+     * 创建携带可信安全上下文的远程网关，不创建资源，可跨线程调用。
+     * @param transport 传输；不可为空。
+     * @param messageCodec 消息编码器；不可为空。
+     * @param assertion 应用签名器；为空只适用于不要求认证的本地 transport。
+     */
+    public RpcRemoteActorGateway(final RpcTransport transport, final RpcActorMessageCodec messageCodec,
+            final SecurityMetadataAssertion assertion) {
         this.transport = Objects.requireNonNull(transport, "transport");
         this.messageCodec = Objects.requireNonNull(messageCodec, "messageCodec");
+        this.assertion = assertion;
     }
 
     /**
@@ -85,7 +102,18 @@ public final class RpcRemoteActorGateway implements RemoteActorGateway {
                 currentRoute.requestTopic(),
                 currentRoute.consumerGroup(),
                 currentRoute.partitionKey().isBlank() ? current.laneKey().value() : currentRoute.partitionKey(),
+                securityMetadata(),
                 messageCodec.encode(current));
         return transport.oneway(request);
+    }
+
+    private SecurityMetadataSnapshot securityMetadata() {
+        if (assertion == null) return null;
+        var context = SecurityContextBridge.current().orElse(null);
+        if (context == null || context.expired(Instant.now())) {
+            throw ZeroException.of(group.zn.zero.rpc.error.RpcErrorCode.INVALID_REQUEST,
+                    "remote actor requires a valid security context", null);
+        }
+        return SecurityMetadataAssertion.signed(context, "rpc-actor", assertion);
     }
 }

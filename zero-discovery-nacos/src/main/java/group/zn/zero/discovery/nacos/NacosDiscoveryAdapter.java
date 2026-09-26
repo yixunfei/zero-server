@@ -17,14 +17,15 @@ import group.zn.zero.discovery.ServiceInstance;
 import group.zn.zero.discovery.ServiceQuery;
 import group.zn.zero.discovery.ServiceSubscription;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -75,6 +76,15 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
      * Nacos 命名服务客户端。
      */
     private volatile NamingService namingService;
+
+    /** SDK 回调只排队，生命周期锁释放后再执行用户代码。 */
+    private final ConcurrentLinkedQueue<Runnable> notifications = new ConcurrentLinkedQueue<>();
+
+    /** 通知单消费者标记。 */
+    private final AtomicBoolean drainingNotifications = new AtomicBoolean();
+
+    /** 生命周期锁内正在执行的 SDK 操作深度。 */
+    private volatile int sdkOperationDepth;
 
     /**
      * 创建 Nacos 服务发现适配器。
@@ -143,14 +153,13 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
      */
     @Override
     public void register(final ServiceInstance instance) {
-        ensureAvailable();
         ServiceInstance checked = Objects.requireNonNull(instance, "instance");
-        callWithStartupRetry("register Nacos instance failed: " + checked.serviceName(), () -> {
-            namingService.registerInstance(checked.serviceName(), checked.groupName(), toNacosInstance(checked));
+        withClient(current -> {
+            registerInstance(current, checked);
+            notifySnapshot(ServiceEventType.REGISTERED, checked.serviceName(), checked.groupName(),
+                    List.of(checked.clusterName()), current);
             return null;
         });
-        registeredInstances.put(new InstanceKey(checked.serviceName(), checked.groupName(), checked.instanceId()), checked);
-        notifySnapshot(ServiceEventType.REGISTERED, checked.serviceName(), checked.groupName(), List.of(checked.clusterName()));
     }
 
     /**
@@ -173,21 +182,25 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
      */
     @Override
     public void unregister(final String serviceName, final String groupName, final String instanceId) {
-        ensureAvailable();
         InstanceKey key = new InstanceKey(
                 Objects.requireNonNull(serviceName, "serviceName"),
                 Objects.requireNonNull(groupName, "groupName"),
                 Objects.requireNonNull(instanceId, "instanceId"));
-        ServiceInstance removed = registeredInstances.get(key);
-        if (removed == null) {
-            throw ZeroException.of(DiscoveryErrorCode.INSTANCE_NOT_FOUND, "instance not found: " + instanceId, null);
-        }
-        callWithStartupRetry("deregister Nacos instance failed: " + removed.serviceName(), () -> {
-            namingService.deregisterInstance(removed.serviceName(), removed.groupName(), toNacosInstance(removed));
+        withClient(current -> {
+            ServiceInstance removed = registeredInstances.get(key);
+            if (removed == null) {
+                throw ZeroException.of(DiscoveryErrorCode.INSTANCE_NOT_FOUND,
+                        "instance not found: " + instanceId, null);
+            }
+            callWithStartupRetry("deregister Nacos instance failed: " + removed.serviceName(), () -> {
+                current.deregisterInstance(removed.serviceName(), removed.groupName(), toNacosInstance(removed));
+                return null;
+            });
+            registeredInstances.remove(key, removed);
+            notifySnapshot(ServiceEventType.UNREGISTERED, removed.serviceName(), removed.groupName(),
+                    List.of(removed.clusterName()), current);
             return null;
         });
-        registeredInstances.remove(key);
-        notifySnapshot(ServiceEventType.UNREGISTERED, removed.serviceName(), removed.groupName(), List.of(removed.clusterName()));
     }
 
     /**
@@ -216,31 +229,31 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
             final String groupName,
             final String instanceId,
             final boolean healthy) {
-        ensureAvailable();
         InstanceKey key = new InstanceKey(
                 Objects.requireNonNull(serviceName, "serviceName"),
                 Objects.requireNonNull(groupName, "groupName"),
                 Objects.requireNonNull(instanceId, "instanceId"));
-        ServiceInstance current = registeredInstances.get(key);
-        if (current == null) {
-            throw ZeroException.of(DiscoveryErrorCode.INSTANCE_NOT_FOUND, "instance not found: " + instanceId, null);
-        }
-        ServiceInstance updated = current.withHealthy(healthy);
-        switch (settings.healthUpdateMode()) {
-            case LOCAL_ONLY -> {
-                registeredInstances.put(key, updated);
-                notifySnapshot(ServiceEventType.HEALTH_CHANGED, serviceName, groupName, List.of(updated.clusterName()));
+        withClient(client -> {
+            ServiceInstance current = registeredInstances.get(key);
+            if (current == null) {
+                throw ZeroException.of(DiscoveryErrorCode.INSTANCE_NOT_FOUND,
+                        "instance not found: " + instanceId, null);
             }
-            case REREGISTER -> register(updated);
-            case FAIL_FAST -> throw ZeroException.of(
-                    DiscoveryErrorCode.HEALTH_UPDATE_UNSUPPORTED,
-                    "Nacos health update is disabled by settings",
-                    null);
-            default -> throw ZeroException.of(
-                    DiscoveryErrorCode.HEALTH_UPDATE_UNSUPPORTED,
-                    "unknown health update mode: " + settings.healthUpdateMode(),
-                    null);
-        }
+            ServiceInstance updated = current.withHealthy(healthy);
+            switch (settings.healthUpdateMode()) {
+                case LOCAL_ONLY -> registeredInstances.put(key, updated);
+                case REREGISTER -> registerInstance(client, updated);
+                case FAIL_FAST -> throw ZeroException.of(
+                        DiscoveryErrorCode.HEALTH_UPDATE_UNSUPPORTED,
+                        "Nacos health update is disabled by settings", null);
+                default -> throw ZeroException.of(
+                        DiscoveryErrorCode.HEALTH_UPDATE_UNSUPPORTED,
+                        "unknown health update mode: " + settings.healthUpdateMode(), null);
+            }
+            notifySnapshot(ServiceEventType.HEALTH_CHANGED, serviceName, groupName,
+                    List.of(updated.clusterName()), client);
+            return null;
+        });
     }
 
     /**
@@ -267,23 +280,8 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
      */
     @Override
     public List<ServiceInstance> lookup(final ServiceQuery query) {
-        ensureAvailable();
         ServiceQuery checked = Objects.requireNonNull(query, "query");
-        List<Instance> instances = callWithStartupRetry("lookup Nacos instances failed: " + checked.serviceName(), () -> checked.healthyOnly()
-                    ? namingService.selectInstances(
-                            checked.serviceName(),
-                            checked.groupName(),
-                            checked.clusters(),
-                            true,
-                            checked.subscribe())
-                    : namingService.getAllInstances(
-                            checked.serviceName(),
-                            checked.groupName(),
-                            checked.clusters(),
-                            checked.subscribe()));
-        return instances.stream()
-                .map(instance -> fromNacosInstance(checked.serviceName(), checked.groupName(), instance))
-                .toList();
+        return withClient(current -> lookupFromClient(current, checked));
     }
 
     /**
@@ -305,20 +303,29 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
      */
     @Override
     public ServiceSubscription subscribe(final ServiceQuery query, final ServiceDiscoveryListener listener) {
-        ensureAvailable();
         ServiceQuery checkedQuery = Objects.requireNonNull(query, "query");
         ServiceDiscoveryListener checkedListener = Objects.requireNonNull(listener, "listener");
-        NacosSubscription subscription = new NacosSubscription(checkedQuery, checkedListener);
-        callWithStartupRetry("subscribe Nacos service failed: " + checkedQuery.serviceName(), () -> {
-            namingService.subscribe(
-                    checkedQuery.serviceName(),
-                    checkedQuery.groupName(),
-                    checkedQuery.clusters(),
-                    subscription.eventListener());
-            return null;
+        return withClient(current -> {
+            NacosSubscription subscription = new NacosSubscription(current, checkedQuery, checkedListener);
+            try {
+                callWithStartupRetry("subscribe Nacos service failed: " + checkedQuery.serviceName(), () -> {
+                    current.subscribe(checkedQuery.serviceName(), checkedQuery.groupName(), checkedQuery.clusters(),
+                            subscription.eventListener());
+                    return null;
+                });
+                subscriptions.add(subscription);
+                return subscription;
+            } catch (RuntimeException | Error failure) {
+                subscription.closed.set(true);
+                try {
+                    current.unsubscribe(checkedQuery.serviceName(), checkedQuery.groupName(), checkedQuery.clusters(),
+                            subscription.eventListener());
+                } catch (NacosException | RuntimeException | Error cleanupFailure) {
+                    addSuppressedIfDistinct(failure, cleanupFailure);
+                }
+                throw failure;
+            }
         });
-        subscriptions.add(subscription);
-        return subscription;
     }
 
     /**
@@ -327,7 +334,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
      * @return 不可变、无序、可能为空、线程安全的注册表快照。
      */
     @Override
-    public Map<String, List<ServiceInstance>> snapshot() {
+    public synchronized Map<String, List<ServiceInstance>> snapshot() {
         return Map.copyOf(registeredInstances.values().stream()
                 .collect(Collectors.groupingBy(ServiceInstance::serviceName, Collectors.toUnmodifiableList())));
     }
@@ -361,44 +368,53 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
         if (current == null) {
             return;
         }
-        ZeroException firstFailure = null;
-        for (NacosSubscription subscription : List.copyOf(subscriptions)) {
-            try {
-                subscription.closeWith(current);
-            } catch (ZeroException ex) {
-                firstFailure = appendFailure(firstFailure, ex);
-            } catch (RuntimeException | Error ex) {
-                firstFailure = appendFailure(
-                        firstFailure,
-                        cleanupError("unsubscribe Nacos service during stop failed", ex));
-            }
-        }
-        for (ServiceInstance instance : List.copyOf(registeredInstances.values())) {
-            try {
-                current.deregisterInstance(instance.serviceName(), instance.groupName(), toNacosInstance(instance));
-            } catch (NacosException ex) {
-                firstFailure = appendFailure(
-                        firstFailure,
-                        nacosError("deregister Nacos instance during stop failed: " + instance.serviceName(), ex));
-            } catch (RuntimeException | Error ex) {
-                firstFailure = appendFailure(
-                        firstFailure,
-                        cleanupError("deregister Nacos instance during stop failed: " + instance.serviceName(), ex));
-            }
-        }
-        registeredInstances.clear();
+        sdkOperationDepth++;
         try {
-            current.shutDown();
-        } catch (NacosException ex) {
-            firstFailure = appendFailure(firstFailure, nacosError("shutdown Nacos naming service failed", ex));
-        } catch (RuntimeException | Error ex) {
-            firstFailure = appendFailure(firstFailure, cleanupError("shutdown Nacos naming service failed", ex));
+            ZeroException firstFailure = null;
+            for (NacosSubscription subscription : List.copyOf(subscriptions)) {
+                try {
+                    subscription.closeWith(current, false);
+                } catch (ZeroException ex) {
+                    firstFailure = appendFailure(firstFailure, ex);
+                } catch (RuntimeException | Error ex) {
+                    firstFailure = appendFailure(
+                            firstFailure,
+                            cleanupError("unsubscribe Nacos service during stop failed", ex));
+                }
+            }
+            for (ServiceInstance instance : List.copyOf(registeredInstances.values())) {
+                try {
+                    current.deregisterInstance(instance.serviceName(), instance.groupName(), toNacosInstance(instance));
+                } catch (NacosException ex) {
+                    firstFailure = appendFailure(
+                            firstFailure,
+                            nacosError("deregister Nacos instance during stop failed: " + instance.serviceName(), ex));
+                } catch (RuntimeException | Error ex) {
+                    firstFailure = appendFailure(
+                            firstFailure,
+                            cleanupError("deregister Nacos instance during stop failed: " + instance.serviceName(), ex));
+                }
+            }
+            registeredInstances.clear();
+            try {
+                current.shutDown();
+            } catch (NacosException ex) {
+                firstFailure = appendFailure(firstFailure, nacosError("shutdown Nacos naming service failed", ex));
+            } catch (RuntimeException | Error ex) {
+                firstFailure = appendFailure(firstFailure, cleanupError("shutdown Nacos naming service failed", ex));
+            } finally {
+                namingService = null;
+                for (NacosSubscription subscription : subscriptions) {
+                    subscription.closed.set(true);
+                }
+                subscriptions.clear();
+                notifications.clear();
+            }
+            if (firstFailure != null) {
+                throw firstFailure;
+            }
         } finally {
-            namingService = null;
-            subscriptions.clear();
-        }
-        if (firstFailure != null) {
-            throw firstFailure;
+            sdkOperationDepth--;
         }
     }
 
@@ -406,6 +422,83 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
         if (!running() || namingService == null) {
             throw ZeroException.of(DiscoveryErrorCode.REGISTRY_UNAVAILABLE, "Nacos registry is unavailable", null);
         }
+    }
+
+    /** 查询固定客户端并应用统一过滤，调用方必须已在线性化事务内。 */
+    private List<ServiceInstance> lookupFromClient(
+            final NamingService current,
+            final ServiceQuery query) {
+        List<Instance> instances = callWithStartupRetry("lookup Nacos instances failed: " + query.serviceName(), () ->
+                query.healthyOnly()
+                        ? current.selectInstances(query.serviceName(), query.groupName(), query.clusters(), true,
+                                query.subscribe())
+                        : current.getAllInstances(query.serviceName(), query.groupName(), query.clusters(),
+                                query.subscribe()));
+        return instances.stream()
+                .map(instance -> fromNacosInstance(query.serviceName(), query.groupName(), instance))
+                .filter(instance -> matchesQuery(query, instance))
+                .toList();
+    }
+
+    /** 在同一生命周期事务内完成远端注册和本地提交。 */
+    private void registerInstance(final NamingService current, final ServiceInstance instance) {
+        callWithStartupRetry("register Nacos instance failed: " + instance.serviceName(), () -> {
+            current.registerInstance(instance.serviceName(), instance.groupName(), toNacosInstance(instance));
+            return null;
+        });
+        registeredInstances.put(new InstanceKey(instance.serviceName(), instance.groupName(), instance.instanceId()), instance);
+    }
+
+    /** 应用服务名、分组、集群和健康过滤。 */
+    private boolean matchesQuery(final ServiceQuery query, final ServiceInstance instance) {
+        return query.serviceName().equals(instance.serviceName())
+                && query.groupName().equals(instance.groupName())
+                && (query.clusters().isEmpty() || query.clusters().contains(instance.clusterName()))
+                && (!query.healthyOnly() || instance.healthy());
+    }
+
+    /** 将一次生命周期操作固定到当前客户端，并在锁外投递通知。 */
+    private <T> T withClient(final Function<NamingService, T> operation) {
+        try {
+            synchronized (this) {
+                ensureAvailable();
+                NamingService current = namingService;
+                sdkOperationDepth++;
+                try {
+                    return operation.apply(current);
+                } finally {
+                    sdkOperationDepth--;
+                }
+            }
+        } finally {
+            drainNotifications();
+        }
+    }
+
+    /** 排队事件；生命周期锁内或 SDK 操作期间不执行用户代码。 */
+    private void enqueueNotification(final Runnable notification) {
+        notifications.add(notification);
+        drainNotifications();
+    }
+
+    /** 单消费者顺序投递通知，监听器重入产生的通知继续排队。 */
+    private void drainNotifications() {
+        if (Thread.holdsLock(this) || sdkOperationDepth != 0) {
+            return;
+        }
+        do {
+            if (!drainingNotifications.compareAndSet(false, true)) {
+                return;
+            }
+            try {
+                Runnable notification;
+                while (sdkOperationDepth == 0 && (notification = notifications.poll()) != null) {
+                    notification.run();
+                }
+            } finally {
+                drainingNotifications.set(false);
+            }
+        } while (sdkOperationDepth == 0 && !notifications.isEmpty());
     }
 
     private Instance toNacosInstance(final ServiceInstance instance) {
@@ -449,12 +542,19 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
             final ServiceEventType type,
             final String serviceName,
             final String groupName,
-            final List<String> clusters) {
+            final List<String> clusters,
+            final NamingService owner) {
         ServiceQuery query = new ServiceQuery(serviceName, groupName, clusters, false, true);
-        ServiceEvent event = new ServiceEvent(type, serviceName, groupName, clusters, lookup(query), Instant.now());
-        for (ServiceDiscoveryListener listener : listeners) {
-            notifyListener(listener, event);
-        }
+        ServiceEvent event = new ServiceEvent(type, serviceName, groupName, clusters,
+                lookupFromClient(owner, query), Instant.now());
+        enqueueNotification(() -> {
+            if (!running() || namingService != owner) {
+                return;
+            }
+            for (ServiceDiscoveryListener listener : listeners) {
+                notifyListener(listener, event);
+            }
+        });
     }
 
     private void notifyListener(final ServiceDiscoveryListener listener, final ServiceEvent event) {
@@ -532,16 +632,6 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
                 null);
     }
 
-    private List<String> clustersFromEvent(final NamingEvent event, final ServiceQuery fallbackQuery) {
-        if (event.getClusters() == null || event.getClusters().isBlank()) {
-            return fallbackQuery.clusters();
-        }
-        return Arrays.stream(event.getClusters().split(","))
-                .map(String::trim)
-                .filter(value -> !value.isBlank())
-                .toList();
-    }
-
     /**
      * Nacos 服务实例索引键。
      *
@@ -571,6 +661,9 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
      */
     private final class NacosSubscription implements ServiceSubscription {
 
+        /** 创建本订阅的客户端，重启后旧句柄不得触碰新客户端。 */
+        private final NamingService ownerClient;
+
         /**
          * 查询条件。
          */
@@ -597,7 +690,11 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
          * @param query 查询条件；不可为空。
          * @param listener 用户监听器；不可为空。
          */
-        private NacosSubscription(final ServiceQuery query, final ServiceDiscoveryListener listener) {
+        private NacosSubscription(
+                final NamingService ownerClient,
+                final ServiceQuery query,
+                final ServiceDiscoveryListener listener) {
+            this.ownerClient = ownerClient;
             this.query = query;
             this.listener = listener;
             this.eventListener = this::onNacosEvent;
@@ -618,28 +715,39 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
          * @param event Nacos 事件；不可为空。
          */
         private void onNacosEvent(final Event event) {
-            if (closed.get() || !(event instanceof NamingEvent namingEvent)) {
+            if (!active() || !(event instanceof NamingEvent namingEvent)) {
                 return;
             }
-            String serviceName = namingEvent.getServiceName() == null ? query.serviceName() : namingEvent.getServiceName();
-            String groupName = namingEvent.getGroupName() == null ? query.groupName() : namingEvent.getGroupName();
-            List<String> clusters = clustersFromEvent(namingEvent, query);
             List<ServiceInstance> instances = namingEvent.getInstances() == null
                     ? List.of()
                     : namingEvent.getInstances().stream()
-                            .map(instance -> fromNacosInstance(serviceName, groupName, instance))
+                            .map(instance -> fromNacosInstance(query.serviceName(), query.groupName(), instance))
+                            .filter(instance -> matchesQuery(query, instance))
                             .toList();
             ServiceEvent serviceEvent = new ServiceEvent(
                     ServiceEventType.SNAPSHOT_CHANGED,
-                    serviceName,
-                    groupName,
-                    clusters,
+                    query.serviceName(),
+                    query.groupName(),
+                    query.clusters(),
                     instances,
                     Instant.now());
-            notifyListener(listener, serviceEvent);
-            for (ServiceDiscoveryListener globalListener : listeners) {
-                notifyListener(globalListener, serviceEvent);
-            }
+            enqueueNotification(() -> {
+                if (!active()) {
+                    return;
+                }
+                notifyListener(listener, serviceEvent);
+                for (ServiceDiscoveryListener globalListener : listeners) {
+                    if (!active()) {
+                        return;
+                    }
+                    notifyListener(globalListener, serviceEvent);
+                }
+            });
+        }
+
+        /** 当前句柄仍属于正在运行的客户端。 */
+        private boolean active() {
+            return !closed.get() && running() && namingService == ownerClient;
         }
 
         /**
@@ -647,13 +755,24 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
          */
         @Override
         public void close() {
-            NamingService current = namingService;
-            if (current == null) {
-                closed.set(true);
-                subscriptions.remove(this);
-                return;
+            try {
+                synchronized (NacosDiscoveryAdapter.this) {
+                    NamingService current = namingService;
+                    if (current != ownerClient || current == null) {
+                        closed.set(true);
+                        subscriptions.remove(this);
+                        return;
+                    }
+                    sdkOperationDepth++;
+                    try {
+                        closeWith(current, true);
+                    } finally {
+                        sdkOperationDepth--;
+                    }
+                }
+            } finally {
+                drainNotifications();
             }
-            closeWith(current);
         }
 
         /**
@@ -661,7 +780,12 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
          *
          * @param current Nacos 命名服务；不可为空。
          */
-        private void closeWith(final NamingService current) {
+        private void closeWith(final NamingService current, final boolean retryOnFailure) {
+            if (current != ownerClient) {
+                closed.set(true);
+                subscriptions.remove(this);
+                return;
+            }
             if (!closed.compareAndSet(false, true)) {
                 return;
             }
@@ -671,7 +795,9 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
                     return null;
                 });
             } catch (RuntimeException | Error ex) {
-                closed.set(false);
+                if (retryOnFailure) {
+                    closed.set(false);
+                }
                 throw ex;
             }
             subscriptions.remove(this);

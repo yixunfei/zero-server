@@ -17,6 +17,19 @@ import org.junit.jupiter.api.Test;
 
 /** 持久化停机、失败保留与单飞回归。 @author zn */
 class PersistenceReportAuditTest {
+    /** 相同 supplier 的再次标脏也是新一代，旧 flush 不得按 record 值相等删除它。 */
+    @Test void sameSupplierDirtyMarkSurvivesOldFlush() {
+        BlockingCapture capture = new BlockingCapture();
+        DefaultPersistenceManager manager = new DefaultPersistenceManager(capture);
+        manager.registerTarget(new PersistenceTarget<>("p", new InMemoryCrudRepository<String, Entity>()));
+        Supplier<Entity> supplier = () -> new Entity("p", 0);
+        manager.markDirty("p", "p", DataThreadBinding.unbound(), supplier);
+        var flush = manager.flushNow();
+        manager.markDirty("p", "p", DataThreadBinding.unbound(), supplier);
+        capture.result.complete(new Entity("p", 0));
+        flush.toCompletableFuture().join();
+        assertEquals(1, manager.statistics().dirtyCount());
+    }
     /** 停机必须保存超过默认批量的全部入口。 */
     @Test void stopDrainsBeyondOneBatch() {
         DefaultPersistenceManager manager = new DefaultPersistenceManager();

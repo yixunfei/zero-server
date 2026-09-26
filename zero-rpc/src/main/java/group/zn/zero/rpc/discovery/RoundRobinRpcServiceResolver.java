@@ -63,12 +63,14 @@ public final class RoundRobinRpcServiceResolver implements RpcServiceResolver {
      */
     public void replaceSnapshot(final RpcServiceSnapshot snapshot) {
         RpcServiceSnapshot current = Objects.requireNonNull(snapshot, "snapshot");
-        List<RpcServiceInstance> copied = new ArrayList<>(instances.get().stream()
+        instances.updateAndGet(previous -> {
+        List<RpcServiceInstance> copied = new ArrayList<>(previous.stream()
                 .filter(instance -> !sameScope(instance, current.query()))
                 .toList());
         copied.addAll(current.instances());
         copied.sort(Comparator.comparing(RpcServiceInstance::instanceId));
-        instances.set(List.copyOf(copied));
+        return List.copyOf(copied);
+        });
     }
 
     /**

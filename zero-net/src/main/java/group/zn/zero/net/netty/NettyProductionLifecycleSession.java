@@ -491,10 +491,11 @@ final class NettyProductionLifecycleSession {
             CompletionStage<ReplayProtection.ReplayDecision> replayStage =
                     securityPolicy.checkReplayAsync(frame, securityContext);
             pendingSecurityChecks++;
+            SecurityContext admittedIdentity = securityContext;
             replayStage.toCompletableFuture()
                     .orTimeout(30L, TimeUnit.SECONDS)
                     .whenComplete((replay, cause) -> executeOnEventLoop(
-                            () -> replayCompleted(frame, replay, cause)));
+                            () -> replayCompleted(frame, admittedIdentity, replay, cause)));
             return false;
         }
         return admitEstablishedFrame(frame);
@@ -502,12 +503,21 @@ final class NettyProductionLifecycleSession {
 
     private void replayCompleted(
             final ProtocolFrame frame,
+            final SecurityContext expectedIdentity,
             final ReplayProtection.ReplayDecision replay,
             final Throwable cause) {
         if (pendingSecurityChecks > 0) {
             pendingSecurityChecks--;
         }
         if (state != ConnectionLifecycleState.ESTABLISHED) {
+            return;
+        }
+        SecurityContext currentIdentity = connection.attributes()
+                .get(ProductionNetworkConnectionAttributes.SECURITY_CONTEXT).orElse(null);
+        if (currentIdentity != expectedIdentity || currentIdentity.expired(Instant.now())
+                || !currentIdentity.allows("network.request")) {
+            reject(ConnectionLifecycleEventType.CONNECTION_REJECTED, NetErrorCode.UNAUTHENTICATED,
+                    ConnectionRejectionReason.UNAUTHENTICATED, NetworkRateLimitScope.FRAME, null);
             return;
         }
         if (cause != null || replay == null || replay != ReplayProtection.ReplayDecision.ACCEPTED) {

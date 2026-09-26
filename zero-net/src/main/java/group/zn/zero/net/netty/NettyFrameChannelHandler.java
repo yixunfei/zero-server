@@ -208,8 +208,10 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
     }
 
     private void submitAcceptedFrame(final ChannelHandlerContext context, final ProtocolFrame frame) {
+        SecurityContext admittedIdentity = connection.attributes()
+                .get(group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes.SECURITY_CONTEXT).orElse(null);
         try {
-            handlerExecutor.execute(() -> invokeHandler(context, frame));
+            handlerExecutor.execute(() -> invokeHandler(context, frame, admittedIdentity));
         } catch (RuntimeException ex) {
             completeProductionFrame(context);
             ZeroException wrapped = ZeroException.of(NetErrorCode.HANDLER_FAILED, "submit net handler failed", ex);
@@ -217,11 +219,14 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
         }
     }
 
-    private void invokeHandler(final ChannelHandlerContext context, final ProtocolFrame frame) {
-        SecurityContext securityContext = connection.attributes()
-                .get(group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes.SECURITY_CONTEXT)
-                .orElse(null);
+    private void invokeHandler(final ChannelHandlerContext context, final ProtocolFrame frame,
+            final SecurityContext securityContext) {
         try {
+            if (securityContext != null && (securityContext.expired(java.time.Instant.now())
+                    || securityContext != connection.attributes()
+                    .get(group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes.SECURITY_CONTEXT).orElse(null))) {
+                throw ZeroException.of(NetErrorCode.UNAUTHENTICATED, "frame authentication changed before execution", null);
+            }
             CompletionStage<List<ProtocolFrame>> stage = securityContext == null
                     ? Objects.requireNonNull(frameHandler.handle(connection, frame), "handlerStage")
                     : SecurityContextBridge.with(securityContext,

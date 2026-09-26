@@ -33,6 +33,8 @@ PAF1 覆盖六个外部 Adapter 槽位；production network 使用同一显式�
 
 全部 Adapter disabled 且 discovery 使用默认 `local` 是合法组合。显式启用任一 Adapter 后，缺配置、非法配置、客户端创建、启动、注册、启动健康或启动预算失败都会阻止启动；不允许静默切换到本地实现，也不进入 degraded 状态。
 
+`production` 表示上述启动校验档位，不会隐式要求同时部署数据库、分布式缓存和 Kafka，也不表示生产就绪。2026-09-26 修复了全局禁止 LOCAL provider 导致完整 Starter 无法装配的回归；需要限制特定关键能力的应用，可在中立装配入口显式使用 `RuntimeProfile.production(criticalCapabilities)` 或 `productionByCapabilityId(...)`，并完整选择满足策略的 provider，不能据此推定全量 Starter 的默认组件图已满足该限制。详见[迁移说明](../migrations/20260926-quality-baseline.md)。
+
 1D 已将 Kafka RPC、MongoDB data、Redis data/cache、PostgreSQL、Nacos discovery/resolver 与 production network 迁移为正式 runtime provider。外部 client 在取得后立即进入中立 build resource ledger；Redis data/cache 共享一个包内资源 handle，且不公开 `RedisClient`。外部 Adapter 各自执行 mandatory startup health；network provider 只组合本地策略、遥测和受管执行器，不声明虚假的外部健康探针。业务统一通过中立 typed capability 访问，不再从 runtime 读取驱动对象。
 
 ## 2. 严格选择器

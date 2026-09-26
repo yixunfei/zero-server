@@ -326,8 +326,8 @@ class ProductionRuntimeAssemblyContractTest {
         assertInstanceOf(
                 RedisDistributedCacheService.class,
                 runtime.require(CacheRuntime.CACHE_SERVICE));
-        // Mongo, shared Redis, Nacos and the PostgreSQL pool, followed by each repository factory.
-        assertEquals(4 + runtime.requireAll(DataRuntime.REPOSITORY_SOURCES).size(), runtime.report().buildResourceCount());
+        // Actor scheduler, Mongo, shared Redis, Nacos and PostgreSQL pool, then repository factories.
+        assertEquals(5 + runtime.requireAll(DataRuntime.REPOSITORY_SOURCES).size(), runtime.report().buildResourceCount());
         assertStartupHealthNotRun(runtime, group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_REDIS_DATA);
         assertStartupHealthNotRun(runtime, group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_REDIS_CACHE);
     }
