@@ -6,6 +6,14 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 2026-09-26 数据安全、缓存与数据库兼容专项审查
+
+- 修复 Redis envelope namespace/collection 中的 hash-tag 花括号注入边界，避免改变 Redis Cluster 的 key slot 语义。
+- 收紧本地数据 journal 路径片段校验，拒绝控制字符、Windows ADS 冒号及非法文件名字符。
+- 仓库注册表改为并发安全的首次注册语义，重复名称显式失败，不再静默替换运行中的仓库实例。
+- 修复内存仓库和 envelope 仓库分页结束位置的整数溢出；不改变 Repository API、信封格式或数据库 schema。
+- 完成 MongoDB、Redis、PostgreSQL 单实例兼容与落库场景审查；性能结论、未覆盖的集群/长稳边界和迁移步骤见[专项迁移说明](docs/migrations/20260926-data-cache-db-audit-20260926.md)及[审查报告](docs/reports/data-cache-db-audit-20260926.zh-CN.md)。
+
 ### 2026-09-26 线程、缓存与分布式一致性专项审查
 
 - 修复 Actor lane 调度、运行时清理、事件完成、帧推进、网络生命周期和 World/Player/Room/NPC 状态边界中的可复现并发缺陷；异步完成、取消、关闭和旧版本状态不会再遗留不可回收队列或覆盖新状态。

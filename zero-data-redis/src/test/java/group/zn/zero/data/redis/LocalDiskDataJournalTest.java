@@ -63,4 +63,14 @@ class LocalDiskDataJournalTest {
         assertThrows(group.zn.zero.core.error.ZeroException.class, () -> journal.readAll("game", "player"));
         assertThrows(group.zn.zero.core.error.ZeroException.class, () -> journal.append(entry));
     }
+
+    /** 路径片段拒绝 Windows ADS、非法文件名字符和控制字符。 */
+    @Test
+    void journalPathShouldRejectUnsafeWindowsSegments() {
+        var journal = new LocalDiskDataJournal(tempDir);
+
+        assertThrows(IllegalArgumentException.class, () -> journal.journalPath("game:logs", "player"));
+        assertThrows(IllegalArgumentException.class, () -> journal.journalPath("game", "player\u0000"));
+        assertThrows(IllegalArgumentException.class, () -> journal.journalPath("game", "player?"));
+    }
 }

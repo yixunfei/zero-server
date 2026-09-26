@@ -196,7 +196,15 @@ public final class LocalDiskDataJournal {
         if (current.isBlank()
                 || current.contains("/")
                 || current.contains("\\")
-                || current.contains("..")) {
+                || current.contains("..")
+                || current.chars().anyMatch(Character::isISOControl)
+                || current.indexOf(':') >= 0
+                || current.indexOf('"') >= 0
+                || current.indexOf('*') >= 0
+                || current.indexOf('?') >= 0
+                || current.indexOf('<') >= 0
+                || current.indexOf('>') >= 0
+                || current.indexOf('|') >= 0) {
             throw new IllegalArgumentException(name + " is not a safe path segment");
         }
         return current;

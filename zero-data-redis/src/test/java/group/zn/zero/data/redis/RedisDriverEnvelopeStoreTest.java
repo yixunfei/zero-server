@@ -50,4 +50,15 @@ class RedisDriverEnvelopeStoreTest {
             assertEquals(0, localJournal.readAll("game", "player").size());
         }
     }
+
+    /** driver 级集合索引 key 不得接受会改变 Redis Cluster hash tag 的命名空间。 */
+    @Test
+    void storeShouldRejectHashTagBracesBeforeConnecting() {
+        try (RedisClient client = RedisClient.create("redis://127.0.0.1:1/0")) {
+            assertThrows(IllegalArgumentException.class, () -> new RedisDriverEnvelopeStore(
+                    "game{tenant}", "player", client, new DefaultRedisDataKeyStrategy(16), null));
+            assertThrows(IllegalArgumentException.class, () -> new RedisDriverEnvelopeStore(
+                    "game", "player}", client, new DefaultRedisDataKeyStrategy(16), null));
+        }
+    }
 }

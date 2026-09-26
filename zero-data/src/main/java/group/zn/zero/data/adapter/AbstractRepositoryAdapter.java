@@ -83,7 +83,11 @@ public abstract class AbstractRepositoryAdapter extends AbstractLifecycle implem
     public <ID, T extends VersionedEntity<ID>> void registerRepository(
             final String name,
             final CrudRepository<ID, T> repository) {
-        repositories.put(Objects.requireNonNull(name, "name"), Objects.requireNonNull(repository, "repository"));
+        String checkedName = Objects.requireNonNull(name, "name");
+        CrudRepository<ID, T> checkedRepository = Objects.requireNonNull(repository, "repository");
+        if (repositories.putIfAbsent(checkedName, checkedRepository) != null) {
+            throw new IllegalArgumentException("repository already registered: " + checkedName);
+        }
     }
 
     /**

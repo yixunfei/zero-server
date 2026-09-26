@@ -1,6 +1,7 @@
 package group.zn.zero.data.repository;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -61,6 +62,22 @@ class InMemoryCrudRepositoryTest {
         assertEquals(3L, page.total());
         assertEquals(2, page.items().size());
         assertTrue(page.nextCursor() != null && !page.nextCursor().isBlank());
+    }
+
+    /** 分页结束位置计算不能因 offset 与 limit 相加溢出而返回非法范围。 */
+    @Test
+    void repositoryShouldHandleLargePageBoundsWithoutIntegerOverflow() {
+        InMemoryCrudRepository<String, TestEntity> repository = new InMemoryCrudRepository<>();
+        repository.save(new TestEntity("player-1", 0, "one")).toCompletableFuture().join();
+
+        PageResult<TestEntity> page = repository.findPage(
+                        new PageRequest(Integer.MAX_VALUE - 1, Integer.MAX_VALUE))
+                .toCompletableFuture()
+                .join();
+
+        assertEquals(0, page.items().size());
+        assertEquals(1L, page.total());
+        assertNull(page.nextCursor());
     }
 
     /**

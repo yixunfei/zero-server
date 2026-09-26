@@ -164,6 +164,14 @@ CacheService / LayeredCacheService
 
 ## 9. 当前实现快照
 
+## 10. 数据库兼容与性能审查边界
+
+2026-09-26 的专项审查确认三类 driver 均通过统一 envelope 和版本条件写边界工作：MongoDB 使用 namespaced collection 与条件 replace，Redis 使用独立 key namespace 和原子脚本，PostgreSQL 使用参数化 SQL、受校验的表名和版本条件 update。真实验证只覆盖本机单实例 MongoDB 7.0、Redis 7.4 和 PostgreSQL 16；不等同于集群故障转移、跨版本兼容、容量或 SLA 证明。
+
+当前落库路径的容量观察项需要纳入后续 benchmark：`ZeroDataEnvelopeCrudRepository` 的同步方法会把数据库 IO 包在 repository monitor 内；`findByIds`、`saveAll` 和 Redis `findAll` 仍是逐对象/逐 key 编排；分页在 envelope repository 中先读取全量再内存切片；PostgreSQL 默认构造非池化 `PGSimpleDataSource` 连接。上述行为保持现有 API 和一致性语义，本轮未猜测性重构；生产装配应由调用方提供连接池、限流和批量策略，并用真实 workload 单独测量。
+
+本轮还修复了分页结束位置的 `int` 加法溢出。超大 `offset + limit` 现在按 `long` 计算后裁剪到结果大小，避免非法 `subList` 范围；正常分页结果和游标格式保持不变。
+
 - `zero-data` 当前提供 `VersionedEntity`、`PageRequest`、`PageResult`、`Repository`、`CrudRepository`、`InMemoryCrudRepository` 和 `AbstractRepositoryAdapter`。
 - `zero-data` 当前提供 `group.zn.zero.data.mapping` 映射基础，包括 `ZeroDataObject`、`ZeroDataId`、`ZeroDataVersion`、`ZeroDataField`、`ZeroDataCompositeKey`、`ZeroDataKeyPart`、`ZeroDataReference`、`ZeroDataReferenceList`、`ZeroDataOwnedCollection`、`ZeroDataEmbedded`、`ZeroDataIgnore`、`ZeroDataKeyCodec`、`DefaultZeroDataKeyCodec`、`ZeroDataKeyGenerator`、`UuidZeroDataKeyGenerator` 和 `ZeroDataMappingIntrospector`。
 - `zero-data` 当前提供 `group.zn.zero.data.envelope` 信封基础，包括 `ZeroDataEnvelope`、`ZeroDataEnvelopeCodec`、`ZeroDataEntityCodec`、`ZeroDataEnvelopeStore` 和 `ZeroDataEnvelopeCrudRepository`；业务对象 payload 通过 `zero-protocol` 的 `ZeroPayloadCodec` / `ZeroWriter` / `ZeroReader` 编码。`ZeroDataEnvelopeStore#saveIfVersion` 是真实后端乐观锁原子写入口，Repository 不再把版本判断停留在先读后写的 Java 层。

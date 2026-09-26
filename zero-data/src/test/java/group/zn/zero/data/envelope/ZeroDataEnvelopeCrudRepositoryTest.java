@@ -1,6 +1,7 @@
 package group.zn.zero.data.envelope;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import group.zn.zero.core.error.ZeroException;
@@ -15,6 +16,8 @@ import group.zn.zero.data.mapping.ZeroDataMappingIntrospector;
 import group.zn.zero.data.mapping.ZeroDataObject;
 import group.zn.zero.data.mapping.ZeroDataObjectMetadata;
 import group.zn.zero.data.mapping.ZeroDataVersion;
+import group.zn.zero.data.model.PageRequest;
+import group.zn.zero.data.model.PageResult;
 import group.zn.zero.data.model.VersionedEntity;
 import group.zn.zero.protocol.buffer.ZeroReader;
 import group.zn.zero.protocol.buffer.ZeroWriter;
@@ -114,6 +117,22 @@ class ZeroDataEnvelopeCrudRepositoryTest {
         assertEquals("generated-id", saved.id());
         assertEquals(1L, saved.version());
         assertEquals("created", saved.name());
+    }
+
+    /** 信封仓库分页结束位置计算不能因整数溢出而产生非法子列表范围。 */
+    @Test
+    void repositoryShouldHandleLargePageBoundsWithoutIntegerOverflow() {
+        ZeroDataEnvelopeCrudRepository<String, PlayerArchive> repository = newRepository(new TestEnvelopeStore());
+        repository.save(new PlayerArchive("p1", 0L, "created")).toCompletableFuture().join();
+
+        PageResult<PlayerArchive> page = repository.findPage(
+                        new PageRequest(Integer.MAX_VALUE - 1, Integer.MAX_VALUE))
+                .toCompletableFuture()
+                .join();
+
+        assertEquals(0, page.items().size());
+        assertEquals(1L, page.total());
+        assertNull(page.nextCursor());
     }
 
     private ZeroDataEnvelopeCrudRepository<String, PlayerArchive> newRepository(final ZeroDataEnvelopeStore store) {

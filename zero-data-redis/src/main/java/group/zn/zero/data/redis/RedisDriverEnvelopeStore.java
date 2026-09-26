@@ -122,8 +122,8 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
             final RedisClient client,
             final RedisDataKeyStrategy keyStrategy,
             final LocalDiskDataJournal localJournal) {
-        this.namespace = requireText(namespace, "namespace");
-        this.collection = requireText(collection, "collection");
+        this.namespace = requireRedisSegment(namespace, "namespace");
+        this.collection = requireRedisSegment(collection, "collection");
         this.client = Objects.requireNonNull(client, "client");
         this.keyStrategy = Objects.requireNonNull(keyStrategy, "keyStrategy");
         this.localJournal = localJournal;
@@ -354,10 +354,13 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
         return value.getBytes(StandardCharsets.UTF_8);
     }
 
-    private String requireText(final String value, final String name) {
+    private String requireRedisSegment(final String value, final String name) {
         String current = Objects.requireNonNull(value, name);
         if (current.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");
+        }
+        if (current.indexOf('{') >= 0 || current.indexOf('}') >= 0) {
+            throw new IllegalArgumentException(name + " must not contain redis hash tag braces");
         }
         return current;
     }

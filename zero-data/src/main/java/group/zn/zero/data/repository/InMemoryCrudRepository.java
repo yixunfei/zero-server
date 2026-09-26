@@ -180,7 +180,7 @@ public final class InMemoryCrudRepository<ID, T extends VersionedEntity<ID>> imp
         PageRequest current = Objects.requireNonNull(request, "request");
         List<T> values = new ArrayList<>(storage.values());
         int fromIndex = Math.min(current.offset(), values.size());
-        int toIndex = Math.min(values.size(), current.offset() + current.limit());
+        int toIndex = (int) Math.min((long) values.size(), (long) current.offset() + current.limit());
         List<T> items = values.subList(fromIndex, toIndex);
         String nextCursor = toIndex < values.size() ? String.valueOf(toIndex) : null;
         return CompletableFuture.completedFuture(new PageResult<>(items, nextCursor, values.size()));

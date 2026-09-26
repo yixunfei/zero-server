@@ -46,6 +46,7 @@ class DefaultRedisDataKeyStrategyTest {
         DefaultRedisDataKeyStrategy strategy = new DefaultRedisDataKeyStrategy();
 
         assertThrows(IllegalArgumentException.class, () -> strategy.dataKey("game", "player", ""));
+        assertThrows(IllegalArgumentException.class, () -> strategy.dataKey("game{tenant}", "player", "1001"));
         assertThrows(IllegalArgumentException.class, () -> strategy.dataKey("game", "{player}", "1001"));
     }
 }

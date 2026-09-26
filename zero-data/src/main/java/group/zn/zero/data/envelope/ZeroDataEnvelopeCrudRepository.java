@@ -225,7 +225,7 @@ public final class ZeroDataEnvelopeCrudRepository<ID, T extends VersionedEntity<
             PageRequest current = Objects.requireNonNull(request, "request");
             List<T> values = decodeAll(store.findAll());
             int fromIndex = Math.min(current.offset(), values.size());
-            int toIndex = Math.min(values.size(), current.offset() + current.limit());
+            int toIndex = (int) Math.min((long) values.size(), (long) current.offset() + current.limit());
             String nextCursor = toIndex < values.size() ? String.valueOf(toIndex) : null;
             return CompletableFuture.completedFuture(
                     new PageResult<>(values.subList(fromIndex, toIndex), nextCursor, values.size()));
