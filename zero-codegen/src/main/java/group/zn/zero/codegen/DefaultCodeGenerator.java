@@ -2,6 +2,7 @@ package group.zn.zero.codegen;
 
 import group.zn.zero.codegen.dsl.ProtocolDslValidator;
 import group.zn.zero.codegen.error.CodegenErrorCode;
+import group.zn.zero.codegen.generator.GeneratedOutputPlan;
 import group.zn.zero.codegen.generator.csharp.CSharpCodegenRenderer;
 import group.zn.zero.codegen.generator.gdscript.GdScriptCodegenRenderer;
 import group.zn.zero.codegen.generator.java.JavaCodegenRenderer;
@@ -49,18 +50,20 @@ public final class DefaultCodeGenerator implements CodeGenerator {
         Objects.requireNonNull(request, "request");
         ProtocolDslValidator.validate(request.document());
         validateLanguages(request);
+        GeneratedOutputPlan outputs = new GeneratedOutputPlan();
         for (CodegenLanguage language : request.languages()) {
             switch (language) {
-                case JAVA -> javaRenderer.render(request);
-                case CSHARP -> csharpRenderer.render(request);
-                case TYPESCRIPT -> typescriptRenderer.render(request);
-                case GDSCRIPT -> gdscriptRenderer.render(request);
+                case JAVA -> javaRenderer.render(request, outputs);
+                case CSHARP -> csharpRenderer.render(request, outputs);
+                case TYPESCRIPT -> typescriptRenderer.render(request, outputs);
+                case GDSCRIPT -> gdscriptRenderer.render(request, outputs);
                 default -> throw ZeroException.of(
                         CodegenErrorCode.UNSUPPORTED_LANGUAGE,
                         "unknown language backend: " + language,
                         null);
             }
         }
+        outputs.apply();
     }
 
     /**

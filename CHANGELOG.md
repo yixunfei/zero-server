@@ -6,6 +6,12 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 2026-09-26 协议生成工具多端升级
+
+- Java、C#、TypeScript、GDScript 生成改为统一渲染与输出预检；跨语言路径冲突、非生成文件和错误目录在写盘前失败，BOImp 与同内容文件继续保留。
+- GUI 的语言专用目录留空时跟随总输出目录，C# 默认命名空间与 CLI 一致；修复 Godot 嵌套 codec 作用域和类型推断错误，须重新生成 GDScript 文件。
+- 增加四端实际编译、运行和固定协议字节向量冒烟测试。线格式未变，步骤与故障边界见[迁移说明](docs/migrations/20260926-codegen-upgrade.md)。
+
 ### 2026-09-26 数据安全、缓存与数据库兼容专项审查
 
 - 修复 Redis 数据与缓存 namespace/collection/cacheName 中的 hash-tag 花括号和冒号分隔边界，避免改变 Redis Cluster 的 key slot 语义或产生跨空间 key 别名。

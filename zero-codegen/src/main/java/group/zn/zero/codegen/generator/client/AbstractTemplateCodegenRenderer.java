@@ -5,7 +5,7 @@ import freemarker.template.Template;
 import freemarker.template.TemplateException;
 import freemarker.template.TemplateExceptionHandler;
 import group.zn.zero.codegen.error.CodegenErrorCode;
-import group.zn.zero.codegen.generator.GeneratedSourceWriter;
+import group.zn.zero.codegen.generator.GeneratedOutputPlan;
 import group.zn.zero.codegen.model.CodegenLanguage;
 import group.zn.zero.codegen.model.CodegenRequest;
 import group.zn.zero.core.error.ZeroException;
@@ -100,9 +100,9 @@ public abstract class AbstractTemplateCodegenRenderer {
      *
      * @param path 输出路径；不可为空。
      * @param content 文件内容；不可为空。
-     * @throws ZeroException 写文件失败时抛出，必须绑定 ErrorCode。
+     * @param outputs 本次生成的输出计划；不可为空。
      */
-    protected void writeGeneratedFile(final Path path, final String content) {
-        GeneratedSourceWriter.writeGenerated(path, content);
+    protected void writeGeneratedFile(final Path path, final String content, final GeneratedOutputPlan outputs) {
+        outputs.addGenerated(path, content);
     }
 }

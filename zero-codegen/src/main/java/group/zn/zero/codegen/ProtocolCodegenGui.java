@@ -111,7 +111,7 @@ public final class ProtocolCodegenGui {
     /**
      * Java 输出目录输入框。
      */
-    private final JTextField javaOutField = new JTextField(DEFAULT_OUTPUT_DIR);
+    private final JTextField javaOutField = new JTextField();
 
     /**
      * Java DTO 生成物输出目录覆盖输入框。
@@ -146,32 +146,32 @@ public final class ProtocolCodegenGui {
     /**
      * C# 输出目录输入框。
      */
-    private final JTextField csharpOutField = new JTextField("target/generated-sources/zero-codegen-csharp");
+    private final JTextField csharpOutField = new JTextField();
 
     /**
      * TypeScript 输出目录输入框。
      */
-    private final JTextField typescriptOutField = new JTextField("target/generated-sources/zero-codegen-typescript");
+    private final JTextField typescriptOutField = new JTextField();
 
     /**
      * GDScript 输出目录输入框。
      */
-    private final JTextField gdscriptOutField = new JTextField("target/generated-sources/zero-codegen-gdscript");
+    private final JTextField gdscriptOutField = new JTextField();
 
     /**
      * C# 命名空间输入框。
      */
-    private final JTextField csharpNamespaceField = new JTextField("Group.Zn.Zero.Generated");
+    private final JTextField csharpNamespaceField = new JTextField();
 
     /**
      * TypeScript 命名空间输入框。
      */
-    private final JTextField typescriptNamespaceField = new JTextField(DEFAULT_PACKAGE);
+    private final JTextField typescriptNamespaceField = new JTextField();
 
     /**
      * GDScript 命名空间输入框。
      */
-    private final JTextField gdscriptNamespaceField = new JTextField(DEFAULT_PACKAGE);
+    private final JTextField gdscriptNamespaceField = new JTextField();
 
     /**
      * Java DTO 包名覆盖输入框。
@@ -591,21 +591,50 @@ public final class ProtocolCodegenGui {
     }
 
     private Map<CodegenLanguage, Path> outputDirs() {
+        return outputDirs(javaOutField.getText(), csharpOutField.getText(),
+                typescriptOutField.getText(), gdscriptOutField.getText());
+    }
+
+    static Map<CodegenLanguage, Path> outputDirs(final String java, final String csharp,
+            final String typescript, final String gdscript) {
         Map<CodegenLanguage, Path> dirs = new EnumMap<>(CodegenLanguage.class);
-        dirs.put(CodegenLanguage.JAVA, Path.of(javaOutField.getText().trim()));
-        dirs.put(CodegenLanguage.CSHARP, Path.of(csharpOutField.getText().trim()));
-        dirs.put(CodegenLanguage.TYPESCRIPT, Path.of(typescriptOutField.getText().trim()));
-        dirs.put(CodegenLanguage.GDSCRIPT, Path.of(gdscriptOutField.getText().trim()));
+        putOutputDir(dirs, CodegenLanguage.JAVA, java);
+        putOutputDir(dirs, CodegenLanguage.CSHARP, csharp);
+        putOutputDir(dirs, CodegenLanguage.TYPESCRIPT, typescript);
+        putOutputDir(dirs, CodegenLanguage.GDSCRIPT, gdscript);
         return dirs;
     }
 
+    private static void putOutputDir(final Map<CodegenLanguage, Path> dirs,
+            final CodegenLanguage language, final String text) {
+        String value = text.trim();
+        if (!value.isBlank()) {
+            dirs.put(language, Path.of(value));
+        }
+    }
+
     private Map<CodegenLanguage, String> namespaces(final String javaNamespace) {
+        return namespaces(javaNamespace, csharpNamespaceField.getText(),
+                typescriptNamespaceField.getText(), gdscriptNamespaceField.getText());
+    }
+
+    static Map<CodegenLanguage, String> namespaces(final String javaNamespace, final String csharp,
+            final String typescript, final String gdscript) {
         Map<CodegenLanguage, String> namespaces = new EnumMap<>(CodegenLanguage.class);
         namespaces.put(CodegenLanguage.JAVA, javaNamespace);
-        namespaces.put(CodegenLanguage.CSHARP, csharpNamespaceField.getText().trim());
-        namespaces.put(CodegenLanguage.TYPESCRIPT, typescriptNamespaceField.getText().trim());
-        namespaces.put(CodegenLanguage.GDSCRIPT, gdscriptNamespaceField.getText().trim());
+        namespaces.put(CodegenLanguage.CSHARP, CodegenNamespaceDefaults.csharp(javaNamespace));
+        putNamespace(namespaces, CodegenLanguage.CSHARP, csharp);
+        putNamespace(namespaces, CodegenLanguage.TYPESCRIPT, typescript);
+        putNamespace(namespaces, CodegenLanguage.GDSCRIPT, gdscript);
         return namespaces;
+    }
+
+    private static void putNamespace(final Map<CodegenLanguage, String> namespaces,
+            final CodegenLanguage language, final String text) {
+        String value = text.trim();
+        if (!value.isBlank()) {
+            namespaces.put(language, value);
+        }
     }
 
     private Map<CodegenLanguage, String> dtoSuffixes() {

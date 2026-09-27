@@ -1,6 +1,7 @@
 package group.zn.zero.codegen.generator.gdscript;
 
 import group.zn.zero.codegen.generator.client.AbstractTemplateCodegenRenderer;
+import group.zn.zero.codegen.generator.GeneratedOutputPlan;
 import group.zn.zero.codegen.generator.client.ClientCodegenSupport;
 import group.zn.zero.codegen.model.CodegenLanguage;
 import group.zn.zero.codegen.model.CodegenRequest;
@@ -36,7 +37,20 @@ public final class GdScriptCodegenRenderer extends AbstractTemplateCodegenRender
      * @param request 代码生成请求；不可为空。
      */
     public void render(final CodegenRequest request) {
+        GeneratedOutputPlan outputs = new GeneratedOutputPlan();
+        render(request, outputs);
+        outputs.apply();
+    }
+
+    /**
+     * 将 GDScript 产物添加到共享输出计划。
+     *
+     * @param request 代码生成请求；不可为空。
+     * @param outputs 共享输出计划；不可为空。
+     */
+    public void render(final CodegenRequest request, final GeneratedOutputPlan outputs) {
         Objects.requireNonNull(request, "request");
+        Objects.requireNonNull(outputs, "outputs");
         Path root = request.outputDir(CodegenLanguage.GDSCRIPT);
         String namespace = request.namespace(CodegenLanguage.GDSCRIPT);
         String dtoSuffix = request.dtoSuffix(CodegenLanguage.GDSCRIPT);
@@ -44,7 +58,7 @@ public final class GdScriptCodegenRenderer extends AbstractTemplateCodegenRender
         model.put("enums", enumModels(request.document().enums()));
         model.put("messages", messageModels(request.document().messages(), dtoSuffix));
         model.put("protocolIds", protocolIds(request.document().protocols()));
-        writeGeneratedFile(root.resolve("zero_protocol.gd"), renderTemplate("zero_protocol.gd.ftl", model));
+        writeGeneratedFile(root.resolve("zero_protocol.gd"), renderTemplate("zero_protocol.gd.ftl", model), outputs);
     }
 
     private List<Map<String, Object>> enumModels(final List<ProtocolEnum> enums) {

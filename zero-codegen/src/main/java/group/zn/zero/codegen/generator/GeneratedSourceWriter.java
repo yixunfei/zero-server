@@ -31,12 +31,9 @@ public final class GeneratedSourceWriter {
      */
     public static void writeGenerated(final Path path, final String content) {
         try {
-            if (Files.exists(path)) {
+            validateGenerated(path);
+            if (Files.isRegularFile(path)) {
                 String existing = Files.readString(path, StandardCharsets.UTF_8);
-                if (!existing.contains(GENERATED_MARKER)) {
-                    throw ZeroException.of(CodegenErrorCode.OUTPUT_FAILED,
-                            "refuse to overwrite non-generated file: " + path, null);
-                }
                 if (existing.equals(content)) {
                     return;
                 }
@@ -57,6 +54,7 @@ public final class GeneratedSourceWriter {
      */
     public static void createImplementation(final Path path, final String content) {
         try {
+            validateImplementation(path);
             createParent(path);
             Files.writeString(path, content, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
         } catch (FileAlreadyExistsException ex) {
@@ -65,6 +63,54 @@ public final class GeneratedSourceWriter {
             }
         } catch (IOException ex) {
             throw outputFailure(path, ex);
+        }
+    }
+
+    /**
+     * 检查目标是否属于工具管理，供整批生成预检使用。
+     *
+     * @param path 目标文件，不可为空。
+     * @throws ZeroException 非生成文件、非普通文件或读取失败时抛出。
+     */
+    static void validateGenerated(final Path path) {
+        validateParent(path);
+        if (!Files.exists(path)) {
+            return;
+        }
+        if (!Files.isRegularFile(path)) {
+            throw ZeroException.of(CodegenErrorCode.OUTPUT_FAILED,
+                    "generated output is not a regular file: " + path, null);
+        }
+        try {
+            if (!Files.readString(path, StandardCharsets.UTF_8).contains(GENERATED_MARKER)) {
+                throw ZeroException.of(CodegenErrorCode.OUTPUT_FAILED,
+                        "refuse to overwrite non-generated file: " + path, null);
+            }
+        } catch (IOException ex) {
+            throw outputFailure(path, ex);
+        }
+    }
+
+    /**
+     * 检查已有业务实现可被安全保留，供整批生成预检使用。
+     *
+     * @param path 目标文件，不可为空。
+     * @throws ZeroException 目标或上级路径类型错误时抛出。
+     */
+    static void validateImplementation(final Path path) {
+        validateParent(path);
+        if (Files.exists(path) && !Files.isRegularFile(path)) {
+            throw ZeroException.of(CodegenErrorCode.OUTPUT_FAILED,
+                    "implementation output is not a regular file: " + path, null);
+        }
+    }
+
+    private static void validateParent(final Path path) {
+        for (Path parent = path.toAbsolutePath().normalize().getParent(); parent != null; parent = parent.getParent()) {
+            if (Files.exists(parent) && !Files.isDirectory(parent)) {
+                throw ZeroException.of(CodegenErrorCode.OUTPUT_FAILED,
+                        "generated output parent is not a directory: " + parent, null);
+            }
         }
     }
 

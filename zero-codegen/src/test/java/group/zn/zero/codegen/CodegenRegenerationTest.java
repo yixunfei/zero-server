@@ -93,6 +93,26 @@ class CodegenRegenerationTest {
         }
     }
 
+    /** 后一个语言的所有权冲突不能提前改写前一个语言的文件。 */
+    @Test
+    void multiLanguagePreflightShouldProtectEarlierLanguageOutputs() throws Exception {
+        var generator = new DefaultCodeGenerator();
+        var initial = request(List.of(CodegenLanguage.JAVA, CodegenLanguage.TYPESCRIPT), "long uid");
+        generator.generate(initial);
+        Path javaDto = initial.outputDir().resolve("group/zn/zero/generated/dto/PlayerQueryProtocolDTO.java");
+        Path tsRuntime = initial.outputDir().resolve("typescript/zero-protocol-runtime.ts");
+        String originalJava = Files.readString(javaDto);
+        Files.writeString(tsRuntime, "// handwritten\n");
+
+        var updated = request(List.of(CodegenLanguage.JAVA, CodegenLanguage.TYPESCRIPT),
+                "long uid, String traceId");
+        ZeroException error = assertThrows(ZeroException.class, () -> generator.generate(updated));
+
+        assertEquals(CodegenErrorCode.OUTPUT_FAILED.code(), error.code());
+        assertEquals(originalJava, Files.readString(javaDto));
+        assertEquals("// handwritten\n", Files.readString(tsRuntime));
+    }
+
     private CodegenRequest request(final List<CodegenLanguage> languages, final String fields) throws Exception {
         Path dsl = root.resolve("Player.si");
         Files.writeString(dsl, "client_to_server:\n  query(" + fields + ");\n  ping();\n");

@@ -92,7 +92,7 @@ class ZeroWriter:
         for byte_index in range(byte_count):
             var word := 0
             var base := byte_index * 8
-            var end := min(field_count, base + 8)
+            var end: int = min(field_count, base + 8)
             for bit_index in range(base, end):
                 if present_predicate.call(bit_index):
                     word |= 1 << (bit_index - base)
@@ -161,7 +161,7 @@ class ZeroReader:
 
     func read_byte() -> int:
         _require_readable(1)
-        var value := buffer[reader_index]
+        var value: int = buffer[reader_index]
         reader_index += 1
         return value
 
@@ -264,7 +264,7 @@ class ZeroReader:
         for byte_index in range(byte_count):
             var word := read_byte()
             var base := byte_index * 8
-            var end := min(field_count, base + 8)
+            var end: int = min(field_count, base + 8)
             for bit_index in range(base, end):
                 values[bit_index] = ((word >> (bit_index - base)) & 1) != 0
         return values
@@ -300,10 +300,6 @@ class ZeroReader:
     func _require_readable(length: int) -> void:
         if length < 0 or reader_index + length > limit:
             push_error("not enough readable bytes")
-
-
-func _is_present(presence: Array, index: int) -> bool:
-    return index >= 0 and index < presence.size() and presence[index]
 
 
 class ZeroGeneratedPayload:
@@ -354,7 +350,7 @@ ${field.writeCode}</#if>
 </#if>
 <#list message.readFields as field>
 <#if field.nullable>
-        if _is_present(presence, ${field.presenceIndex?c}) and reader.has_remaining_in_object(object_end):
+        if ${field.presenceIndex?c} < presence.size() and presence[${field.presenceIndex?c}] and reader.has_remaining_in_object(object_end):
             message.${field.name} = ${field.readExpression}
 <#else>
         if reader.has_remaining_in_object(object_end):

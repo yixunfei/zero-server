@@ -114,6 +114,8 @@ GUI 示例：
 java -jar zero-codegen/target/zero-codegen-0.1.0-SNAPSHOT-all.jar --gui
 ```
 
+CLI 的 `--out` 与 GUI 的总输出目录采用相同布局：Java 直接写入总目录，C#、TypeScript、GDScript 分别写入其下的 `csharp/`、`typescript/`、`gdscript/`。GUI 中语言专用目录留空表示使用该布局；填写后只覆盖对应语言。C# 命名空间默认从 Java 包名转换为 PascalCase，例如 `game.live.protocol` 对应 `Game.Live.Protocol`；其他客户端命名空间默认使用 DSL 包名，也可单独覆盖。
+
 Windows 客户端也可以复制并修改一键 CLI 脚本：
 
 ```text
@@ -225,7 +227,12 @@ Java：
 - BO 在启动时注册并安全发布；注册不得与分发并发，业务线程约束仍由调用方保证。
 - `--genBoImpl true` 只创建不存在的 BOImp，已有实现即使保留旧生成标记也不会覆盖。接口变化需要手工更新业务实现。
 - DTO、codec、协议号、BO 接口和 dispatcher 等工具管理文件内容相同时不重写；非生成文件仍拒绝覆盖。请勿手工修改工具管理文件。
-- 普通协议生成不提供脚手架的 ownership hash、事务或回滚保证，也不清理旧包名/旧后缀下的产物；修改布局后需检查过期文件。
+- 四端源码先完整渲染并统一预检目标路径和文件归属，再开始写盘。路径重复、文件/目录冲突或非工具管理文件会在写入前报错，已有产物保持原样。写入阶段发生磁盘故障时可能已有部分文件更新，排除故障后需重新生成。
+- 普通协议生成不提供脚手架的 ownership hash、完整事务或回滚保证，也不清理旧包名/旧后缀下的产物；修改布局后需检查过期文件。
+
+四端回归可在仓库根运行 `zero-codegen/scripts/smoke-interop.ps1 -GodotExecutable <Godot 控制台程序路径>`。需要 Java 21、.NET 8 SDK、Node.js/npm 和 Godot 4；脚本生成标准 `.si` 工程，编译 Java/C#/TypeScript，并在 Godot 中运行 GDScript，比较固定协议字节向量和各端往返结果。不提供 Godot 路径且本机找不到 `godot` 时，只检查 GDScript 结构并明确提示未完成运行验证。
+
+升级已有 Godot 项目时重新生成并替换 `zero_protocol.gd`；旧版嵌套 codec 调用外层工具函数会在 Godot 编译时报错。详细步骤见 [2026-09-26 迁移说明](../../docs/migrations/20260926-codegen-upgrade.md)。
 
 跨模块布局应让业务 dispatcher 依赖 BO 与协议模块，不能让框架 `zero-net` 反向依赖业务代码。迁移和验证范围见 [codegen 对接迁移](../../docs/migrations/20260923-codegen-integration.md)。
 
@@ -233,4 +240,4 @@ Java：
 
 - 生成器不替你设计业务流程。
 - 复杂排序策略、签名、加密、压缩和权限字段，应由业务层或后续扩展头承接。
-- 当前 GDScript 以可用和易接入为主，实际 Godot 端编译仍建议结合项目验证。
+- 代表性 GDScript 向量已在 Godot 4.7.2 编译和运行；业务项目仍应覆盖自己的字段组合、引擎版本和调用方式。

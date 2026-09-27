@@ -262,6 +262,12 @@ zero-codegen/src/test/resources/protocol-dsl/sample/
 - `zero-codegen` Maven `package` 阶段会附加 `zero-codegen-<version>-all.jar`，可通过 `--gui` 启动图形工具，也可通过 `jpackage` 包装为平台可执行文件。
 - 面向客户端和活动策划的完整用户指南位于 `zero-codegen/docs/user-guide.zh-CN.md`。
 
+### 2026-09-26 多端生成与验证
+
+`DefaultCodeGenerator` 将 Java、C#、TypeScript、GDScript 后端的产物收集到 `GeneratedOutputPlan`，完成渲染后统一检查目标路径冲突、既有文件归属和上级目录类型。预检失败不写入任何目标；通过后仍按生成顺序更新，仅首次创建 BOImp，同内容文件保留原时间戳。普通协议生成不提供磁盘写入故障的整体回滚，也不自动删除旧布局产物。
+
+标准 `.si` 工程的四端编译、往返及固定字节向量由 `zero-codegen/scripts/smoke-interop.ps1` 验证。GDScript 生成模板修复嵌套 codec 的作用域访问及整数类型推断，可在 Godot 4.7.2 执行；协议 ID、字段顺序和线格式未改变。升级步骤见[迁移说明](migrations/20260926-codegen-upgrade.md)。
+
 
 ## 2026-09-17 报告核实修订
 

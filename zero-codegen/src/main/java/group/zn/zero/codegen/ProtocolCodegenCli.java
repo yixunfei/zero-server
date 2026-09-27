@@ -368,7 +368,7 @@ public final class ProtocolCodegenCli {
             final String defaultNamespace) {
         Map<CodegenLanguage, String> result = new EnumMap<>(CodegenLanguage.class);
         result.put(CodegenLanguage.JAVA, defaultNamespace);
-        result.put(CodegenLanguage.CSHARP, options.getOrDefault("--csNs", toPascalNamespace(defaultNamespace)));
+        result.put(CodegenLanguage.CSHARP, options.getOrDefault("--csNs", CodegenNamespaceDefaults.csharp(defaultNamespace)));
         result.put(CodegenLanguage.TYPESCRIPT, options.getOrDefault("--tsNs", defaultNamespace));
         result.put(CodegenLanguage.GDSCRIPT, options.getOrDefault("--gdNs", defaultNamespace));
         return result;
@@ -424,24 +424,6 @@ public final class ProtocolCodegenCli {
         if (options.containsKey(option)) {
             result.put(kind, options.get(option));
         }
-    }
-
-    private static String toPascalNamespace(final String value) {
-        StringBuilder builder = new StringBuilder(value.length());
-        boolean upperNext = true;
-        for (int index = 0; index < value.length(); index++) {
-            char current = value.charAt(index);
-            if (!Character.isLetterOrDigit(current)) {
-                upperNext = true;
-                if (builder.length() > 0 && builder.charAt(builder.length() - 1) != '.') {
-                    builder.append('.');
-                }
-                continue;
-            }
-            builder.append(upperNext ? Character.toUpperCase(current) : current);
-            upperNext = false;
-        }
-        return builder.toString();
     }
 
     private static String required(final Map<String, String> values, final String key) {

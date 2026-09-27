@@ -1,6 +1,7 @@
 package group.zn.zero.codegen.generator.typescript;
 
 import group.zn.zero.codegen.generator.client.AbstractTemplateCodegenRenderer;
+import group.zn.zero.codegen.generator.GeneratedOutputPlan;
 import group.zn.zero.codegen.generator.client.ClientCodegenSupport;
 import group.zn.zero.codegen.model.CodegenLanguage;
 import group.zn.zero.codegen.model.CodegenRequest;
@@ -39,15 +40,28 @@ public final class TypeScriptCodegenRenderer extends AbstractTemplateCodegenRend
      * @param request 代码生成请求；不可为空。
      */
     public void render(final CodegenRequest request) {
+        GeneratedOutputPlan outputs = new GeneratedOutputPlan();
+        render(request, outputs);
+        outputs.apply();
+    }
+
+    /**
+     * 将 TypeScript 产物添加到共享输出计划。
+     *
+     * @param request 代码生成请求；不可为空。
+     * @param outputs 共享输出计划；不可为空。
+     */
+    public void render(final CodegenRequest request, final GeneratedOutputPlan outputs) {
         Objects.requireNonNull(request, "request");
+        Objects.requireNonNull(outputs, "outputs");
         Path root = request.outputDir(CodegenLanguage.TYPESCRIPT);
         String namespace = ClientCodegenSupport.toTypeScriptNamespace(request.namespace(CodegenLanguage.TYPESCRIPT));
         String dtoSuffix = request.dtoSuffix(CodegenLanguage.TYPESCRIPT);
 
         writeGeneratedFile(root.resolve("zero-protocol-runtime.ts"),
-                renderTemplate("runtime.ts.ftl", baseModel(namespace)));
+                renderTemplate("runtime.ts.ftl", baseModel(namespace)), outputs);
         writeGeneratedFile(root.resolve("protocol-ids.ts"),
-                renderTemplate("protocolIds.ts.ftl", protocolIdsModel(namespace, request.document().protocols())));
+                renderTemplate("protocolIds.ts.ftl", protocolIdsModel(namespace, request.document().protocols())), outputs);
 
         List<Map<String, Object>> exports = new ArrayList<>();
         exports.add(exportModel("zero-protocol-runtime"));
@@ -55,23 +69,23 @@ public final class TypeScriptCodegenRenderer extends AbstractTemplateCodegenRend
         for (ProtocolEnum item : request.document().enums()) {
             String fileName = moduleName(item.name());
             writeGeneratedFile(root.resolve(fileName + ".ts"),
-                    renderTemplate("enum.ts.ftl", enumModel(namespace, item)));
+                    renderTemplate("enum.ts.ftl", enumModel(namespace, item)), outputs);
             exports.add(exportModel(fileName));
         }
         for (ProtocolMessage message : request.document().messages()) {
             String dtoName = dtoName(message.name(), dtoSuffix);
             String fileName = moduleName(dtoName);
             writeGeneratedFile(root.resolve(fileName + ".ts"),
-                    renderTemplate("message.ts.ftl", messageModel(namespace, message, dtoSuffix)));
+                    renderTemplate("message.ts.ftl", messageModel(namespace, message, dtoSuffix)), outputs);
             exports.add(exportModel(fileName));
             String codecFileName = moduleName(dtoName + "Codec");
             writeGeneratedFile(root.resolve(codecFileName + ".ts"),
-                    renderTemplate("codec.ts.ftl", codecModel(namespace, message, dtoSuffix)));
+                    renderTemplate("codec.ts.ftl", codecModel(namespace, message, dtoSuffix)), outputs);
             exports.add(exportModel(codecFileName));
         }
         Map<String, Object> indexModel = baseModel(namespace);
         indexModel.put("exports", exports);
-        writeGeneratedFile(root.resolve("index.ts"), renderTemplate("index.ts.ftl", indexModel));
+        writeGeneratedFile(root.resolve("index.ts"), renderTemplate("index.ts.ftl", indexModel), outputs);
     }
 
     private Map<String, Object> enumModel(final String namespace, final ProtocolEnum item) {

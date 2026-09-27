@@ -1,6 +1,7 @@
 package group.zn.zero.codegen.generator.csharp;
 
 import group.zn.zero.codegen.generator.client.AbstractTemplateCodegenRenderer;
+import group.zn.zero.codegen.generator.GeneratedOutputPlan;
 import group.zn.zero.codegen.generator.client.ClientCodegenSupport;
 import group.zn.zero.codegen.model.CodegenLanguage;
 import group.zn.zero.codegen.model.CodegenRequest;
@@ -39,26 +40,39 @@ public final class CSharpCodegenRenderer extends AbstractTemplateCodegenRenderer
      * @param request 代码生成请求；不可为空。
      */
     public void render(final CodegenRequest request) {
+        GeneratedOutputPlan outputs = new GeneratedOutputPlan();
+        render(request, outputs);
+        outputs.apply();
+    }
+
+    /**
+     * 将 C# 产物添加到共享输出计划。
+     *
+     * @param request 代码生成请求；不可为空。
+     * @param outputs 共享输出计划；不可为空。
+     */
+    public void render(final CodegenRequest request, final GeneratedOutputPlan outputs) {
         Objects.requireNonNull(request, "request");
+        Objects.requireNonNull(outputs, "outputs");
         Path root = request.outputDir(CodegenLanguage.CSHARP);
         String namespace = ClientCodegenSupport.toCSharpNamespace(request.namespace(CodegenLanguage.CSHARP));
         String dtoSuffix = request.dtoSuffix(CodegenLanguage.CSHARP);
 
         writeGeneratedFile(root.resolve("ZeroProtocolRuntime.cs"),
-                renderTemplate("runtime.cs.ftl", runtimeModel(namespace)));
+                renderTemplate("runtime.cs.ftl", runtimeModel(namespace)), outputs);
         writeGeneratedFile(root.resolve("ProtocolIds.cs"),
-                renderTemplate("protocolIds.cs.ftl", protocolIdsModel(namespace, request.document().protocols())));
+                renderTemplate("protocolIds.cs.ftl", protocolIdsModel(namespace, request.document().protocols())), outputs);
 
         for (ProtocolEnum item : request.document().enums()) {
             writeGeneratedFile(root.resolve(item.name() + ".cs"),
-                    renderTemplate("enum.cs.ftl", enumModel(namespace, item)));
+                    renderTemplate("enum.cs.ftl", enumModel(namespace, item)), outputs);
         }
         for (ProtocolMessage message : request.document().messages()) {
             String dtoName = dtoName(message.name(), dtoSuffix);
             writeGeneratedFile(root.resolve(dtoName + ".cs"),
-                    renderTemplate("message.cs.ftl", messageModel(namespace, message, dtoSuffix)));
+                    renderTemplate("message.cs.ftl", messageModel(namespace, message, dtoSuffix)), outputs);
             writeGeneratedFile(root.resolve(dtoName + "Codec.cs"),
-                    renderTemplate("codec.cs.ftl", codecModel(namespace, message, dtoSuffix)));
+                    renderTemplate("codec.cs.ftl", codecModel(namespace, message, dtoSuffix)), outputs);
         }
     }
 

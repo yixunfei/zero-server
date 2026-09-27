@@ -5,7 +5,7 @@ import freemarker.template.Template;
 import freemarker.template.TemplateException;
 import freemarker.template.TemplateExceptionHandler;
 import group.zn.zero.codegen.error.CodegenErrorCode;
-import group.zn.zero.codegen.generator.GeneratedSourceWriter;
+import group.zn.zero.codegen.generator.GeneratedOutputPlan;
 import group.zn.zero.codegen.model.CodegenLanguage;
 import group.zn.zero.codegen.model.CodegenRequest;
 import group.zn.zero.codegen.model.JavaArtifactKind;
@@ -79,34 +79,48 @@ public final class JavaCodegenRenderer {
      * @throws ZeroException 生成失败时抛出，必须绑定 ErrorCode。
      */
     public void render(final CodegenRequest request) {
+        GeneratedOutputPlan outputs = new GeneratedOutputPlan();
+        render(request, outputs);
+        outputs.apply();
+    }
+
+    /**
+     * 将 Java 产物添加到共享输出计划。
+     *
+     * @param request 代码生成请求；不可为空。
+     * @param outputs 共享输出计划；不可为空。
+     */
+    public void render(final CodegenRequest request, final GeneratedOutputPlan outputs) {
         Objects.requireNonNull(request, "request");
+        Objects.requireNonNull(outputs, "outputs");
         JavaLayout layout = JavaLayout.from(request);
         String dtoSuffix = request.dtoSuffix(CodegenLanguage.JAVA);
         JavaProjectModel project = new JavaProjectModel(request.document().messages());
 
         writeGeneratedFile(layout.dtoDir().resolve("ZeroGeneratedPayload.java"), renderTemplate("payloadMarker.java.ftl",
-                baseModel(layout.dtoPackage())));
+                baseModel(layout.dtoPackage())), outputs);
         for (ProtocolEnum item : request.document().enums()) {
             writeGeneratedFile(layout.dtoDir().resolve(item.name() + ".java"), renderTemplate("enum.java.ftl",
-                    enumModel(layout.dtoPackage(), item)));
+                    enumModel(layout.dtoPackage(), item)), outputs);
         }
         for (ProtocolMessage message : request.document().messages()) {
             String dtoName = dtoName(message.name(), dtoSuffix);
             writeGeneratedFile(layout.dtoDir().resolve(dtoName + ".java"), renderTemplate("message.java.ftl",
-                    messageModel(layout.dtoPackage(), message, dtoSuffix)));
+                    messageModel(layout.dtoPackage(), message, dtoSuffix)), outputs);
             writeGeneratedFile(layout.codecDir().resolve(dtoName + "Codec.java"),
-                    renderTemplate("codec.java.ftl", codecModel(layout, message, project, dtoSuffix)));
+                    renderTemplate("codec.java.ftl", codecModel(layout, message, project, dtoSuffix)), outputs);
         }
         writeGeneratedFile(layout.protocolDir().resolve("ProtocolIds.java"), renderTemplate("protocolIds.java.ftl",
-                protocolIdsModel(layout.protocolPackage(), request.document().protocols())));
+                protocolIdsModel(layout.protocolPackage(), request.document().protocols())), outputs);
         writeGeneratedFile(layout.protocolDir().resolve("GeneratedProtocolDefinitions.java"),
                 renderTemplate("protocolDefinitions.java.ftl",
-                        protocolDefinitionsModel(layout.protocolPackage(), request.document().protocols())));
-        renderBo(layout, request, dtoSuffix);
-        renderDispatcher(layout, request, project, dtoSuffix);
+                        protocolDefinitionsModel(layout.protocolPackage(), request.document().protocols())), outputs);
+        renderBo(layout, request, dtoSuffix, outputs);
+        renderDispatcher(layout, request, project, dtoSuffix, outputs);
     }
 
-    private void renderBo(final JavaLayout layout, final CodegenRequest request, final String dtoSuffix) {
+    private void renderBo(final JavaLayout layout, final CodegenRequest request, final String dtoSuffix,
+            final GeneratedOutputPlan outputs) {
         Map<String, List<ProtocolMethod>> grouped = new LinkedHashMap<>();
         for (ProtocolMethod method : request.document().methods()) {
             grouped.computeIfAbsent(method.boName(), ignored -> new ArrayList<>()).add(method);
@@ -116,10 +130,10 @@ public final class JavaCodegenRenderer {
         }
         for (Map.Entry<String, List<ProtocolMethod>> entry : grouped.entrySet()) {
             writeGeneratedFile(layout.boDir().resolve(entry.getKey() + ".java"), renderTemplate("boInterface.java.ftl",
-                    boModel(layout, entry.getKey(), entry.getValue(), false, dtoSuffix)));
+                    boModel(layout, entry.getKey(), entry.getValue(), false, dtoSuffix)), outputs);
             if (request.generateBoImpl()) {
                 String implName = implementationName(entry.getKey());
-                GeneratedSourceWriter.createImplementation(layout.boImplDir().resolve(implName + ".java"),
+                outputs.addImplementation(layout.boImplDir().resolve(implName + ".java"),
                         renderTemplate("boImpl.java.ftl",
                         boModel(layout, entry.getKey(), entry.getValue(), true, dtoSuffix)));
             }
@@ -130,13 +144,14 @@ public final class JavaCodegenRenderer {
             final JavaLayout layout,
             final CodegenRequest request,
             final JavaProjectModel project,
-            final String dtoSuffix) {
+            final String dtoSuffix,
+            final GeneratedOutputPlan outputs) {
         if (request.document().methods().isEmpty()) {
             return;
         }
         Path dispatcherPath = layout.dispatcherDir().resolve("GeneratedProtocolDispatcher.java");
         writeGeneratedFile(dispatcherPath, renderTemplate("dispatcher.java.ftl",
-                dispatcherModel(layout, request.document().methods(), project, dtoSuffix)));
+                dispatcherModel(layout, request.document().methods(), project, dtoSuffix)), outputs);
     }
 
     private Map<String, Object> enumModel(final String namespace, final ProtocolEnum item) {
@@ -818,8 +833,8 @@ public final class JavaCodegenRenderer {
         builder.append(indent).append(line).append(System.lineSeparator());
     }
 
-    private void writeGeneratedFile(final Path path, final String content) {
-        GeneratedSourceWriter.writeGenerated(path, content);
+    private void writeGeneratedFile(final Path path, final String content, final GeneratedOutputPlan outputs) {
+        outputs.addGenerated(path, content);
     }
 
     /**
