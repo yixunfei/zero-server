@@ -109,7 +109,7 @@ CacheService / LayeredCacheService
 - 击穿：`CacheLoadCoordinator` 按 key singleflight，限制最大并发加载数。
 - 穿透：负缓存保存空结果，并使用较短 TTL。
 - 雪崩：`CachePolicy` 支持 TTL jitter，避免大量 key 同时过期。
-- Redis 故障：`LayeredCacheService` 标记 degraded，保留未过期 L1 和 loader 回源能力，并暴露 backend failure、backlog 与 write-back failure 计数。
+- Redis 故障：`LayeredCacheService` 标记 degraded，保留未过期 L1 和 loader 回源能力，并暴露 backend failure、backlog 与 write-back failure 计数。loader 结果写 L2 失败时默认不回填 L1（含负缓存），当前调用仍返回 loader 结果；只有显式本地降级选项允许失败回填。
 - 本地内存膨胀：`CachePolicy` 提供 L1 最大条目数，首版使用轻量近似淘汰。
 
 分布式缓存常见模型：
@@ -123,6 +123,8 @@ CacheService / LayeredCacheService
 ## 6. 玩家在线数据
 
 玩家在线数据常驻内存。
+
+`LocalPlayerService` 默认使用 `MissingPlayerPolicy.REJECT`，仓库未命中返回 `PLAYER_NOT_FOUND`，不自动建档。登录建立会话前查询权威仓库；认证和账号对 UID 的授权仍由业务负责。原型或明确需要自动建档的业务可通过构造函数选择 `CREATE_DEFAULT`。普通加载可以读缓存，删档需同步失效缓存。
 
 保存策略：
 
@@ -150,7 +152,7 @@ CacheService / LayeredCacheService
 - 通过 `DataThreadBinding` 描述对象应在哪个逻辑执行域捕获快照。
 - 通过 `PersistenceBindingExecutor` 在绑定执行域内捕获可落库快照，避免持久化线程直接读取 Actor 内 live mutable 对象。
 - 通过 `PersistenceScheduler` 接入定时 flush；生产调度器应由 starter 或后续统一线程管理提供，`zero-data` 不直接创建生产线程池。
-- flush 成功后移除脏对象，失败时保留脏对象并统计失败次数，等待下一轮重试。
+- flush 成功后按 key 与 DirtyEntry 条件相等删除；每次标脏有独立 generation，因此 flush 期间的新标脏（即使 supplier 相同）会保留。失败时保留脏对象并统计失败次数，等待下一轮重试。
 - 为后续缓存写回、失败降级和积压观测保留统一入口，但不在 `S2C-02` 中实现 Redis 分布式缓存策略。
 
 首版边界：
@@ -200,3 +202,13 @@ Redis 数据与缓存 key 的 namespace/collection/cacheName 不得包含 `{`、
 ## 2026-09-17 报告核实修订
 
 内存缓存先登记单飞 future 再调用加载器，完成时按身份移除；显式写入和失效阻止更早加载回填。L2 回填 L1 原子比较缓存版本并保留原到期时间；读取到的 L2 版本推进本地版本生成器。持久化管理器必须先 start；在仓库及快照执行域关闭前 stop，停止期间拒绝新增脏对象，等待在途 flush 并保存全部剩余对象。默认停机预算 30 秒，可通过构造器配置；依赖返回非阻塞 CompletionStage。失败/超时保留脏入口并以 PERSISTENCE_FLUSH_FAILED 使生命周期进入 FAILED，可恢复依赖后再次 stop。并发 flush 合并为同一在途批次，后续脏入口继续保留。
+
+## 2026-09-28 存储与降级边界
+
+ZeroDataEnvelopeStore.saveIfVersion 的默认实现返回 ATOMIC_WRITE_UNSUPPORTED 异常，不再先读后写；自定义实现必须提供真正原子的条件写。ScopedEnvelopeStore 保留原始 cause 链，外层维持稳定数据错误码及文案。
+
+PostgreSQL / MongoDB driver 直接 save 拒绝低于后端当前版本的信封，等版本仍允许替换。直接 save 不是 CAS；并发修改必须走 Repository / saveIfVersion，修复旧业务内容也应使用新的版本号。
+
+LayeredCacheService(policy, store, true) 与 RedisDistributedCacheService(name, policy, store, true) 显式开启 L2 写失败后的本地降级，允许暂存 loader 正值及负结果。默认关闭；当前调用仍取得 loader 结果，写回重试队列仍有界、非持久、无内建后台线程。原有未过期 L1 继续可读，不能据此宣称强一致。
+
+完整默认变化、业务选择和验证见 [迁移说明](migrations/20260928-report-audit-followup.md)。

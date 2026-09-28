@@ -19,7 +19,7 @@ public final class LocalGameFixture implements AutoCloseable {
         Objects.requireNonNull(profileLoader, "profileLoader");
         this.observation = new LocalGameObservation();
         PlayerUidResolver resolver = request -> 1001L;
-        this.playerService = new LocalPlayerService(scheduler, resolver);
+        this.playerService = new LocalPlayerService(scheduler, resolver, group.zn.zero.player.MissingPlayerPolicy.CREATE_DEFAULT);
         this.sceneService = new LocalSceneService(scheduler);
     }
 

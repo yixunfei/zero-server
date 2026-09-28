@@ -6,6 +6,14 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 2026-09-28 九项报告补充复核
+
+- 房间消费者异常不再回滚已经发布的状态；默认历史容量仍为 1024，增加容量选择及原子窗口/缺口查询。
+- 缺失玩家默认拒绝，提供显式 `CREATE_DEFAULT`；登录建会话前查权威仓库，原型示例和脚手架显式启用建档。
+- L2 回填失败默认不写 L1，分层缓存与 Redis 门面可显式启用本地降级；自定义 envelope 存储必须实现原子 CAS，未覆盖时直接失败。
+- PostgreSQL / MongoDB driver 直接保存拒绝版本倒退，数据包装器保留原始 cause；World 迁移统一 entity lane 并保留交接令牌到源释放；排行榜回调移出状态锁，保留提交后异常契约。
+- flush 新标脏丢失在当前基线不成立，原有 generation 和条件删除已保护新入口。逐项结论、风险和验证见[复核报告](docs/reports/report-audit-followup-20260928.zh-CN.md)，0.x 行为变化见[迁移说明](docs/migrations/20260928-report-audit-followup.md)。
+
 ### 2026-09-28 报告核实与边界修复
 
 - 完成网络、外部系统、安全、数据缓存、Actor/runtime 与游戏域报告的逐项核查；修复 TCP 默认裸入口、握手限流、UDP peer/超长包、数据库错误分类、持久化 flush、玩家重复登录、world 异步迁移和状态同步摘要校验。

@@ -176,3 +176,9 @@ Java 21 虚拟线程允许用于：
 当前预算、取消/关闭释放规则、队列观察语义和内部消息 ID 的 0.x 变化见[迁移说明](migrations/20260923-performance-plan.md)。
 
 受管 Scheduler 先发布单次 timer 登记，再提交一次性调度。零延迟回调可早于 `schedule` 返回，但只能清除自身登记；迟到 future 不得覆盖后续重排，取消先发生时也必须取消后来附加的 future。此控制只保护句柄归属，不在 timer 上执行用户代码，不增加线程或业务锁。
+
+## 7. 本地 World 和 Ranking 提交边界
+
+LocalWorldService 的进入、移动及迁移步骤统一使用 entity lane，同一实体交接直到源释放才解除排他。全局 stateLock 仍保护 world/shard/entity 目录；完成异步 future 时已经退出该锁，避免继续编排阶段在锁内重入。该锁和 lane 都只属于单进程，不替代分布式 ownership。
+
+LocalRankingService 的状态写入仍由服务锁保护，事件和指标回调在锁外同步执行。回调可以查询已提交状态，失败不会撤销提交；并发通知没有全局顺序保证。有序业务应明确选择 Actor lane 或其他串行调用边界，不在服务内部新增线程池。

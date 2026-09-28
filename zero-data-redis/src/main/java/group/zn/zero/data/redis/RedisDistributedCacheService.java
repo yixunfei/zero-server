@@ -65,8 +65,22 @@ public final class RedisDistributedCacheService<K, V> implements CacheService<K,
             final String backendName,
             final CachePolicy policy,
             final CacheStore<K, V> redisStore) {
+        this(backendName, policy, redisStore, false);
+    }
+
+    /**
+     * 显式选择 L2 写失败时是否缓存 loader 结果；不创建线程，默认构造关闭本地降级。
+     * @param backendName 后端名称；不可为空。
+     * @param policy 缓存策略；不可为空。
+     * @param redisStore 二级缓存；可为空，空时只使用 L1。
+     * @param cacheLoadedValueOnBackendFailure true 允许正负加载结果回填 L1，业务须接受短时不一致。
+     * @throws NullPointerException 后端名称或策略为空。
+     */
+    public RedisDistributedCacheService(final String backendName, final CachePolicy policy,
+            final CacheStore<K, V> redisStore, final boolean cacheLoadedValueOnBackendFailure) {
         this.backendName = Objects.requireNonNull(backendName, "backendName");
-        this.delegate = new LayeredCacheService<>(Objects.requireNonNull(policy, "policy"), redisStore);
+        this.delegate = new LayeredCacheService<>(Objects.requireNonNull(policy, "policy"), redisStore,
+                cacheLoadedValueOnBackendFailure);
     }
 
     /**

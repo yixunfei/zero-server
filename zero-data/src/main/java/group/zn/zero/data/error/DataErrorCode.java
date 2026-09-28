@@ -38,6 +38,12 @@ public enum DataErrorCode implements ErrorCode {
     /** 并发写冲突或死锁，调用方可按策略重试。 */
     CONCURRENT_WRITE(ErrorCategory.DATA_ACCESS, "ZERO-DATA-CONCURRENT-WRITE", "concurrent data write conflict"),
 
+    /** 存储实现未提供原子版本条件写。 */
+    ATOMIC_WRITE_UNSUPPORTED(
+            ErrorCategory.DATA_ACCESS,
+            "ZERO-DATA-ATOMIC-WRITE-UNSUPPORTED",
+            "atomic versioned write is not implemented"),
+
     /**
      * 数据映射非法。
      */

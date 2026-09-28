@@ -417,3 +417,9 @@ ranking-season scaffold
 ## 2026-09-17 报告核实修订
 
 ADD 溢出返回 RANKING_SCORE_REJECTED 且保持原分数。queryTop 是最多 100 条的 Top-N 查询，snapshot 是完整榜单快照，queryPlayerRank 可以返回 100 名以外的位置；三者不是同一分页接口，不应据结果长度差异判定契约冲突。
+
+## 2026-09-28 提交后通知
+
+LocalRankingService 在服务锁内原子更新索引、条目、版本、幂等键及赛季状态，submitScore、transitionSeason 和 settle 的事件与指标回调均在锁外执行。慢回调不再阻塞其他线程的状态查询和独立更新；调用线程仍同步等待回调。
+
+回调异常保留原异常对象并向调用方传播，已经提交的分数或赛季状态不会回滚。幂等重试遵循原有键的作用范围，不代表无限期去重或事件可靠重投。并发调用的通知可能乱序，需要顺序的业务应将相关操作串行投递到 Actor lane，不应依赖通知时持有服务锁。见 [迁移说明](../migrations/20260928-report-audit-followup.md)。

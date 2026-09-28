@@ -15,7 +15,11 @@ import java.util.function.Consumer;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
-/** Deterministic in-memory world slice. State changes are routed through world/shard actor lanes. */
+/**
+ * 单进程世界服务；同实体的移动和全部迁移阶段在 entity lane 串行。
+ * Deterministic in-memory world slice.
+ * @author zn
+ */
 public final class LocalWorldService {
     private final ActorScheduler scheduler;
     private final Consumer<WorldEvent> eventSink;
@@ -50,8 +54,8 @@ public final class LocalWorldService {
         }
     }
     public void createWorld(String worldId, String initialShardId) { createWorld(new World(worldId, 0), List.of(new Shard(initialShardId, worldId, 0))); }
-    public Entity enterWorld(String entityId, String worldId) { return call(LaneKey.custom(worldId), () -> { World w=world(worldId); String shard=shards.values().stream().filter(s->s.worldId().equals(worldId)).map(Shard::shardId).sorted().findFirst().orElseThrow(()->failure("no shard")); Entity e=new Entity(entityId,worldId,shard,0,0,0,w.routeEpoch(),EntityStatus.ACTIVE,null); if(entities.putIfAbsent(entityId,e)!=null) throw failure("entity exists"); emit(new WorldEvent(WorldEvent.Type.ENTERED,worldId,entityId,null,shard)); metrics.increment("enter","success","assigned"); return e; }); }
-    public Entity moveEntity(String entityId,String shardId,double x,double y) { return call(LaneKey.custom(shardId), () -> { Entity e=entity(entityId); if(!e.ownerShardId().equals(shardId)||e.status()!=EntityStatus.ACTIVE) { metrics.increment("move","rejected","not-owner"); throw failure("entity is not owned by shard"); } Entity moved=e.move(x,y); entities.put(entityId,moved); emit(new WorldEvent(WorldEvent.Type.MOVED,e.worldId(),entityId,shardId,shardId)); metrics.increment("move","success","owner"); return moved; }); }
+    public Entity enterWorld(String entityId, String worldId) { return call(entityLane(entityId), () -> { World w=world(worldId); String shard=shards.values().stream().filter(s->s.worldId().equals(worldId)).map(Shard::shardId).sorted().findFirst().orElseThrow(()->failure("no shard")); Entity e=new Entity(entityId,worldId,shard,0,0,0,w.routeEpoch(),EntityStatus.ACTIVE,null); if(entities.putIfAbsent(entityId,e)!=null) throw failure("entity exists"); emit(new WorldEvent(WorldEvent.Type.ENTERED,worldId,entityId,null,shard)); metrics.increment("enter","success","assigned"); return e; }); }
+    public Entity moveEntity(String entityId,String shardId,double x,double y) { return call(entityLane(entityId), () -> { Entity e=entity(entityId); if(!e.ownerShardId().equals(shardId)||e.status()!=EntityStatus.ACTIVE||e.migrationId()!=null) { metrics.increment("move","rejected","not-owner"); throw failure("entity is not owned by shard"); } Entity moved=e.move(x,y); entities.put(entityId,moved); emit(new WorldEvent(WorldEvent.Type.MOVED,e.worldId(),entityId,shardId,shardId)); metrics.increment("move","success","owner"); return moved; }); }
     public Migration requestMigration(String migrationId,String entityId,String targetShardId) {
         long routeEpoch;
         synchronized (stateLock) {
@@ -61,28 +65,25 @@ public final class LocalWorldService {
     }
     /** 申请迁移；同实体只允许一个迁移，重试相同 ID 保持幂等，不允许跨 world。 */
     public Migration requestMigration(String migrationId, String entityId, String targetShardId, long routeEpoch) {
-        return call(LaneKey.custom(owner(entityId)), () -> requestMigrationInLane(migrationId, entityId, targetShardId, routeEpoch));
+        return call(entityLane(entityId), () -> requestMigrationInLane(migrationId, entityId, targetShardId, routeEpoch));
     }
 
     /** Asynchronously locks the source entity for migration. */
     public CompletionStage<Migration> requestMigrationAsync(
             String migrationId, String entityId, String targetShardId) {
         long routeEpoch;
-        String sourceShard;
         synchronized (stateLock) {
             Entity current = entity(entityId);
             routeEpoch = world(current.worldId()).routeEpoch();
-            sourceShard = current.ownerShardId();
         }
-        return callAsync(LaneKey.custom(sourceShard),
+        return callAsync(entityLane(entityId),
                 () -> requestMigrationInLane(migrationId, entityId, targetShardId, routeEpoch));
     }
 
     /** Asynchronously locks the source entity using an explicit route epoch. */
     public CompletionStage<Migration> requestMigrationAsync(
             String migrationId, String entityId, String targetShardId, long routeEpoch) {
-        String sourceShard = owner(entityId);
-        return callAsync(LaneKey.custom(sourceShard),
+        return callAsync(entityLane(entityId),
                 () -> requestMigrationInLane(migrationId, entityId, targetShardId, routeEpoch));
     }
 
@@ -99,7 +100,9 @@ public final class LocalWorldService {
             Shard targetShard = shards.get(targetShardId);
             if (targetShard == null) throw failure("target shard not found");
             if (!targetShard.worldId().equals(current.worldId())) throw failure("target world mismatch");
-            if (current.status() != EntityStatus.ACTIVE) throw failure("entity migration already in progress");
+            if (current.status() != EntityStatus.ACTIVE || current.migrationId() != null) {
+                throw failure("entity migration already in progress");
+            }
             if (current.routeEpoch() != routeEpoch) throw failure("stale route epoch");
             Migration migration = new Migration(migrationId, entityId, current.ownerShardId(), targetShardId,
                     routeEpoch, MigrationState.SOURCE_LOCKED, EntitySnapshot.of(current));
@@ -122,20 +125,19 @@ public final class LocalWorldService {
      * @return completion signal containing the resulting migration
      */
     public CompletionStage<Migration> prepareMigrationAsync(String migrationId, boolean accepted) {
-        String targetShard = target(migrationId);
-        return callAsync(LaneKey.custom(targetShard), () -> prepareMigrationInLane(migrationId, accepted));
+        return callAsync(entityLane(entityForMigration(migrationId)), () -> prepareMigrationInLane(migrationId, accepted));
     }
     /** @return asynchronous accepted target preparation. */
     public CompletionStage<Migration> prepareMigrationAsync(String migrationId) {
         return prepareMigrationAsync(migrationId, true);
     }
     public Migration commitMigration(String migrationId) {
-        return call(LaneKey.custom(target(migrationId)), () -> commitMigrationInLane(migrationId));
+        return call(entityLane(entityForMigration(migrationId)), () -> commitMigrationInLane(migrationId));
     }
 
     /** Asynchronously commits a prepared target. */
     public CompletionStage<Migration> commitMigrationAsync(String migrationId) {
-        return callAsync(LaneKey.custom(target(migrationId)), () -> commitMigrationInLane(migrationId));
+        return callAsync(entityLane(entityForMigration(migrationId)), () -> commitMigrationInLane(migrationId));
     }
 
     private Migration commitMigrationInLane(String migrationId) {
@@ -149,7 +151,9 @@ public final class LocalWorldService {
             throw failure("target not prepared");
         }
         Entity e = requireMigrationOwner(m);
-        Entity n = e.transferred(m.targetShardId(), m.routeEpoch());
+        // 保留本次交接令牌直到源释放，期间不得启动第二次迁移或移动。
+        Entity n = new Entity(e.entityId(), e.worldId(), m.targetShardId(), e.x(), e.y(),
+                e.stateVersion() + 1, m.routeEpoch(), EntityStatus.ACTIVE, m.migrationId());
         entities.put(e.entityId(), n);
         Migration result = m.withState(MigrationState.TARGET_COMMITTED);
         migrations.put(migrationId, result);
@@ -159,12 +163,12 @@ public final class LocalWorldService {
     }
 
     public Migration releaseSource(String migrationId) {
-        return call(LaneKey.custom(source(migrationId)), () -> releaseSourceInLane(migrationId));
+        return call(entityLane(entityForMigration(migrationId)), () -> releaseSourceInLane(migrationId));
     }
 
     /** Asynchronously releases the source after target commit. */
     public CompletionStage<Migration> releaseSourceAsync(String migrationId) {
-        return callAsync(LaneKey.custom(source(migrationId)), () -> releaseSourceInLane(migrationId));
+        return callAsync(entityLane(entityForMigration(migrationId)), () -> releaseSourceInLane(migrationId));
     }
 
     private Migration releaseSourceInLane(String migrationId) {
@@ -175,6 +179,17 @@ public final class LocalWorldService {
         if (m.state() != MigrationState.TARGET_COMMITTED) {
             throw failure("target not committed");
         }
+        Entity current = entity(m.entityId());
+        if (!m.targetShardId().equals(current.ownerShardId())
+                || current.status() != EntityStatus.ACTIVE
+                || !m.migrationId().equals(current.migrationId())
+                || current.routeEpoch() != m.routeEpoch()
+                || current.stateVersion() != m.snapshot().stateVersion() + 1) {
+            throw failure("stale migration release");
+        }
+        entities.put(current.entityId(), new Entity(current.entityId(), current.worldId(),
+                current.ownerShardId(), current.x(), current.y(), current.stateVersion(),
+                current.routeEpoch(), EntityStatus.ACTIVE, null));
         Migration result = m.withState(MigrationState.COMPLETED);
         migrations.put(migrationId, result);
         emit(new WorldEvent(WorldEvent.Type.MIGRATION_COMPLETED, migrationWorld(m), m.entityId(),
@@ -213,8 +228,13 @@ public final class LocalWorldService {
     public List<WorldEvent> events() { synchronized (stateLock) { return List.copyOf(events); } }
     private World world(String id) { World world = worlds.get(id); if (world == null) throw failure("world not found"); return world; }
     private Entity entity(String id) { Entity entity = entities.get(id); if (entity == null) throw failure("entity not found"); return entity; }
-    private String owner(String id) { synchronized (stateLock) { return entity(id).ownerShardId(); } }
-    private String target(String id){synchronized (stateLock) { return findMigration(id).targetShardId(); }} private String source(String id){synchronized (stateLock) { return findMigration(id).sourceShardId(); }} private String migrationWorld(Migration m){return entity(m.entityId()).worldId();} private String eWorld(Migration m){return migrationWorld(m);}
+    private String entityForMigration(String migrationId) {
+        synchronized (stateLock) { return findMigration(migrationId).entityId(); }
+    }
+    private LaneKey entityLane(String entityId) {
+        return LaneKey.entity(Objects.requireNonNull(entityId, "entityId"));
+    }
+    private String migrationWorld(Migration m){return entity(m.entityId()).worldId();} private String eWorld(Migration m){return migrationWorld(m);}
     private Migration findMigration(String id){Migration m=migrations.get(id);if(m==null)throw failure("migration not found");return m;}
     private <T> T call(LaneKey lane, Task<T> task){ return callAsync(lane, task).toCompletableFuture().join(); }
     private <T> CompletionStage<T> callAsync(LaneKey lane, Task<T> task) {
@@ -223,9 +243,11 @@ public final class LocalWorldService {
         try {
             CompletionStage<Void> dispatched = scheduler.dispatch(new ActorMessage(lane, new Command(() -> {
                 try {
+                    T value;
                     synchronized (stateLock) {
-                        result.complete(task.run());
+                        value = task.run();
                     }
+                    result.complete(value);
                 } catch (RuntimeException | Error failure) {
                     result.completeExceptionally(failure);
                     throw failure;

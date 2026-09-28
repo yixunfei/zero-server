@@ -54,6 +54,9 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
      */
     private final CacheService<Long, PlayerProfile> playerCache;
 
+    /** 未命中玩家资料时的显式策略。 */
+    private final MissingPlayerPolicy missingPlayerPolicy;
+
     /**
      * 账号到玩家 ID 的本地会话表。
      */
@@ -83,7 +86,21 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
                 actorScheduler,
                 uidResolver,
                 new InMemoryCrudRepository<>(),
-                new InMemoryCacheService<>());
+                new InMemoryCacheService<>(),
+                MissingPlayerPolicy.REJECT);
+    }
+
+    /**
+     * 创建本地内存玩家服务；按策略决定是否建档，不创建线程。
+     * @param actorScheduler 调度器；不可为空。
+     * @param uidResolver UID 解析器；不可为空。
+     * @param missingPlayerPolicy 缺失策略；不可为空。
+     * @throws NullPointerException 必填参数为空。
+     */
+    public LocalPlayerService(final ActorScheduler actorScheduler, final PlayerUidResolver uidResolver,
+            final MissingPlayerPolicy missingPlayerPolicy) {
+        this(actorScheduler, uidResolver, new InMemoryCrudRepository<>(), new InMemoryCacheService<>(),
+                missingPlayerPolicy);
     }
 
     /**
@@ -103,11 +120,30 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
             final PlayerUidResolver uidResolver,
             final CrudRepository<Long, PlayerProfile> playerRepository,
             final CacheService<Long, PlayerProfile> playerCache) {
+        this(actorScheduler, uidResolver, playerRepository, playerCache, MissingPlayerPolicy.REJECT);
+    }
+
+    /**
+     * 创建可配置缺失玩家策略的本地玩家服务；不创建线程。
+     * @param actorScheduler 调度器；不可为空。
+     * @param uidResolver UID 解析器；不可为空。
+     * @param playerRepository 玩家仓库；实现必须保障原子版本条件写。
+     * @param playerCache 玩家缓存；不可为空。
+     * @param missingPlayerPolicy 缺失策略；REJECT 不建档，CREATE_DEFAULT 显式允许原型建档。
+     * @throws NullPointerException 必填参数为空。
+     */
+    public LocalPlayerService(
+            final ActorScheduler actorScheduler,
+            final PlayerUidResolver uidResolver,
+            final CrudRepository<Long, PlayerProfile> playerRepository,
+            final CacheService<Long, PlayerProfile> playerCache,
+            final MissingPlayerPolicy missingPlayerPolicy) {
         ActorScheduler scheduler = Objects.requireNonNull(actorScheduler, "actorScheduler");
         this.actorGateway = new GameActorGateway(scheduler);
         this.uidResolver = Objects.requireNonNull(uidResolver, "uidResolver");
         this.playerRepository = Objects.requireNonNull(playerRepository, "playerRepository");
         this.playerCache = Objects.requireNonNull(playerCache, "playerCache");
+        this.missingPlayerPolicy = Objects.requireNonNull(missingPlayerPolicy, "missingPlayerPolicy");
         this.subscriptions = List.of(
                 scheduler.register(LoginCommand.class, ActorHandler.sync((context, message) -> {
                     LoginCommand command = (LoginCommand) message.payload();
@@ -155,6 +191,19 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
         return new LocalPlayerService(actorScheduler, request -> stableUid(request.accountId()));
     }
 
+    /**
+     * 使用稳定 hash UID 并显式选择缺失玩家策略，不创建线程。
+     * @param actorScheduler 调度器；不可为空。
+     * @param missingPlayerPolicy 缺失策略；不可为空。
+     * @return 线程安全的本地玩家服务。
+     * @throws NullPointerException 必填参数为空。
+     */
+    public static LocalPlayerService withStableHashUid(
+            final ActorScheduler actorScheduler, final MissingPlayerPolicy missingPlayerPolicy) {
+        return new LocalPlayerService(actorScheduler, request -> stableUid(request.accountId()),
+                new InMemoryCrudRepository<>(), new InMemoryCacheService<>(), missingPlayerPolicy);
+    }
+
     private static long stableUid(final String accountId) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
@@ -167,7 +216,8 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
     }
 
     /**
-     * 登录并绑定账号到玩家 ID。
+     * 登录前查询权威仓库，玩家存在或按显式策略建档后才绑定账号到玩家 ID。
+     * 身份认证及账号与 UID 的授权关系由业务的 UID 解析器负责。
      *
      * @param request 登录请求；不可为空。
      * @return 登录结果；不可为空；异步完成；失败时必须绑定 ErrorCode。
@@ -176,11 +226,25 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
     public CompletionStage<PlayerLoginResult> login(final PlayerLoginRequest request) {
         Objects.requireNonNull(request, "request");
         CompletableFuture<PlayerLoginResult> result = new CompletableFuture<>();
-        long uid = uidResolver.resolve(request);
-        linkDispatch(actorGateway.dispatch(
-                GameRequestContext.client(request.traceId()),
-                LaneKey.session(request.accountId()),
-                new LoginCommand(request, uid, result)), result);
+        try {
+            long uid = uidResolver.resolve(request);
+            loadRepositoryProfile(uid).whenComplete((ignored, failure) -> {
+                if (failure != null) {
+                    result.completeExceptionally(failure);
+                    return;
+                }
+                try {
+                    linkDispatch(actorGateway.dispatch(
+                            GameRequestContext.client(request.traceId()),
+                            LaneKey.session(request.accountId()),
+                            new LoginCommand(request, uid, result)), result);
+                } catch (RuntimeException dispatchFailure) {
+                    result.completeExceptionally(dispatchFailure);
+                }
+            });
+        } catch (RuntimeException failure) {
+            result.completeExceptionally(failure);
+        }
         return result;
     }
 
@@ -194,20 +258,24 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
     public CompletionStage<PlayerProfile> loadPlayer(final PlayerLoadRequest request) {
         Objects.requireNonNull(request, "request");
         CompletableFuture<PlayerProfile> result = new CompletableFuture<>();
-        loadFromCacheOrRepository(request).whenComplete((profile, ex) -> {
-            if (ex != null) {
-                result.completeExceptionally(ex);
-                return;
-            }
-            try {
-                linkDispatch(actorGateway.dispatch(
-                        GameRequestContext.client(request.traceId()),
-                        LaneKey.player(Long.toString(request.uid())),
-                        new LoadPlayerCommand(request, profile, result)), result);
-            } catch (RuntimeException failure) {
-                result.completeExceptionally(failure);
-            }
-        });
+        try {
+            loadFromCacheOrRepository(request).whenComplete((profile, ex) -> {
+                if (ex != null) {
+                    result.completeExceptionally(ex);
+                    return;
+                }
+                try {
+                    linkDispatch(actorGateway.dispatch(
+                            GameRequestContext.client(request.traceId()),
+                            LaneKey.player(Long.toString(request.uid())),
+                            new LoadPlayerCommand(request, profile, result)), result);
+                } catch (RuntimeException failure) {
+                    result.completeExceptionally(failure);
+                }
+            });
+        } catch (RuntimeException failure) {
+            result.completeExceptionally(failure);
+        }
         return result;
     }
 
@@ -279,24 +347,54 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
     private CompletionStage<PlayerProfile> loadFromCacheOrRepository(final PlayerLoadRequest request) {
         return playerCache.get(request.uid()).thenCompose(cached -> {
             if (cached.isPresent()) {
-                return java.util.concurrent.CompletableFuture.completedFuture(cached.orElseThrow());
+                return CompletableFuture.completedFuture(checkedProfile(request.uid(), cached.orElseThrow()));
             }
-            return playerRepository.findById(request.uid())
-                    .thenCompose(stored -> stored
-                            .map(profile -> playerCache.put(request.uid(), profile)
-                                    .thenApply(ignored -> profile))
-                            .orElseGet(() -> createAndStoreDefaultProfile(request.uid())));
+            return loadRepositoryProfile(request.uid()).thenCompose(profile ->
+                    playerCache.put(request.uid(), profile).thenApply(ignored -> profile));
         });
+    }
+
+    private CompletionStage<PlayerProfile> loadRepositoryProfile(final long uid) {
+        return playerRepository.findById(uid).thenCompose(stored -> stored
+                .map(profile -> CompletableFuture.completedFuture(checkedProfile(uid, profile)))
+                .orElseGet(() -> (missingPlayerPolicy == MissingPlayerPolicy.CREATE_DEFAULT
+                        ? createAndStoreDefaultProfile(uid) : failedPlayerNotFound(uid)).toCompletableFuture()));
+    }
+
+    private PlayerProfile checkedProfile(final long uid, final PlayerProfile profile) {
+        if (profile.uid() != uid) {
+            throw ZeroException.of(group.zn.zero.data.error.DataErrorCode.INVALID_ENTITY,
+                    "player snapshot uid mismatch", null);
+        }
+        return profile;
+    }
+
+    private CompletionStage<PlayerProfile> failedPlayerNotFound(final long uid) {
+        return CompletableFuture.failedFuture(ZeroException.of(
+                PlayerErrorCode.PLAYER_NOT_FOUND, "player profile not found: uid=" + uid, null));
     }
 
     private CompletionStage<PlayerProfile> createAndStoreDefaultProfile(final long uid) {
         PlayerProfile profile = new PlayerProfile(uid, "player-" + uid, true);
         return playerRepository.save(profile)
+                .handle((ignored, failure) -> {
+                    if (failure != null && !isVersionConflict(failure)) {
+                        throw new java.util.concurrent.CompletionException(failure);
+                    }
+                    return ignored;
+                })
                 .thenCompose(ignored -> playerRepository.findById(uid))
-                .thenCompose(saved -> {
-                    PlayerProfile current = saved.orElseThrow();
-                    return playerCache.put(uid, current).thenApply(ignored -> current);
-                });
+                .thenApply(saved -> checkedProfile(uid, saved.orElseThrow(() ->
+                        ZeroException.of(PlayerErrorCode.PLAYER_NOT_FOUND))));
+    }
+
+    private boolean isVersionConflict(final Throwable failure) {
+        Throwable cause = failure;
+        while (cause instanceof java.util.concurrent.CompletionException && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        return cause instanceof ZeroException zero
+                && zero.errorCode() == group.zn.zero.data.error.DataErrorCode.VERSION_CONFLICT;
     }
 
     /**

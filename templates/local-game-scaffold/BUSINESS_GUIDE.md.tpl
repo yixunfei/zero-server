@@ -32,6 +32,8 @@ src/main/java/__PACKAGE_PATH__/LocalGameObservation.java
 
 `__APP_CLASS__.java` is the composition root only. `LocalGameBO` adapts generated protocol events to injected asynchronous business ports. Services return `CompletionStage`; handlers must compose stages and must not call `join()` or `get()`.
 
+The local fixture explicitly selects `MissingPlayerPolicy.CREATE_DEFAULT` to create prototype players. The framework default is `REJECT`. When connecting an account system, register player profiles through your repository before login, use the default rejection policy, and implement authentication and account-to-UID authorization in the business boundary.
+
 ## 3. Where To Change Protocol
 
 Protocol input lives in:

@@ -19,21 +19,43 @@ import java.util.concurrent.CompletionStage;
 
 /** Local in-memory room service. All mutations are dispatched on the room lane. */
 public final class LocalRoomService {
+    /** 默认保留的内存事件历史条数。 */
+    public static final int DEFAULT_EVENT_HISTORY_CAPACITY = 1024;
     private final ActorScheduler scheduler;
     private final ConcurrentMap<RoomId, MutableRoom> rooms = new ConcurrentHashMap<>();
     private final Consumer<RoomEvent> eventConsumer;
+    /** 每个房间内存历史容量；不限制实时事件交付。 */
+    private final int eventHistoryCapacity;
 
-    public LocalRoomService() { this(new LocalActorScheduler(), ignored -> { }); }
-    public LocalRoomService(ActorScheduler scheduler) { this(scheduler, ignored -> { }); }
+    public LocalRoomService() { this(new LocalActorScheduler(), ignored -> { }, DEFAULT_EVENT_HISTORY_CAPACITY); }
+    public LocalRoomService(ActorScheduler scheduler) { this(scheduler, ignored -> { }, DEFAULT_EVENT_HISTORY_CAPACITY); }
     public LocalRoomService(ActorScheduler scheduler, Consumer<RoomEvent> eventConsumer) {
+        this(scheduler, eventConsumer, DEFAULT_EVENT_HISTORY_CAPACITY);
+    }
+    /**
+     * 创建房间服务并配置内存事件历史容量。
+     *
+     * <p>事件消费者仍会收到每一条实时事件；容量只限制 {@link #events(RoomId)} 的内存历史。
+     * 需要可靠补洞时应在消费者中接入持久事件日志。
+     *
+     * @param scheduler actor 调度器；不可为空。
+     * @param eventConsumer 实时事件消费者；不可为空。
+     * @param eventHistoryCapacity 每个房间保留的历史条数；必须大于 0。
+     */
+    public LocalRoomService(ActorScheduler scheduler, Consumer<RoomEvent> eventConsumer,
+            int eventHistoryCapacity) {
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.eventConsumer = Objects.requireNonNull(eventConsumer, "eventConsumer");
+        if (eventHistoryCapacity <= 0) {
+            throw new IllegalArgumentException("eventHistoryCapacity must be positive");
+        }
+        this.eventHistoryCapacity = eventHistoryCapacity;
         scheduler.register(Command.class, ActorHandler.sync((context, message) -> apply((Command) message.payload())));
     }
     public RoomSnapshot create(RoomId id, int capacity, long reconnectWindowMillis) {
         Objects.requireNonNull(id, "id");
         if (capacity < 1 || reconnectWindowMillis < 0) throw new IllegalArgumentException("invalid room configuration");
-        MutableRoom room = new MutableRoom(id, capacity, reconnectWindowMillis);
+        MutableRoom room = new MutableRoom(id, capacity, reconnectWindowMillis, eventHistoryCapacity);
         if (rooms.putIfAbsent(id, room) != null) throw failure("room already exists");
         room.emit(RoomEvent.Type.CREATED, null); return room.snapshot();
     }
@@ -47,6 +69,24 @@ public final class LocalRoomService {
     public long droppedEventCount(RoomId id) {
         MutableRoom current = room(id);
         synchronized (current.events) { return current.droppedEvents; }
+    }
+    /**
+     * 原子读取保留窗口和缺口标志，线程安全；不修改房间状态。
+     * @param id 房间身份；不可为空。
+     * @param afterSequence 已消费的序号，-1 表示从创建事件开始。
+     * @return 不可变历史及缺口元数据；缺口不能靠本地历史补齐。
+     * @throws IllegalArgumentException 序号小于 -1。
+     */
+    public RoomEventHistory eventHistory(RoomId id, long afterSequence) {
+        if (afterSequence < -1) throw new IllegalArgumentException("afterSequence must be >= -1");
+        MutableRoom current = room(id);
+        synchronized (current.events) {
+            long first = current.events.isEmpty() ? -1 : current.events.getFirst().sequence();
+            long latest = current.events.isEmpty() ? -1 : current.events.getLast().sequence();
+            return new RoomEventHistory(current.events.stream()
+                    .filter(event -> event.sequence() > afterSequence).toList(), first, latest,
+                    current.droppedEvents, current.droppedEvents > 0 && afterSequence < first - 1);
+        }
     }
     public CompletionStage<Void> join(RoomId id, String playerId) { return dispatch(id, new Join(player(playerId))); }
     public CompletionStage<Void> leave(RoomId id, String playerId) { return dispatch(id, new Leave(player(playerId))); }
@@ -94,6 +134,9 @@ public final class LocalRoomService {
         RoomCheckpoint checkpoint = current.checkpoint();
         try {
             command.apply(current);
+        } catch (RoomEventDeliveryFailure failure) {
+            // 事件已经进入历史队列并交给消费者，不能再回滚已提交的房间状态。
+            throw failure;
         } catch (RuntimeException failure) {
             current.restore(checkpoint);
             throw failure;
@@ -122,8 +165,8 @@ public final class LocalRoomService {
         public void apply(MutableRoom r) { value = r.settle(key, result); }
     }
     private final class MutableRoom {
-        final RoomId id; final int capacity; final long window; final ConcurrentMap<String,RoomMember> members=new ConcurrentHashMap<>(); final ArrayDeque<RoomEvent> events=new ArrayDeque<>(); long droppedEvents; RoomState state=RoomState.WAITING; long seq; String settlementId, settlementResult; RoomStats stats=new RoomStats(0,0,0,0,0,0);
-        MutableRoom(RoomId i,int c,long w){id=i;capacity=c;window=w;}
+        final RoomId id; final int capacity; final long window; final int historyCapacity; final ConcurrentMap<String,RoomMember> members=new ConcurrentHashMap<>(); final ArrayDeque<RoomEvent> events=new ArrayDeque<>(); long droppedEvents; RoomState state=RoomState.WAITING; long seq; String settlementId, settlementResult; RoomStats stats=new RoomStats(0,0,0,0,0,0);
+        MutableRoom(RoomId i,int c,long w,int h){id=i;capacity=c;window=w;historyCapacity=h;}
         void join(String p){ if(state==RoomState.CLOSED) throw failure("room closed"); if(members.containsKey(p)&&members.get(p).slot()!=PlayerSlot.LEFT) return; if(state!=RoomState.WAITING) throw failure("room not accepting joins"); if(members.values().stream().filter(m->m.slot()!=PlayerSlot.LEFT).count()>=capacity) throw failure("room full"); members.put(p,new RoomMember(p,PlayerSlot.JOINED,0)); stats=new RoomStats(stats.joins()+1,stats.leaves(),stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements()); emit(RoomEvent.Type.JOINED,p); }
         void leave(String p){ if(members.remove(p)==null)return; stats=new RoomStats(stats.joins(),stats.leaves()+1,stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements());emit(RoomEvent.Type.LEFT,p); }
         void disconnect(String p,long now){ RoomMember m=member(p); if(m.slot()==PlayerSlot.LEFT)return; members.put(p,new RoomMember(p,PlayerSlot.DISCONNECTED,now)); emit(RoomEvent.Type.DISCONNECTED,p); }
@@ -137,14 +180,13 @@ public final class LocalRoomService {
             long eventSequence = type == RoomEvent.Type.CREATED ? seq : ++seq;
             RoomEvent event = new RoomEvent(id, eventSequence, type, player, System.currentTimeMillis());
             synchronized (events) {
-                if (events.size() == 1024) { events.removeFirst(); droppedEvents++; }
+                if (events.size() == historyCapacity) { events.removeFirst(); droppedEvents++; }
                 events.addLast(event);
             }
             try {
                 eventConsumer.accept(event);
             } catch (RuntimeException failure) {
-                throw group.zn.zero.core.error.ZeroException.of(group.zn.zero.core.error.SystemErrorCode.SYSTEM_ERROR,
-                        "room event consumer failed after state transition", failure);
+                throw new RoomEventDeliveryFailure(failure);
             }
         }
         RoomCheckpoint checkpoint() {
@@ -178,4 +220,12 @@ public final class LocalRoomService {
             String settlementId,
             String settlementResult,
             RoomStats stats) { }
+
+    /** 标识事件已交付后失败，apply 不得回滚已提交状态。 */
+    private static final class RoomEventDeliveryFailure extends group.zn.zero.core.error.ZeroException {
+        RoomEventDeliveryFailure(final RuntimeException cause) {
+            super(group.zn.zero.core.error.SystemErrorCode.SYSTEM_ERROR,
+                    "room event consumer failed after state transition", cause);
+        }
+    }
 }

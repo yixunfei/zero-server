@@ -59,7 +59,9 @@ class PlayerLoadConcurrencyTest {
     }
     private static LocalPlayerService service(
             group.zn.zero.cache.CacheService<Long, PlayerProfile> cache) {
-        return new LocalPlayerService(new LocalActorScheduler(), account -> 1L, new InMemoryCrudRepository<>(), cache);
+        var repository = new InMemoryCrudRepository<Long, PlayerProfile>();
+        repository.save(new PlayerProfile(1, "registered", true)).toCompletableFuture().join();
+        return new LocalPlayerService(new LocalActorScheduler(), account -> 1L, repository, cache);
     }
     /** 依序提供受控读取结果。 */
     private static final class ControlledCache extends InMemoryCacheService<Long, PlayerProfile> {

@@ -48,6 +48,9 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
      */
     private final CachePolicy policy;
 
+    /** L2 写入失败时是否允许把 loader 结果暂存到 L1；默认关闭以避免错误负缓存。 */
+    private final boolean cacheLoadedValueOnBackendFailure;
+
     /**
      * 加载协调器。
      */
@@ -127,9 +130,25 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
      * @throws NullPointerException 当策略为空时抛出。
      */
     public LayeredCacheService(final CachePolicy policy, final CacheStore<K, V> l2Store) {
+        this(policy, l2Store, false);
+    }
+
+    /**
+     * 创建分层缓存服务并显式选择 L2 写失败时的本地降级策略。
+     *
+     * <p>关闭时 loader 结果仍返回给当前调用方并进入有界写回队列，但不会写入 L1；
+     * 开启时允许暂存结果以换取故障期间的可用性，调用方必须接受 L1 与 L2 暂时不一致。
+     *
+     * @param policy 缓存策略；不可为空。
+     * @param l2Store 二级缓存存储；可为空。
+     * @param cacheLoadedValueOnBackendFailure 是否在 L2 写失败时回填 L1。
+     */
+    public LayeredCacheService(final CachePolicy policy, final CacheStore<K, V> l2Store,
+            final boolean cacheLoadedValueOnBackendFailure) {
         this.policy = Objects.requireNonNull(policy, "policy");
         this.l1Cache = new InMemoryCacheService<>(policy);
         this.l2Store = l2Store;
+        this.cacheLoadedValueOnBackendFailure = cacheLoadedValueOnBackendFailure;
         this.loadCoordinator = new CacheLoadCoordinator<>(policy.maxConcurrentLoads(), policy.loadTimeout());
     }
 
@@ -415,7 +434,9 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
         } catch (RuntimeException failure) {
             markBackendFailure();
             enqueueWriteBack(key, entry);
-            storeL1IfCurrent(key, entry, token);
+            if (cacheLoadedValueOnBackendFailure) {
+                storeL1IfCurrent(key, entry, token);
+            }
             return CompletableFuture.completedFuture(value);
         }
         CompletableFuture<Optional<V>> result = new CompletableFuture<>();
@@ -424,10 +445,11 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
                 markBackendFailure();
                 enqueueWriteBack(key, entry);
             }
-            // 后端不可用时保留既有降级能力；明确版本拒绝则不得污染 L1。
+            // 默认不缓存后端写入失败的加载结果；只有显式本地降级允许回填，版本拒绝始终不回填。
             if (!result.isCancelled()
                     && !(failure instanceof java.util.concurrent.CancellationException)
-                    && (failure != null || Boolean.TRUE.equals(saved))) {
+                    && (failure == null && Boolean.TRUE.equals(saved)
+                        || failure != null && cacheLoadedValueOnBackendFailure)) {
                 storeL1IfCurrent(key, entry, token);
             }
             result.complete(value);

@@ -120,9 +120,10 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
     }
 
     /**
-     * 保存信封。
+     * 保存信封；不会覆盖后端更高版本。
      *
      * @param envelope 信封；不可为空。
+     * @throws ZeroException 当后端已有更高版本或写入失败时抛出。
      */
     @Override
     public void save(final ZeroDataEnvelope envelope) {
@@ -133,7 +134,8 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
                 + "on conflict (namespace, collection, id) do update set "
                 + "version=excluded.version, schema_version=excluded.schema_version, "
                 + "codec_version=excluded.codec_version, "
-                + "updated_at_epoch_millis=excluded.updated_at_epoch_millis, payload=excluded.payload";
+                + "updated_at_epoch_millis=excluded.updated_at_epoch_millis, payload=excluded.payload "
+                + "where " + tableName + ".version <= excluded.version";
         try (Connection connection = connection();
                 PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, row.namespace());
@@ -144,7 +146,10 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
             statement.setInt(6, row.codecVersion());
             statement.setLong(7, row.updatedAtEpochMillis());
             statement.setBytes(8, row.payload());
-            statement.executeUpdate();
+            if (statement.executeUpdate() == 0) {
+                throw ZeroException.of(DataErrorCode.VERSION_CONFLICT,
+                        "postgresql save would move version backwards", null);
+            }
         } catch (SQLException ex) {
             throw ZeroException.of(DataErrorCode.WRITE_FAILED, "postgresql write failed", ex);
         }

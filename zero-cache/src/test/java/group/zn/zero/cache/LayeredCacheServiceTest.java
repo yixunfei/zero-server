@@ -134,6 +134,36 @@ class LayeredCacheServiceTest {
                 false);
     }
 
+    /** 同步/异步写回失败的正值和负值都不得遮蔽恢复后的 L2 新值。 */
+    @Test void failedBackfillDoesNotPoisonL1() {
+        for (boolean synchronous : new boolean[] {true, false}) {
+            for (Optional<String> loaded : java.util.List.of(Optional.<String>empty(), Optional.of("old"))) {
+                FakeStore<String, String> store = new FakeStore<>();
+                store.failWrite = true;
+                store.throwWrite = synchronous;
+                var cache = new LayeredCacheService<>(testPolicy(), store);
+                assertEquals(loaded, cache.getOrLoad("k", CacheLoader.sync(key -> loaded)).toCompletableFuture().join());
+                assertEquals(1, cache.healthSnapshot().backlogCount());
+                store.failWrite = false;
+                store.entries.put("k", new CacheStoreEntry<>("new", 10, 1, Instant.now().plusSeconds(60), false));
+                assertEquals(Optional.of("new"), cache.get("k").toCompletableFuture().join());
+                assertEquals(2, store.readCount.get());
+            }
+        }
+    }
+
+    /** 显式选择本地降级时仍可在 L2 故障期间使用 loader 结果。 */
+    @Test void localFallbackRequiresExplicitSelection() {
+        for (Optional<String> loaded : java.util.List.of(Optional.<String>empty(), Optional.of("local"))) {
+            FakeStore<String, String> store = new FakeStore<>();
+            store.failWrite = true;
+            var cache = new LayeredCacheService<>(testPolicy(), store, true);
+            cache.getOrLoad("k", CacheLoader.sync(key -> loaded)).toCompletableFuture().join();
+            assertEquals(loaded, cache.get("k").toCompletableFuture().join());
+            assertEquals(1, store.readCount.get());
+        }
+    }
+
     /**
      * 测试用缓存存储。
      *
@@ -162,6 +192,9 @@ class LayeredCacheServiceTest {
          * 是否写入失败。
          */
         private boolean failWrite;
+
+        /** 是否同步抛出写失败。 */
+        private boolean throwWrite;
 
         /**
          * 读取缓存。
@@ -201,6 +234,7 @@ class LayeredCacheServiceTest {
         @Override
         public CompletionStage<Boolean> putIfVersion(final K key, final CacheStoreEntry<V> entry) {
             if (failWrite) {
+                if (throwWrite) throw new IllegalStateException("synchronous write failure");
                 return CompletableFuture.failedFuture(new IllegalStateException("write failed"));
             }
             entries.put(key, entry);

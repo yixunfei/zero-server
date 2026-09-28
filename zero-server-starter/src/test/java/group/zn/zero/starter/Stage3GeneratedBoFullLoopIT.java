@@ -150,7 +150,7 @@ class Stage3GeneratedBoFullLoopIT {
                     components.require(ActorRuntime.ACTOR_SCHEDULER),
                     request -> 1001L,
                     playerRepository,
-                    playerCache);
+                    playerCache, group.zn.zero.player.MissingPlayerPolicy.CREATE_DEFAULT);
                     LocalSceneService sceneService = new LocalSceneService(
                             components.require(ActorRuntime.ACTOR_SCHEDULER))) {
                 registerMetrics(components.require(MonitorRuntimeComponent.MONITOR_RUNTIME));

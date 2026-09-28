@@ -86,14 +86,14 @@ flowchart TB
 | 模块 | 职责 | 核心入口 | 常见修改位置 | 禁止依赖与主要风险 |
 | --- | --- | --- | --- | --- |
 | `zero-game` | 游戏请求上下文、执行域和 Actor 网关 | `GameRequestContext`、`GameExecutionDomain`、`GameActorGateway` | `zero-game/src/main/java/group/zn/zero/game` | 不引入具体存储或传输；上下文、lane 映射和 TraceId 传播变化需跨模块验证 |
-| `zero-player` | 登录、UID 解析、玩家资料与在线玩家服务抽象 | `PlayerService`、`LocalPlayerService`、`PlayerUidResolver`、`PlayerLoginRequest` | `zero-player/src/main/java/group/zn/zero/player` | 玩家状态默认绑定 player actor；本地实现不是生产账号或持久化方案 |
+| `zero-player` | 登录、UID 解析、玩家资料与在线玩家服务抽象 | `PlayerService`、`LocalPlayerService`、`MissingPlayerPolicy`、`PlayerUidResolver` | `zero-player/src/main/java/group/zn/zero/player` | 玩家状态绑定 player actor；默认拒绝缺失档案，原型显式选择 CREATE_DEFAULT；认证授权由业务提供 |
 | `zero-scene` | 场景进入、离开、实体状态、位置与移动抽象 | `SceneService`、`LocalSceneService`、`SceneEnterRequest`、`SceneMoveRequest` | `zero-scene/src/main/java/group/zn/zero/scene` | 场景状态默认绑定 scene actor；AOI、跨服迁移和广播一致性不应塞入本地参考实现 |
 | `zero-aoi` | 单 owner 内存 AOI 索引、可见集合与可见性事件最小运行时 | `AoiIndex`、`InMemoryAoiIndex`、`VisibilityEvent` | `zero-aoi/src/main/java/group/zn/zero/aoi` | 仅为 local/minimum-slice；禁止具体中间件、网络写入和跨服迁移；生产容量未证明 |
 | `zero-state-sync` | snapshot/delta envelope、状态版本与 baseline 重同步判定最小运行时 | `SyncEnvelope`、`InMemoryStateSync` | `zero-state-sync/src/main/java/group/zn/zero/statesync` | 仅为 local/minimum-slice；不冻结客户端协议、不负责业务规则或跨服一致性 |
 | `zero-frame-sync` | 固定帧时钟、输入收集、迟到/缺失策略、确定性帧提交与广播的本地最小运行时 | `FrameMatchRuntime`、`FrameMatchConfig`、`FrameInput`、`FrameCommitted` | `zero-frame-sync/src/main/java/group/zn/zero/framesync` | 仅为 local/minimum-slice；单 lane、有界输入；不包含 rollback、回放、真实传输或生产容量证明 |
 | `zero-npc` | Actor-owned zone NPC lifecycle、behavior state 与 bounded tick/degradation 的本地最小运行时 | `LocalNpcZone`、`ZoneActor`、`NpcSnapshot`、`TickBudget`、`BehaviorAdapter` | `zero-npc/src/main/java/group/zn/zero/npc` | 仅依赖 `zero-actor`；禁止 Starter、网络、中间件、线程池和阻塞 adapter；仅证明 local/minimum-slice，不包含完整 AI、持久化、跨服或生产容量 |
-| `zero-ranking` | Actor-lane-owned local ranking/season minimum slice: explicit score merge, bounded ordered top query, snapshots and idempotent settlement | `RankingService`、`LocalRankingService`、`RankSnapshot` | `zero-ranking/src/main/java/group/zn/zero/ranking` | 仅依赖 `zero-actor`；无内部 executor、middleware 或具体 adapter；local slice，不包含 Redis、跨服或奖励发放 |
-| `zero-room` | 本地内存房间生命周期、成员状态、房间命令、广播与结算最小切片 | `LocalRoomService`、`RoomState`、`RoomSnapshot` | `zero-room/src/main/java/group/zn/zero/room` | 仅依赖 `zero-actor`；禁止具体数据库、缓存、MQ、服务发现、Starter 或 Netty；生产持久化、匹配、跨服与长稳未证明 |
+| `zero-ranking` | 线程安全的本地排行榜与赛季：锁内状态提交、锁外通知；顺序业务显式选择 Actor lane | `RankingService`、`LocalRankingService`、`RankSnapshot` | `zero-ranking/src/main/java/group/zn/zero/ranking` | 仅依赖 `zero-actor`；无内部 executor、middleware 或具体 adapter；local slice，不包含 Redis、跨服或奖励发放 |
+| `zero-room` | 本地内存房间生命周期、成员状态、广播、结算与有界事件历史 | `LocalRoomService`、`RoomState`、`RoomSnapshot`、`RoomEventHistory` | `zero-room/src/main/java/group/zn/zero/room` | 仅依赖 `zero-actor`；通知失败不回滚提交，历史可配且显式标记缺口；不包含持久日志、匹配或跨服 |
 | `zero-logic` | 逻辑会话和端到端业务夹具 | `LogicSession`、`LogicSessionManager`、`LocalLogicExample` | `zero-logic/src/main/java/group/zn/zero/logic` | 主要用于本地示例与测试夹具，不应成为具体游戏业务的巨型公共模块 |
 
 ## 5. 网络、RPC、数据与缓存

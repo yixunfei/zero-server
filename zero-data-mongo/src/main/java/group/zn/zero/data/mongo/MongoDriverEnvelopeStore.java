@@ -2,6 +2,7 @@ package group.zn.zero.data.mongo;
 
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.lte;
 
 import com.mongodb.MongoWriteException;
 import com.mongodb.MongoException;
@@ -122,7 +123,7 @@ public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
     }
 
     /**
-     * 保存信封。
+     * 保存信封；不会覆盖后端更高版本。
      *
      * @param envelope 信封；不可为空。
      */
@@ -130,9 +131,18 @@ public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
     public void save(final ZeroDataEnvelope envelope) {
         try {
             MongoDataDocument document = MongoDataDocument.fromEnvelope(validateEnvelope(envelope));
-            mongoCollection.replaceOne(matchId(document.id()), document.toBson(), new ReplaceOptions().upsert(true));
+            UpdateResult result = mongoCollection.replaceOne(
+                    and(matchId(document.id()), lte("version", document.version())),
+                    document.toBson(), new ReplaceOptions().upsert(true));
+            if (result.getMatchedCount() == 0L && result.getUpsertedId() == null) {
+                throw ZeroException.of(DataErrorCode.VERSION_CONFLICT,
+                        "mongo save would move version backwards", null);
+            }
         } catch (RuntimeException ex) {
-            throw ZeroException.of(DataErrorCode.WRITE_FAILED, "mongo write failed", ex);
+            if (ex instanceof ZeroException zeroException) {
+                throw zeroException;
+            }
+            throw ZeroException.of(classifyWriteFailure(ex), "mongo write failed", ex);
         }
     }
 

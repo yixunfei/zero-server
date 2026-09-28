@@ -42,8 +42,8 @@ public interface ZeroDataEnvelopeStore {
      * 按期望版本条件保存信封。
      *
      * <p>该方法承载 Repository 的乐观锁语义。`expectedVersion == 0` 表示仅当对象不存在时创建；
-     * `expectedVersion > 0` 表示仅当后端当前版本等于该值时更新。真实 driver-backed store 必须用
-     * 后端原子条件写实现，避免多实例并发下先读后写导致丢更新。
+     * `expectedVersion > 0` 表示仅当后端当前版本等于该值时更新。存储实现必须覆盖此默认方法并用
+     * 后端原子条件写实现；默认实现直接失败，避免多实例并发下先读后写导致丢更新。
      *
      * @param envelope 待保存信封；不可为空。
      * @param expectedVersion 期望当前版本；必须大于等于 0。
@@ -51,20 +51,13 @@ public interface ZeroDataEnvelopeStore {
      * @throws group.zn.zero.core.error.ZeroException 保存失败时抛出，必须绑定 ErrorCode。
      */
     default boolean saveIfVersion(final ZeroDataEnvelope envelope, final long expectedVersion) {
-        ZeroDataEnvelope current = java.util.Objects.requireNonNull(envelope, "envelope");
+        java.util.Objects.requireNonNull(envelope, "envelope");
         if (expectedVersion < 0L) {
             throw new IllegalArgumentException("expectedVersion must be non-negative");
         }
-        Optional<ZeroDataEnvelope> previous = findById(current.id());
-        if (expectedVersion == 0L) {
-            if (previous.isPresent()) {
-                return false;
-            }
-        } else if (previous.isEmpty() || previous.orElseThrow().version() != expectedVersion) {
-            return false;
-        }
-        save(current);
-        return true;
+        throw group.zn.zero.core.error.ZeroException.of(
+                group.zn.zero.data.error.DataErrorCode.ATOMIC_WRITE_UNSUPPORTED,
+                "store must implement atomic saveIfVersion", null);
     }
 
     /**

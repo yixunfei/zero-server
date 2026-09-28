@@ -98,7 +98,7 @@ class CacheScenarioExampleTest {
         VersionedStore<String, String> store = new VersionedStore<>();
         store.failRead = true;
         store.failWrite = true;
-        LayeredCacheService<String, String> cache = new LayeredCacheService<>(testPolicy(), store);
+        LayeredCacheService<String, String> cache = new LayeredCacheService<>(testPolicy(), store, true);
 
         Optional<String> first = cache.getOrLoad("player-2002", CacheLoader.sync(key -> Optional.of("fallback")))
                 .toCompletableFuture()

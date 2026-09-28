@@ -108,7 +108,7 @@ public final class __APP_CLASS__ {
                 "bootstrap", "zeroServer started", Map.of("name", APP_NAME)));
         try (LocalPlayerService playerService = new LocalPlayerService(
                 runtime.require(ActorRuntime.ACTOR_SCHEDULER),
-                request -> 1001L);
+                request -> 1001L, group.zn.zero.player.MissingPlayerPolicy.CREATE_DEFAULT);
                 LocalSceneService sceneService = new LocalSceneService(
                         runtime.require(ActorRuntime.ACTOR_SCHEDULER))) {
             registerMetrics(monitorRuntime);

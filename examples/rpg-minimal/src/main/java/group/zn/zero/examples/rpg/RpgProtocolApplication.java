@@ -144,7 +144,7 @@ public final class RpgProtocolApplication {
         application.start();
         try (LocalPlayerService playerService = new LocalPlayerService(
                 components.require(ActorRuntime.ACTOR_SCHEDULER),
-                request -> 1001L);
+                request -> 1001L, group.zn.zero.player.MissingPlayerPolicy.CREATE_DEFAULT);
                 LocalSceneService sceneService = new LocalSceneService(
                         components.require(ActorRuntime.ACTOR_SCHEDULER))) {
             registerMetrics(monitorRuntime);

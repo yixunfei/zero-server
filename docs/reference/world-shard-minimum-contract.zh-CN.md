@@ -507,3 +507,9 @@ world-shard scaffold
 本文只证明：开放世界 / 分片迁移正式化前，已经有一份可被 doctor、readiness、advisor、roadmap 和 implementation slice selector 发现的最小契约草案。
 
 </details>
+
+## 2026-09-28 本地迁移排他边界
+
+LocalWorldService 进入、移动与全部迁移步骤使用同一 LaneKey.entity(entityId)。目标提交保留 migrationId 到源释放，期间不允许移动或再次迁移；源释放核对目标 owner、迁移令牌、routeEpoch 与 stateVersion。已经完成的旧迁移重试不更改新交接。
+
+共享 stateLock 继续保护目录；异步结果在锁外完成，避免迁移链重入该锁。Actor/IO 路径使用异步接口，不在同一 lane 内同步等待自身命令。以上属于单进程保证，尚无跨进程租约、持久 fencing、故障恢复协调器或独立分片副本交接协议。见 [复核报告](../reports/report-audit-followup-20260928.zh-CN.md)。

@@ -10,7 +10,8 @@ import java.util.Set;
 
 /**
  * 同步内存排行榜；线程安全，服务锁同时保护 UID 表、排名索引和赛季状态。
- * 保留锁内事件回调顺序；索引不改变回调重入语义，调用方仍可通过 Actor Lane 编排操作。
+ * 状态提交在服务锁内完成，事件回调在锁外执行；回调观察到的状态已经提交。
+ * 回调失败向调用方传播但不撤销提交；并发通知可能乱序，顺序业务应显式串行调用。
  * @author zn
  */
 public final class LocalRankingService implements RankingService {
@@ -28,7 +29,7 @@ public final class LocalRankingService implements RankingService {
 
     /**
      * 创建排行榜，不创建线程。
-     * @param events 事件端口，不可为空，回调在服务锁内执行。
+     * @param events 事件端口，不可为空，回调在提交后执行且不持有服务锁。
      * @param metrics 统计端口，不可为空。
      * @throws NullPointerException 参数为空。
      */
@@ -51,32 +52,35 @@ public final class LocalRankingService implements RankingService {
      * @throws IllegalArgumentException UID/幂等键为空白。
      * @throws NullPointerException 必填参数为空。
      */
-    @Override public synchronized RankingEntry submitScore(final String rankingId, final String seasonId,
+    @Override public RankingEntry submitScore(final String rankingId, final String seasonId,
             final String uid, final long score, final long tieBreakValue, final ScoreMergeMode mode,
             final String idempotencyKey) {
-        Key key = key(rankingId, seasonId);
-        Objects.requireNonNull(uid, "uid");
-        Objects.requireNonNull(mode, "mode");
-        Objects.requireNonNull(idempotencyKey, "idempotencyKey");
-        if (idempotencyKey.isBlank()) throw new IllegalArgumentException("idempotencyKey");
-        Board board = boards.computeIfAbsent(key, ignored -> new Board());
-        if (board.state != SeasonState.OPEN) {
-            throw RankingErrorCode.RANKING_SEASON_STATE_INVALID.failure("season is " + board.state);
+        RankingEntry result;
+        synchronized (this) {
+            Key key = key(rankingId, seasonId);
+            Objects.requireNonNull(uid, "uid");
+            Objects.requireNonNull(mode, "mode");
+            Objects.requireNonNull(idempotencyKey, "idempotencyKey");
+            if (idempotencyKey.isBlank()) throw new IllegalArgumentException("idempotencyKey");
+            Board board = boards.computeIfAbsent(key, ignored -> new Board());
+            if (board.state != SeasonState.OPEN) {
+                throw RankingErrorCode.RANKING_SEASON_STATE_INVALID.failure("season is " + board.state);
+            }
+            RankingEntry previous = board.entries.get(uid);
+            if (previous != null && idempotencyKey.equals(board.idempotency.get(uid))) return previous;
+            long merged = previous == null ? score : switch (mode) {
+                case SET -> score;
+                case MAX -> Math.max(previous.score(), score);
+                case ADD -> addScore(previous.score(), score);
+            };
+            result = new RankingEntry(uid, merged, tieBreakValue, System.currentTimeMillis(), board.version + 1);
+            board.index.replace(previous, result);
+            board.entries.put(uid, result);
+            board.idempotency.put(uid, idempotencyKey);
+            board.version++;
+            board.top = null;
         }
-        RankingEntry previous = board.entries.get(uid);
-        if (previous != null && idempotencyKey.equals(board.idempotency.get(uid))) return previous;
-        long merged = previous == null ? score : switch (mode) {
-            case SET -> score;
-            case MAX -> Math.max(previous.score(), score);
-            case ADD -> addScore(previous.score(), score);
-        };
-        RankingEntry result = new RankingEntry(uid, merged, tieBreakValue, System.currentTimeMillis(), board.version + 1);
-        board.index.replace(previous, result);
-        board.entries.put(uid, result);
-        board.idempotency.put(uid, idempotencyKey);
-        board.version++;
-        board.top = null;
-        events.onEvent(new RankingEvent("SCORE_SUBMITTED", rankingId, seasonId, uid, merged));
+        events.onEvent(new RankingEvent("SCORE_SUBMITTED", rankingId, seasonId, uid, result.score()));
         metrics.increment("submit", "success");
         return result;
     }
@@ -148,15 +152,19 @@ public final class LocalRankingService implements RankingService {
      * @return 变更后的赛季状态。
      * @throws group.zn.zero.core.error.ZeroException 状态转换非法。
      */
-    @Override public synchronized SeasonState transitionSeason(final String rankingId, final String seasonId,
+    @Override public SeasonState transitionSeason(final String rankingId, final String seasonId,
             final SeasonState target, final String idempotencyKey) {
-        Objects.requireNonNull(target, "target");
-        Objects.requireNonNull(idempotencyKey, "idempotencyKey");
-        Board board = boards.computeIfAbsent(key(rankingId, seasonId), ignored -> new Board());
-        if (idempotencyKey.equals(board.transitionKeys.get(target))) return board.state;
-        if (!allowed(board.state, target)) throw RankingErrorCode.SEASON_TRANSITION_REJECTED.failure(board.state + " -> " + target);
-        board.state = target;
-        board.transitionKeys.put(target, idempotencyKey);
+        synchronized (this) {
+            Objects.requireNonNull(target, "target");
+            Objects.requireNonNull(idempotencyKey, "idempotencyKey");
+            Board board = boards.computeIfAbsent(key(rankingId, seasonId), ignored -> new Board());
+            if (idempotencyKey.equals(board.transitionKeys.get(target))) return board.state;
+            if (!allowed(board.state, target)) {
+                throw RankingErrorCode.SEASON_TRANSITION_REJECTED.failure(board.state + " -> " + target);
+            }
+            board.state = target;
+            board.transitionKeys.put(target, idempotencyKey);
+        }
         events.onEvent(new RankingEvent("SEASON_" + target, rankingId, seasonId, null, 0));
         return target;
     }
@@ -169,15 +177,17 @@ public final class LocalRankingService implements RankingService {
      * @return 首次结算 true，重复 false。
      * @throws group.zn.zero.core.error.ZeroException 不处于 SETTLING。
      */
-    @Override public synchronized boolean settle(final String rankingId, final String seasonId, final String settlementId) {
-        Objects.requireNonNull(settlementId, "settlementId");
-        Board board = boards.get(key(rankingId, seasonId));
-        if (board != null && board.settlements.contains(settlementId)) return false;
-        if (board == null || board.state != SeasonState.SETTLING) {
-            throw RankingErrorCode.RANKING_SEASON_STATE_INVALID.failure("not settling");
+    @Override public boolean settle(final String rankingId, final String seasonId, final String settlementId) {
+        synchronized (this) {
+            Objects.requireNonNull(settlementId, "settlementId");
+            Board board = boards.get(key(rankingId, seasonId));
+            if (board != null && board.settlements.contains(settlementId)) return false;
+            if (board == null || board.state != SeasonState.SETTLING) {
+                throw RankingErrorCode.RANKING_SEASON_STATE_INVALID.failure("not settling");
+            }
+            board.settlements.add(settlementId);
+            board.state = SeasonState.SETTLED;
         }
-        board.settlements.add(settlementId);
-        board.state = SeasonState.SETTLED;
         events.onEvent(new RankingEvent("SETTLED", rankingId, seasonId, null, 0));
         return true;
     }

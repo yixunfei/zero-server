@@ -539,6 +539,14 @@ class ZeroDataEnvelopeCrudRepositoryTest {
             envelopes.put(envelope.id(), envelope);
         }
 
+        /** 测试存储显式实现原子条件写。 */
+        @Override public synchronized boolean saveIfVersion(final ZeroDataEnvelope envelope, final long expected) {
+            ZeroDataEnvelope old = envelopes.get(envelope.id());
+            if (expected == 0 ? old != null : old == null || old.version() != expected) return false;
+            envelopes.put(envelope.id(), envelope);
+            return true;
+        }
+
         /**
          * 根据编码 ID 删除信封。
          *
