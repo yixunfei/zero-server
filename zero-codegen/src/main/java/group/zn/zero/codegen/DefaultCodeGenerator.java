@@ -10,6 +10,10 @@ import group.zn.zero.codegen.model.CodegenLanguage;
 import group.zn.zero.codegen.model.CodegenRequest;
 import group.zn.zero.core.error.ZeroException;
 import java.util.Objects;
+import java.util.ArrayList;
+import java.util.List;
+import java.nio.file.Path;
+import group.zn.zero.codegen.model.JavaArtifactKind;
 
 /**
  * 默认代码生成器。
@@ -47,10 +51,28 @@ public final class DefaultCodeGenerator implements CodeGenerator {
      */
     @Override
     public void generate(final CodegenRequest request) {
+        plan(request).apply();
+    }
+
+    /**
+     * 渲染全部目标供预览或执行；不写文件，实例由调用线程独占。
+     * @param request 已配置的生成请求，不可为空。
+     * @return 可变、有序的输出计划，包含全部目标语言。
+     * @throws ZeroException 校验或模板渲染失败。
+     */
+    public GeneratedOutputPlan plan(final CodegenRequest request) {
         Objects.requireNonNull(request, "request");
         ProtocolDslValidator.validate(request.document());
         validateLanguages(request);
-        GeneratedOutputPlan outputs = new GeneratedOutputPlan();
+        List<Path> roots = new ArrayList<>();
+        roots.add(request.outputDir());
+        request.languages().forEach(language -> roots.add(request.outputDir(language)));
+        if (request.languages().contains(CodegenLanguage.JAVA)) {
+            for (JavaArtifactKind kind : JavaArtifactKind.values()) {
+                roots.add(request.javaOutputDir(kind));
+            }
+        }
+        GeneratedOutputPlan outputs = new GeneratedOutputPlan(request.outputDir(), roots);
         for (CodegenLanguage language : request.languages()) {
             switch (language) {
                 case JAVA -> javaRenderer.render(request, outputs);
@@ -63,7 +85,7 @@ public final class DefaultCodeGenerator implements CodeGenerator {
                         null);
             }
         }
-        outputs.apply();
+        return outputs;
     }
 
     /**

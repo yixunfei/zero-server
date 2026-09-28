@@ -1,5 +1,11 @@
 # RPC 设计
 
+## 2026-09-28 报告核实补充
+
+Kafka RPC 已使用真实 producer/consumer、响应 ack、pending 超时和重启回收；旧版“只有 pending 表”的描述已过时。Kafka 不可用、认证缺失或外部集群未提供时仍 fail-closed，不会退回本地传输。
+
+Nacos adapter 已接入真实 SDK，提供注册、查询、订阅和健康更新。集群规模、鉴权、重平衡和跨机房容灾尚未由本轮单测证明，生产项目必须显式启用 external-test 和自身故障演练。跨进程 RPC 仍是至少一次语义，业务必须使用幂等键、版本 fencing 或补偿。
+
 ## 1. 目标
 
 zeroServer RPC 偏向服务接口调用，首版可调用契约支持 request/response 和 oneway；broadcast 仍是规划能力，不在当前 common 接口枚举中暴露。

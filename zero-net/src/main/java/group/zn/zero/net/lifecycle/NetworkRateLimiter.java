@@ -24,6 +24,17 @@ public interface NetworkRateLimiter {
     boolean allowConnection(IConnection connection);
 
     /**
+     * 在执行握手和鉴权前限制入站 frame；在 Netty IO 线程执行。
+     *
+     * @param connection 尚未建立业务会话的连接。
+     * @param frame 入站 frame。
+     * @return true 表示允许继续握手或排队。
+     */
+    default boolean allowAdmissionFrame(final IConnection connection, final ProtocolFrame frame) {
+        return allowFrame(connection, frame);
+    }
+
+    /**
      * 判断已建立连接的业务帧是否允许投递。
      *
      * @param connection 已建立连接；不可为空。

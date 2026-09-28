@@ -1,6 +1,7 @@
 package group.zn.zero.data.redis;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import group.zn.zero.cache.CacheLoader;
@@ -24,6 +25,15 @@ class RedisDataAdapterTest {
 
         assertEquals("redis", adapter.serviceName());
         assertTrue(adapter.appendOnlyMode());
+    }
+
+    /** 默认注册不能静默退化为本地 Map。 */
+    @Test
+    void adapterShouldRequireExplicitRedisClientForProductionRepository() {
+        RedisDataAdapter adapter = new RedisDataAdapter();
+
+        assertThrows(IllegalStateException.class,
+                () -> adapter.registerZcodeRepository("players", null, null, 1));
     }
 
     /**

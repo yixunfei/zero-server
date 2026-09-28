@@ -1,7 +1,8 @@
 /*
  * ${generatedMarker}. Do not edit manually.
  */
-namespace ${namespace};
+namespace ${namespace}
+{
 
 /// <summary>
 /// 生成协议号常量。
@@ -15,4 +16,5 @@ public static class ProtocolIds
     /// <summary>${item.comment}</summary>
     public const int ${item.constantName} = ${item.id?c};
 </#list>
+}
 }

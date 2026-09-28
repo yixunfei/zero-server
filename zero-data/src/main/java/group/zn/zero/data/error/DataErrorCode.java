@@ -35,6 +35,9 @@ public enum DataErrorCode implements ErrorCode {
      */
     VERSION_CONFLICT(ErrorCategory.DATA_ACCESS, "ZERO-DATA-VERSION-CONFLICT", "data version conflict"),
 
+    /** 并发写冲突或死锁，调用方可按策略重试。 */
+    CONCURRENT_WRITE(ErrorCategory.DATA_ACCESS, "ZERO-DATA-CONCURRENT-WRITE", "concurrent data write conflict"),
+
     /**
      * 数据映射非法。
      */
@@ -44,6 +47,15 @@ public enum DataErrorCode implements ErrorCode {
      * 后端不可用。
      */
     BACKEND_UNAVAILABLE(ErrorCategory.SYSTEM, "ZERO-DATA-BACKEND-UNAVAILABLE", "data backend is unavailable"),
+
+    /** 读取结果超过配置的内存预算。 */
+    READ_LIMIT_EXCEEDED(ErrorCategory.DATA_ACCESS, "ZERO-DATA-READ-LIMIT-EXCEEDED", "data read limit exceeded"),
+
+    /** 脏对象登记超过内存预算。 */
+    PERSISTENCE_DIRTY_LIMIT_EXCEEDED(
+            ErrorCategory.DATA_ACCESS,
+            "ZERO-DATA-PERSISTENCE-DIRTY-LIMIT-EXCEEDED",
+            "persistence dirty entry limit exceeded"),
 
     /**
      * 数据实体非法。

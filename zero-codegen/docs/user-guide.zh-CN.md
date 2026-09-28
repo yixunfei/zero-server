@@ -227,8 +227,9 @@ Java：
 - BO 在启动时注册并安全发布；注册不得与分发并发，业务线程约束仍由调用方保证。
 - `--genBoImpl true` 只创建不存在的 BOImp，已有实现即使保留旧生成标记也不会覆盖。接口变化需要手工更新业务实现。
 - DTO、codec、协议号、BO 接口和 dispatcher 等工具管理文件内容相同时不重写；非生成文件仍拒绝覆盖。请勿手工修改工具管理文件。
-- 四端源码先完整渲染并统一预检目标路径和文件归属，再开始写盘。路径重复、文件/目录冲突或非工具管理文件会在写入前报错，已有产物保持原样。写入阶段发生磁盘故障时可能已有部分文件更新，排除故障后需重新生成。
-- 普通协议生成不提供脚手架的 ownership hash、完整事务或回滚保证，也不清理旧包名/旧后缀下的产物；修改布局后需检查过期文件。
+- 四端源码先完整渲染并统一预检路径和归属；使用摘要清单记录已生成内容，拒绝覆盖手改生成物，全部源码规范为 LF。
+- 工程写入使用目录文件锁、恢复日志和同目录临时替换。IO 失败时回滚；进程中断留下 `.zero-codegen/pending.json` 时用 `--mode recover` 恢复后再生成。恢复发现外部编辑会停止并保留现场。多文件输出并非同时对外可见，不应与构建并行运行；不承诺断电持久性。
+- `--mode plan` 预览过期文件；`--mode prune` 重新生成并清理摘要一致的过期文件。手改过期文件显示 `stale-modified`，移出当前输出配置的文件显示 `stale-outside-config`，两者均保留。BOImp 不进入清理清单。
 
 四端回归可在仓库根运行 `zero-codegen/scripts/smoke-interop.ps1 -GodotExecutable <Godot 控制台程序路径>`。需要 Java 21、.NET 8 SDK、Node.js/npm 和 Godot 4；脚本生成标准 `.si` 工程，编译 Java/C#/TypeScript，并在 Godot 中运行 GDScript，比较固定协议字节向量和各端往返结果。不提供 Godot 路径且本机找不到 `godot` 时，只检查 GDScript 结构并明确提示未完成运行验证。
 
@@ -241,3 +242,62 @@ Java：
 - 生成器不替你设计业务流程。
 - 复杂排序策略、签名、加密、压缩和权限字段，应由业务层或后续扩展头承接。
 - 代表性 GDScript 向量已在 Godot 4.7.2 编译和运行；业务项目仍应覆盖自己的字段组合、引擎版本和调用方式。
+
+## 12. 项目配置与团队/CI 使用
+
+GUI 的“打开项目 / 保存项目”使用同一份 UTF-8 JSON。按使用频率划分为“工程 / 语言设置 / Java 高级布局”，先“预览变更”再生成。可提交这样的 `codegen.json`：
+
+```json
+{
+  "input": ["protocol/common", "protocol/game"],
+  "out": "generated",
+  "pkg": "group.example.game",
+  "languages": "java,csharp,typescript,gdscript",
+  "genBoImpl": true,
+  "outCs": "client-csharp/Protocol",
+  "outTs": "client-web/src/protocol",
+  "outGd": "client-godot/protocol"
+}
+```
+
+配置字段与 CLI 参数同名，省略 `--`；`input` 为路径数组，支持含空格、中文和逗号的路径。所有配置路径相对配置文件解析，CLI 覆盖路径相对当前工作目录解析。CLI 覆盖配置；重复普通参数、重复 JSON 键和未知键直接报错。CLI 可重复 `--input`，输入文件自动去重。操作模式不保存到工程配置中。
+
+```shell
+java -jar zero-codegen-<version>-all.jar --config codegen.json --mode validate
+java -jar zero-codegen-<version>-all.jar --config codegen.json --mode plan --json
+java -jar zero-codegen-<version>-all.jar --config codegen.json
+java -jar zero-codegen-<version>-all.jar --config codegen.json --mode check --json
+```
+
+| 模式 | 用途 | 是否写入 |
+| --- | --- | --- |
+| validate | 解析、全工程校验和全部模板渲染 | 否 |
+| plan | 预检当前产物，列出创建/更新/保留/过期 | 否 |
+| check | CI 检查待生成、变化或过期产物；漂移退出 3 | 否 |
+| generate | 默认；更新生成物并保留旧产物 | 是 |
+| prune | 生成并清理未手改的过期产物 | 是 |
+| recover | 回滚上次未完成事务；不要求 DSL 可解析 | 是 |
+
+退出码 0 为成功，1 为解析/输出失败，2 为参数/配置错误，3 为生成漂移。`--json` 只输出一份 JSON，成功包含文件状态和解析渲染/输出耗时；失败包含 `exitCode/error/message`。不要删除 `.zero-codegen` 清单和锁文件来绕过保护；工具停止后可连同所有纯生成产物一起重新建立输出目录。
+
+## 13. 客户端接入约定与验证
+
+| 使用方 | 支持与已执行验证 |
+| --- | --- |
+| Java 服务端 | Java 21，完整 DTO/codec/协议号/BO/dispatcher 编译运行 |
+| C# | 生成 C# 8 源码，`.NET Standard 2.1` 编译与 `.NET 8` 执行；Unity 编辑器、IL2CPP/AOT 尚未验证 |
+| TypeScript | ES2020 bigint，strict 模式；CommonJS/Node 与 ES modules 编译，esbuild 打包后 Chrome 实际运行 |
+| Godot | Godot 4.7.2 本机执行；CI 配置 Godot 4.4.1，远程结果以流水线为准 |
+
+DSL byte 为 signed 8 位，C# 使用 `sbyte`，`byte[]` 字段为 `sbyte[]`；原始 `bytes` 仍是 `byte[]`/Uint8Array/PackedByteArray。TS long/ulong 用 bigint。ulong 上限为 2^63−1，并非完整 unsigned 64 位。
+
+Godot 编解码失败不会交付部分 DTO：`Codec.read(reader)` 返回 null；通过 `reader.is_valid()` 和 `reader.get_error()` 获取首个错误。writer 同样提供状态，失败后 `to_byte_array()` 返回空数组，调用方必须先检查状态。其它语言通过异常报告失败。
+
+完整验证使用 PowerShell 7：
+
+```powershell
+./zero-codegen/scripts/smoke-interop.ps1 -GodotExecutable <Godot路径> -RequireAll
+./zero-codegen/scripts/measure-codegen.ps1 -Messages 100 -Runs 3
+```
+
+`-RequireAll` 要求 Godot 和 Chrome/Chromium/Edge 均实际运行，不允许结构检查替代。浏览器可用 `-BrowserExecutable` 指定。本机 Edge 未提供 headless 输出，Chrome 已验证。脚本固定 TS/esbuild 版本，首次运行需要网络；CI 使用 Windows/Linux 矩阵并保留生成产物。性能脚本报告首次与内容不变时的耗时；数值只代表本机测试负载，不作为生产 SLA。

@@ -1,6 +1,7 @@
 package group.zn.zero.data.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import group.zn.zero.core.error.ZeroException;
@@ -57,7 +58,7 @@ class PersistenceReportAuditTest {
         assertEquals(LifecycleState.FAILED, manager.state());
         assertEquals(1, manager.statistics().dirtyCount());
     }
-    /** 异步捕获不完成时有界退出，同时并发 flush 共用结果。 */
+    /** 异步捕获不完成时有界退出，同时并发 flush 按请求排队。 */
     @Test void stalledCaptureTimesOutAndConcurrentFlushIsCoalesced() {
         BlockingCapture capture = new BlockingCapture();
         DefaultPersistenceManager manager = new DefaultPersistenceManager("p", capture, Clock.systemUTC(), Duration.ofMillis(30));
@@ -65,11 +66,13 @@ class PersistenceReportAuditTest {
         manager.start();
         manager.markDirty("p", "p", DataThreadBinding.unbound(), () -> new Entity("p", 0));
         var first = manager.flushNow();
-        assertEquals(first, manager.flushNow());
+        var second = manager.flushNow();
+        assertNotSame(first, second);
         assertThrows(ZeroException.class, manager::stop);
         assertEquals(1, manager.statistics().dirtyCount());
         capture.result.complete(new Entity("p", 0));
         first.toCompletableFuture().join();
+        second.toCompletableFuture().join();
         manager.stop();
         assertEquals(0, manager.statistics().dirtyCount());
     }

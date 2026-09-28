@@ -186,9 +186,11 @@ public final class InMemoryAoiIndex implements AoiIndex {
             result.add(new VisibilityEvent(type, observer, first, sceneSequence, ++state.syncSequence));
             return;
         }
-        entities.add(first);
-        entities.sort(java.util.Comparator.comparing(AoiEntity::entityId));
-        for (AoiEntity entity : entities) {
+        List<AoiEntity> ordered = new ArrayList<>(entities.size() + 1);
+        ordered.add(first);
+        ordered.addAll(entities);
+        ordered.sort(java.util.Comparator.comparing(AoiEntity::entityId));
+        for (AoiEntity entity : ordered) {
             result.add(new VisibilityEvent(type, observer, entity, sceneSequence, ++state.syncSequence));
         }
     }

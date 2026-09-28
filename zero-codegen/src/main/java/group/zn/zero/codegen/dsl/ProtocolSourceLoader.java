@@ -8,6 +8,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
@@ -46,10 +48,22 @@ public final class ProtocolSourceLoader {
                     null);
         }
         List<ProtocolSourceFile> sources = new ArrayList<>();
-        for (Path file : files) {
+        for (Path file : canonicalFiles(files)) {
             sources.add(read(file));
         }
         return List.copyOf(sources);
+    }
+
+    private List<Path> canonicalFiles(final List<Path> paths) {
+        LinkedHashSet<Path> unique = new LinkedHashSet<>();
+        for (Path path : paths) {
+            try {
+                unique.add(path.toRealPath());
+            } catch (IOException ex) {
+                throw ZeroException.of(CodegenErrorCode.DSL_PARSE_FAILED, "failed to resolve input: " + path, ex);
+            }
+        }
+        return List.copyOf(unique);
     }
 
     private void collect(final Path input, final List<Path> files) {
@@ -100,7 +114,7 @@ public final class ProtocolSourceLoader {
     }
 
     private boolean isSiFile(final Path path) {
-        return path.getFileName().toString().toLowerCase().endsWith(".si");
+        return path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".si");
     }
 
     private String stripExtension(final String fileName) {

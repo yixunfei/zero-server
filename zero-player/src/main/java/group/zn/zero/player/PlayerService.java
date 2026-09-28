@@ -8,6 +8,7 @@ import java.util.concurrent.CompletionStage;
  *
  * <p>该接口承载阶段 3 首版可直接接入的登录、玩家加载和玩家查询能力。
  * 实现必须保证玩家在线状态在 player lane 内修改，会话绑定在 session lane 内修改。
+ * 默认实现拒绝同一账号的第二次在线登录；顶号和踢出需要业务提供连接协调器。
  *
  * @author zn
  */

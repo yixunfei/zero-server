@@ -3,7 +3,8 @@
  */
 using System;
 
-namespace ${namespace};
+namespace ${namespace}
+{
 
 /// <summary>
 /// ${messageName} payload 编解码器。
@@ -13,8 +14,8 @@ public static class ${codecName}
     /// <summary>写入 payload。</summary>
     public static void Write(ZeroWriter writer, ${messageName} message)
     {
-        ArgumentNullException.ThrowIfNull(writer);
-        ArgumentNullException.ThrowIfNull(message);
+        if (writer == null) throw new ArgumentNullException(nameof(writer));
+        if (message == null) throw new ArgumentNullException(nameof(message));
         int objectMarker = writer.BeginObject();
 <#if hasNullableFields>
         writer.WritePresenceBits(${nullableFieldCount?c}, index => index switch
@@ -41,7 +42,7 @@ ${field.writeCode}</#if>
     /// <summary>读取 payload。</summary>
     public static ${messageName} Read(ZeroReader reader)
     {
-        ArgumentNullException.ThrowIfNull(reader);
+        if (reader == null) throw new ArgumentNullException(nameof(reader));
         int objectEnd = reader.BeginObject();
         ${messageName} message = new ${messageName}();
 <#if hasNullableFields>
@@ -70,4 +71,5 @@ ${field.writeCode}</#if>
         return index >= 0 && index < presence.Length && presence[index];
     }
 </#if>
+}
 }

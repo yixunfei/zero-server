@@ -61,7 +61,7 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
             final String namespace, final String collection, final String tableName, final DataSource dataSource) {
         this.namespace = requireText(namespace, "namespace");
         this.collection = requireText(collection, "collection");
-        this.tableName = PostgresqlDriverSettings.requireIdentifier(tableName);
+        this.tableName = quoteIdentifier(PostgresqlDriverSettings.requireIdentifier(tableName));
         this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
         initializeSchema();
     }
@@ -169,7 +169,7 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
             }
             return updateIfVersion(row, expectedVersion);
         } catch (SQLException ex) {
-            throw ZeroException.of(DataErrorCode.WRITE_FAILED, "postgresql conditional write failed", ex);
+            throw ZeroException.of(classifyWriteFailure(ex), "postgresql conditional write failed", ex);
         }
     }
 
@@ -325,5 +325,23 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
             throw new IllegalArgumentException(name + " must not be blank");
         }
         return current;
+    }
+
+    private DataErrorCode classifyWriteFailure(final SQLException failure) {
+        String state = failure.getSQLState();
+        if (state != null && (state.startsWith("08") || state.startsWith("53"))) {
+            return DataErrorCode.BACKEND_UNAVAILABLE;
+        }
+        if ("40001".equals(state) || "40P01".equals(state)) {
+            return DataErrorCode.CONCURRENT_WRITE;
+        }
+        if ("23505".equals(state)) {
+            return DataErrorCode.VERSION_CONFLICT;
+        }
+        return DataErrorCode.WRITE_FAILED;
+    }
+
+    private String quoteIdentifier(final String identifier) {
+        return '"' + identifier.replace("\"", "\"\"") + '"';
     }
 }

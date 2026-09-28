@@ -3,6 +3,10 @@ package group.zn.zero.codegen.generator;
 import group.zn.zero.codegen.error.CodegenErrorCode;
 import group.zn.zero.core.error.ZeroException;
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.io.IOException;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -22,6 +26,26 @@ public final class GeneratedOutputPlan {
 
     /** 已登记目标的上级目录，用于常数时间检测文件与目录冲突。 */
     private final Set<Path> outputParents = new HashSet<>();
+
+    /** 可选工程级生命周期管理器。 */
+    private final ManagedOutput managed;
+
+    /** 上次预检的内容快照，由 apply 消费。 */
+    private ManagedOutput.Prepared prepared;
+
+    /** 创建独立文件计划；用于单后端或嵌入式调用。 */
+    public GeneratedOutputPlan() {
+        managed = null;
+    }
+
+    /**
+     * 创建具备清单、锁和恢复日志的工程计划，构造时不写文件。
+     * @param root 工程输出根目录。
+     * @param allowedRoots 已配置的目标目录；有序、不可为空，由构造器复制。
+     */
+    public GeneratedOutputPlan(final Path root, final List<Path> allowedRoots) {
+        managed = new ManagedOutput(root, allowedRoots);
+    }
 
     /**
      * 登记工具管理的生成文件。
@@ -45,18 +69,17 @@ public final class GeneratedOutputPlan {
 
     /**
      * 先检查所有输出，再写入；预检失败不会改变任何目标文件。
-     * 写入阶段的 IO 故障仍可能留下已完成的文件，应修复故障后重新生成。
+     * 工程计划保存恢复日志，IO 失败自动回滚；独立文件计划仅逐文件替换。
      *
      * @throws ZeroException 路径冲突、文件归属冲突或 IO 失败时抛出。
      */
     public void apply() {
-        for (Map.Entry<Path, Output> entry : outputs.entrySet()) {
-            if (entry.getValue().implementation()) {
-                GeneratedSourceWriter.validateImplementation(entry.getKey());
-            } else {
-                GeneratedSourceWriter.validateGenerated(entry.getKey());
-            }
+        if (managed != null) {
+            managed.apply(prepared == null ? managed.prepare(outputs, false) : prepared);
+            prepared = null;
+            return;
         }
+        inspect();
         for (Map.Entry<Path, Output> entry : outputs.entrySet()) {
             if (entry.getValue().implementation()) {
                 GeneratedSourceWriter.createImplementation(entry.getKey(), entry.getValue().content());
@@ -64,6 +87,57 @@ public final class GeneratedOutputPlan {
                 GeneratedSourceWriter.writeGenerated(entry.getKey(), entry.getValue().content());
             }
         }
+    }
+
+    /**
+     * 只读检查文件归属并计算变更；线程独占，不创建目录。
+     * @return 不可变、有序、可能为空的状态清单。
+     * @throws ZeroException 归属或 IO 检查失败。
+     */
+    public List<Change> inspect() {
+        return inspect(false);
+    }
+
+    /**
+     * 预览输出，可选列出可清理的过期文件；只读、线程独占。
+     * @param prune 是否计划清理摘要一致的过期生成物。
+     * @return 不可变有序状态列表，可能为空。
+     */
+    public List<Change> inspect(final boolean prune) {
+        if (managed != null) {
+            prepared = managed.prepare(outputs, prune);
+            return prepared.changes();
+        }
+        List<Change> changes = new ArrayList<>();
+        for (Map.Entry<Path, Output> entry : outputs.entrySet()) {
+            if (entry.getValue().implementation()) {
+                GeneratedSourceWriter.validateImplementation(entry.getKey());
+            } else {
+                GeneratedSourceWriter.validateGenerated(entry.getKey());
+            }
+            try {
+                Path path = entry.getKey();
+                String status = !Files.exists(path) ? "create"
+                        : entry.getValue().implementation() ? "preserve"
+                        : Files.readString(path).equals(entry.getValue().content()) ? "unchanged" : "update";
+                changes.add(new Change(path.toString(), status));
+            } catch (IOException ex) {
+                throw ZeroException.of(CodegenErrorCode.OUTPUT_FAILED, "failed to inspect " + entry.getKey(), ex);
+            }
+        }
+        return List.copyOf(changes);
+    }
+
+    /** 恢复工程未完成事务；遇到外部编辑时失败并保留恢复日志，线程独占。 */
+    public void recover() {
+        if (managed != null) {
+            managed.recover();
+            prepared = null;
+        }
+    }
+
+    /** 一项只读文件变更，用于 GUI 和机器报告。 */
+    public record Change(String path, String status) {
     }
 
     private void add(final Path path, final String content, final boolean implementation) {
@@ -83,7 +157,8 @@ public final class GeneratedOutputPlan {
         for (Path parent = target.getParent(); parent != null; parent = parent.getParent()) {
             outputParents.add(parent);
         }
-        outputs.put(target, new Output(content, implementation));
+        outputs.put(target, new Output(content.replace("\r\n", "\n"), implementation));
+        prepared = null;
     }
 
     private static ZeroException failure(final String message) {
@@ -91,6 +166,6 @@ public final class GeneratedOutputPlan {
     }
 
     /** 一项待写入文件。 */
-    private record Output(String content, boolean implementation) {
+    record Output(String content, boolean implementation) {
     }
 }

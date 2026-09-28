@@ -311,7 +311,7 @@ public final class CSharpCodegenRenderer extends AbstractTemplateCodegenRenderer
     private String scalarCSharpType(final String scalarName, final boolean nullable) {
         return switch (scalarName) {
             case "boolean" -> nullable ? "bool?" : "bool";
-            case "byte" -> nullable ? "byte?" : "byte";
+            case "byte" -> nullable ? "sbyte?" : "sbyte";
             case "short" -> nullable ? "short?" : "short";
             case "int" -> nullable ? "int?" : "int";
             case "uint", "id", "count" -> nullable ? "int?" : "int";

@@ -4,6 +4,7 @@ import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
 
 import com.mongodb.MongoWriteException;
+import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
@@ -43,6 +44,8 @@ public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
      * MongoDB collection。
      */
     private final MongoCollection<Document> mongoCollection;
+    /** 单次全量读取上限，避免把大集合无界载入内存。 */
+    private final int maxFindAll;
 
     /**
      * 创建 MongoDB driver-backed 信封存储。
@@ -56,8 +59,18 @@ public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
             final MongoDatabase database,
             final String namespace,
             final String collectionName) {
+        this(database, namespace, collectionName, 10_000);
+    }
+
+    /** 创建带有界全量读取的 Mongo 存储。 */
+    public MongoDriverEnvelopeStore(final MongoDatabase database, final String namespace,
+            final String collectionName, final int maxFindAll) {
         this.namespace = requireText(namespace, "namespace");
         this.collectionName = requireText(collectionName, "collectionName");
+        if (maxFindAll <= 0) {
+            throw new IllegalArgumentException("maxFindAll must be positive");
+        }
+        this.maxFindAll = maxFindAll;
         MongoDatabase checkedDatabase = Objects.requireNonNull(database, "database");
         String physicalName = physicalCollectionName(this.namespace, this.collectionName);
         // Use the sharded namespace limit so a later sharding change remains possible.
@@ -90,13 +103,20 @@ public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
      */
     @Override
     public List<ZeroDataEnvelope> findAll() {
-        try (MongoCursor<Document> cursor = mongoCollection.find(matchCollection()).iterator()) {
-            List<ZeroDataEnvelope> results = new ArrayList<>();
+        try (MongoCursor<Document> cursor = mongoCollection.find(matchCollection()).limit(maxFindAll + 1).iterator()) {
+            List<ZeroDataEnvelope> results = new ArrayList<>(Math.min(maxFindAll, 1024));
             while (cursor.hasNext()) {
+                if (results.size() >= maxFindAll) {
+                    throw ZeroException.of(DataErrorCode.READ_LIMIT_EXCEEDED,
+                            "mongo read all exceeds configured limit", null);
+                }
                 results.add(MongoDataDocument.fromBson(cursor.next()).toEnvelope());
             }
             return List.copyOf(results);
         } catch (RuntimeException ex) {
+            if (ex instanceof ZeroException zeroException) {
+                throw zeroException;
+            }
             throw ZeroException.of(DataErrorCode.READ_FAILED, "mongo read all failed", ex);
         }
     }
@@ -138,7 +158,7 @@ public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
                     document.toBson());
             return result.getMatchedCount() == 1L;
         } catch (RuntimeException ex) {
-            throw ZeroException.of(DataErrorCode.WRITE_FAILED, "mongo conditional write failed", ex);
+            throw ZeroException.of(classifyWriteFailure(ex), "mongo conditional write failed", ex);
         }
     }
 
@@ -215,5 +235,22 @@ public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
             throw new IllegalArgumentException(name + " must not be blank");
         }
         return current;
+    }
+
+    private DataErrorCode classifyWriteFailure(final RuntimeException failure) {
+        if (failure instanceof com.mongodb.DuplicateKeyException) {
+            return DataErrorCode.VERSION_CONFLICT;
+        }
+        if (failure instanceof MongoException mongoException && mongoException.hasErrorLabel("TransientTransactionError")) {
+            return DataErrorCode.CONCURRENT_WRITE;
+        }
+        if (failure instanceof MongoException mongoException && mongoException.getCode() == 11000) {
+            return DataErrorCode.VERSION_CONFLICT;
+        }
+        if (failure instanceof com.mongodb.MongoSocketException
+                || failure instanceof com.mongodb.MongoTimeoutException) {
+            return DataErrorCode.BACKEND_UNAVAILABLE;
+        }
+        return DataErrorCode.WRITE_FAILED;
     }
 }

@@ -10,6 +10,7 @@ import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.net.ConnectionListener;
 import group.zn.zero.net.IConnection;
 import group.zn.zero.net.ServerFrameHandler;
+import group.zn.zero.net.ServerFactory;
 import group.zn.zero.net.ServerOptions;
 import group.zn.zero.net.ServerType;
 import group.zn.zero.net.error.NetErrorCode;
@@ -41,6 +42,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -49,6 +51,22 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class NettyServerImplementationsTest {
+
+    /** 默认工厂不得静默创建绕过 production admission 的 TCP 入口。 */
+    @Test
+    void tcpFactoryRequiresExplicitAdmissionChoice() throws Exception {
+        ExecutorService executor = newHandlerExecutor("zero-net-factory");
+        try {
+            assertThrows(IllegalStateException.class, () -> ServerFactory.tcp(
+                    ServerOptions.tcp("127.0.0.1", 0), (connection, frame) ->
+                            CompletableFuture.completedFuture(List.of(frame)), executor));
+            assertNotNull(ServerFactory.tcpUnmanaged(
+                    ServerOptions.tcp("127.0.0.1", 0), (connection, frame) ->
+                            CompletableFuture.completedFuture(List.of(frame)), executor));
+        } finally {
+            shutdown(executor);
+        }
+    }
 
     /**
      * 验证 TCP 服务端可以启动、连接、收发协议帧并关闭。
@@ -181,6 +199,48 @@ class NettyServerImplementationsTest {
             server.stop();
             shutdown(handlerExecutor);
         }
+    }
+
+    /** 同一远端复用地址上下文，超长包丢弃后共享 socket 仍可服务。 */
+    @Test
+    void udpPeerShouldBeReusedAndOversizedDatagramShouldBeCounted() throws Exception {
+        ProtocolFrameCodec codec = new ZeroBinaryFrameCodec();
+        AtomicReference<IConnection> first = new AtomicReference<>();
+        AtomicInteger opens = new AtomicInteger();
+        AtomicInteger closes = new AtomicInteger();
+        ExecutorService executor = newHandlerExecutor("zero-net-udp-peer");
+        NettyUdpServer server = new NettyUdpServer(ServerOptions.udp("127.0.0.1", 0)
+                .withIoThreads(1, 1).withMaxFrameLength(128), codec,
+                (connection, request) -> {
+                    IConnection previous = first.getAndSet(connection);
+                    if (previous != null) assertTrue(previous == connection);
+                    return CompletableFuture.completedFuture(List.of(request));
+                }, new ConnectionListener() {
+                    @Override public void onOpen(final IConnection connection) { opens.incrementAndGet(); }
+                    @Override public void onClose(final IConnection connection) { closes.incrementAndGet(); }
+                }, executor, null, new UdpSessionOptions(2, Duration.ofMinutes(1)));
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.setSoTimeout(3000);
+            server.start();
+            sendUdp(socket, server.boundPort(), new byte[129]);
+            for (int i = 0; i < 2; i++) {
+                sendUdp(socket, server.boundPort(), codec.encode(frame("ping")));
+                DatagramPacket response = new DatagramPacket(new byte[128], 128);
+                socket.receive(response);
+                assertEquals("ping", text(codec.decode(java.util.Arrays.copyOf(
+                        response.getData(), response.getLength()))));
+            }
+            assertEquals(1, server.oversizedDatagramCount());
+            assertEquals(1, opens.get());
+        } finally {
+            server.stop();
+            shutdown(executor);
+        }
+        assertEquals(1, closes.get());
+    }
+
+    private static void sendUdp(final DatagramSocket socket, final int port, final byte[] bytes) throws Exception {
+        socket.send(new DatagramPacket(bytes, bytes.length, new InetSocketAddress("127.0.0.1", port)));
     }
 
     /**

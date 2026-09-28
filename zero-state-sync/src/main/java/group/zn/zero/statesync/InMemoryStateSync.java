@@ -21,14 +21,24 @@ public final class InMemoryStateSync {
         }
         Observer observer = new Observer(envelope.sceneId(), envelope.observerId());
         Baseline known = baselines.get(observer);
-        if (known != null && (envelope.syncSeq() <= known.sequence() || envelope.stateVersion() <= known.version())) {
+        if (known != null && envelope.syncSeq() <= known.sequence()) {
+            if (envelope.syncSeq() == known.sequence()
+                    && envelope.stateVersion() == known.version()
+                    && !envelope.payloadHash().equals(known.payloadHash())) {
+                return new Result(Status.RESYNC_REQUIRED, known.version());
+            }
             return new Result(Status.IGNORED, known.version());
         }
         if (envelope.kind() == SyncEnvelope.Kind.DELTA
-                && (known == null || known.version() != envelope.baselineVersion())) {
+                && (known == null || known.version() != envelope.baselineVersion()
+                || envelope.syncSeq() != known.sequence() + 1L)) {
             return new Result(Status.RESYNC_REQUIRED, known == null ? -1 : known.version());
         }
-        baselines.put(observer, new Baseline(envelope.syncSeq(), envelope.stateVersion()));
+        if (known != null && envelope.stateVersion() < known.version()) {
+            return new Result(Status.IGNORED, known.version());
+        }
+        baselines.put(observer, new Baseline(
+                envelope.syncSeq(), envelope.stateVersion(), envelope.payloadHash()));
         return new Result(Status.APPLIED, envelope.stateVersion());
     }
     /** 接收结果类别，IGNORED 表示重复或过期输入。 */
@@ -38,5 +48,5 @@ public final class InMemoryStateSync {
     /** 场景中的观察者身份。 */
     private record Observer(String scene, String observer) { }
     /** 最后成功应用的消息信息。 */
-    private record Baseline(long sequence, long version) { }
+    private record Baseline(long sequence, long version, String payloadHash) { }
 }

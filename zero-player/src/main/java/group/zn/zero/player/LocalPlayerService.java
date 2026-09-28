@@ -6,6 +6,7 @@ import group.zn.zero.actor.scheduler.ActorScheduler;
 import group.zn.zero.actor.scheduler.ActorSubscription;
 import group.zn.zero.cache.CacheService;
 import group.zn.zero.cache.InMemoryCacheService;
+import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.data.repository.CrudRepository;
 import group.zn.zero.data.repository.InMemoryCrudRepository;
 import group.zn.zero.game.GameActorGateway;
@@ -110,7 +111,13 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
         this.subscriptions = List.of(
                 scheduler.register(LoginCommand.class, ActorHandler.sync((context, message) -> {
                     LoginCommand command = (LoginCommand) message.payload();
-                    sessions.put(command.request().accountId(), command.uid());
+                    Long existing = sessions.putIfAbsent(command.request().accountId(), command.uid());
+                    if (existing != null) {
+                        command.result().completeExceptionally(ZeroException.of(
+                                PlayerErrorCode.ACCOUNT_ALREADY_ONLINE,
+                                "account already has an online session", null));
+                        return;
+                    }
                     command.result().complete(new PlayerLoginResult(
                             command.request().accountId(),
                             command.uid(),

@@ -48,6 +48,7 @@ public final class SiProtocolProjectParser {
         Objects.requireNonNull(namespace, "namespace");
         Objects.requireNonNull(inputs, "inputs");
         List<ProtocolSourceFile> sources = sourceLoader.load(inputs);
+        Map<String, String> types = collectTypes(sources);
         Map<String, ProtocolIdRange> ranges = protoIdPath == null
                 ? Map.of()
                 : protoIdParser.parse(protoIdPath);
@@ -57,11 +58,16 @@ public final class SiProtocolProjectParser {
         List<ProtocolMessage> messages = new ArrayList<>();
         List<ProtocolMethod> methods = new ArrayList<>();
         for (ProtocolSourceFile source : sources) {
-            ProtocolDslDocument document = siParser.parse(
+            ProtocolDslDocument document;
+            try {
+                document = siParser.parseProjectFile(
                     namespace,
                     source.schemaName(),
                     source.source(),
-                    ranges.get(ProtocolIdFileParser.normalizeKey(source.schemaName())));
+                    ranges.get(ProtocolIdFileParser.normalizeKey(source.schemaName())), types);
+            } catch (ZeroException ex) {
+                throw sourceError(source, ex);
+            }
             protocols.addAll(document.protocols());
             enums.addAll(document.enums());
             messages.addAll(document.messages());
@@ -73,12 +79,33 @@ public final class SiProtocolProjectParser {
         return document;
     }
 
+    private Map<String, String> collectTypes(final List<ProtocolSourceFile> sources) {
+        Map<String, String> types = new LinkedHashMap<>();
+        Map<String, Path> owners = new LinkedHashMap<>();
+        for (ProtocolSourceFile source : sources) {
+            try {
+                for (Map.Entry<String, String> entry : siParser.declarations(source.source()).entrySet()) {
+                    Path previous = owners.putIfAbsent(entry.getKey(), source.path());
+                    if (previous != null) {
+                        throw ZeroException.of(CodegenErrorCode.DSL_VALIDATION_FAILED,
+                                "duplicate type " + entry.getKey() + ", first declared in " + previous, null);
+                    }
+                    types.put(entry.getKey(), entry.getValue());
+                }
+            } catch (ZeroException ex) {
+                throw sourceError(source, ex);
+            }
+        }
+        return types;
+    }
+
+    private ZeroException sourceError(final ProtocolSourceFile source, final ZeroException cause) {
+        return ZeroException.of(CodegenErrorCode.DSL_PARSE_FAILED, source.path() + ": " + cause.message(), cause);
+    }
+
     private void validateConfiguredRangesUsed(
             final Map<String, ProtocolIdRange> ranges,
             final List<ProtocolSourceFile> sources) {
-        if (ranges.isEmpty()) {
-            return;
-        }
         Map<String, ProtocolSourceFile> sourceByKey = new LinkedHashMap<>();
         for (ProtocolSourceFile source : sources) {
             String key = ProtocolIdFileParser.normalizeKey(source.schemaName());

@@ -86,6 +86,24 @@ class LayeredCacheServiceTest {
         assertTrue(cache.healthSnapshot().backendFailureCount() >= 1L);
     }
 
+    /** 写回失败保留有界重试项，后端恢复后可显式补偿。 */
+    @Test
+    void layeredCacheShouldRetryFailedWriteBack() {
+        FakeStore<String, String> store = new FakeStore<>();
+        store.failWrite = true;
+        LayeredCacheService<String, String> cache = new LayeredCacheService<>(testPolicy(), store);
+
+        assertEquals(Optional.of("local"), cache.getOrLoad(
+                "player-retry", CacheLoader.sync(key -> Optional.of("local")))
+                .toCompletableFuture().join());
+        assertEquals(1L, cache.healthSnapshot().backlogCount());
+
+        store.failWrite = false;
+        assertEquals(1, cache.retryWriteBacks(4).toCompletableFuture().join());
+        assertEquals(0L, cache.healthSnapshot().backlogCount());
+        assertTrue(store.entries.containsKey("player-retry"));
+    }
+
     /**
      * 验证负缓存阻止穿透。
      */

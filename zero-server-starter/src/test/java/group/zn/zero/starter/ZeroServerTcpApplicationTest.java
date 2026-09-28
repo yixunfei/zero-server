@@ -25,7 +25,7 @@ class ZeroServerTcpApplicationTest {
     @Test
     void startProbeStopIsIdempotentAndReleasesListener() {
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        IServer server = ServerFactory.tcp(ServerOptions.tcp("127.0.0.1", 0),
+        IServer server = ServerFactory.tcpUnmanaged(ServerOptions.tcp("127.0.0.1", 0),
                 (connection, frame) -> CompletableFuture.completedFuture(List.of()), executor);
         GameRuntime runtime = LocalRuntime.create(new MapZeroConfig(Map.of("zero.mode", "test")), new InMemoryLogSink());
         ZeroServerTcpApplication application = new ZeroServerTcpApplication(runtime, server);
@@ -48,10 +48,10 @@ class ZeroServerTcpApplicationTest {
     @Test
     void serverStartFailureStopsRuntime() {
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        IServer first = ServerFactory.tcp(ServerOptions.tcp("127.0.0.1", 0),
+        IServer first = ServerFactory.tcpUnmanaged(ServerOptions.tcp("127.0.0.1", 0),
                 (connection, frame) -> CompletableFuture.completedFuture(List.of()), executor);
         first.start();
-        IServer second = ServerFactory.tcp(ServerOptions.tcp("127.0.0.1", Integer.parseInt(first.bindAddress().split(":")[1])),
+        IServer second = ServerFactory.tcpUnmanaged(ServerOptions.tcp("127.0.0.1", Integer.parseInt(first.bindAddress().split(":")[1])),
                 (connection, frame) -> CompletableFuture.completedFuture(List.of()), executor);
         GameRuntime runtime = LocalRuntime.create(new MapZeroConfig(Map.of("zero.mode", "test")), new InMemoryLogSink());
         ZeroServerTcpApplication application = new ZeroServerTcpApplication(runtime, second);

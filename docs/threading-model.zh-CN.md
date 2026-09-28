@@ -1,5 +1,12 @@
 # 线程模型设计
 
+## 2026-09-28 报告核实补充
+
+- `ExecutorActorScheduler` 对每 lane 和全局未完成消息施加有界准入；同 lane 会等待前一条异步 stage 完成后再 drain，executor 拒绝、取消和异常都会释放预算。它仍使用组合根提供的 executor，不创建集群 mailbox 或持久邮箱。
+- `DefaultPersistenceManager` 的定时 flush 只提交异步流程，不在调度线程 `join`；flush 请求按调用独立完成。达到 dirty limit 时登记失败，业务应通过统计做降级或告警。
+- 网络握手、鉴权和 replay 检查仍必须在连接生命周期约束内完成；UDP peer 的地址上下文只提供会话生命周期，不把 datagram 变成可靠连接。
+- `LocalWorldService.migrateAsync` 是跨 lane 编排入口；同步 `migrate` 仅作为兼容 facade，禁止在 Actor/Netty/IO 线程调用。
+
 ## 2026-09-26 并发边界补充
 
 本轮专项审查确认并修复了几类容易被异步回调放大的竞态：Actor lane 的登记/注销必须按句柄身份 fencing，异步 handler 的取消、异常和 executor 拒绝必须释放当前 lane 的准入预算；运行时关闭必须先停止新提交，再以幂等方式清理已登记资源；事件总线、帧循环、网络连接和 World/Player/Room/NPC 状态只接受当前代际或当前版本的完成结果。完成回调不得在外部线程直接修改绑定状态，必须回到所属执行域。

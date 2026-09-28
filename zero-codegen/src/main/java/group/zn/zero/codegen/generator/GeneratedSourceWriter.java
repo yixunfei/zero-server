@@ -39,7 +39,7 @@ public final class GeneratedSourceWriter {
                 }
             }
             createParent(path);
-            Files.writeString(path, content, StandardCharsets.UTF_8);
+            OutputFiles.replace(path.toAbsolutePath().normalize(), content);
         } catch (IOException ex) {
             throw outputFailure(path, ex);
         }

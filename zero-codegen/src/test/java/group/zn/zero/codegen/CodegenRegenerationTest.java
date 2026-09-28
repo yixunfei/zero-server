@@ -84,6 +84,7 @@ class CodegenRegenerationTest {
             var request = request(List.of(language), "long uid");
             generator.generate(request);
             Path protectedFile = outputs(request).stream()
+                    .filter(path -> path.getFileName().toString().matches(".*\\.(java|cs|ts|gd)$"))
                     .filter(path -> !path.getFileName().toString().endsWith("Imp.java"))
                     .findFirst().orElseThrow();
             Files.writeString(protectedFile, "// handwritten source\n");

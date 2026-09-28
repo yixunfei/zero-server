@@ -89,7 +89,9 @@ public final class RedisDataAdapter extends AbstractRepositoryAdapter {
             final ZeroDataObjectMetadata metadata,
             final ZeroPayloadCodec<T> payloadCodec,
             final int codecVersion) {
-        return registerZcodeRepository(name, metadata, payloadCodec, codecVersion, null);
+        throw new IllegalStateException(
+                "Redis repository registration requires an explicit RedisClient; "
+                        + "use registerDriverRepository or registerInMemoryZcodeRepository for a local prototype");
     }
 
     /**
@@ -110,12 +112,38 @@ public final class RedisDataAdapter extends AbstractRepositoryAdapter {
             final ZeroPayloadCodec<T> payloadCodec,
             final int codecVersion,
             final LocalDiskDataJournal localJournal) {
+        throw new IllegalStateException(
+                "Redis repository registration requires an explicit RedisClient; "
+                        + "use registerDriverRepository or registerInMemoryZcodeRepository for a local prototype");
+    }
+
+    /**
+     * Registers an explicitly local zcode repository for tests or a
+     * single-process prototype. This method never provides Redis durability or
+     * multi-instance sharing.
+     *
+     * @param name repository name; non-null.
+     * @param metadata mapping metadata; non-null.
+     * @param payloadCodec payload codec; non-null.
+     * @param codecVersion payload codec version; positive.
+     * @param localJournal optional local journal.
+     * @param <ID> identifier type.
+     * @param <T> entity type.
+     * @return registered local repository.
+     */
+    public <ID, T extends VersionedEntity<ID>> ZeroDataEnvelopeCrudRepository<ID, T>
+            registerInMemoryZcodeRepository(
+                    final String name,
+                    final ZeroDataObjectMetadata metadata,
+                    final ZeroPayloadCodec<T> payloadCodec,
+                    final int codecVersion,
+                    final LocalDiskDataJournal localJournal) {
         ZeroDataObjectMetadata currentMetadata = Objects.requireNonNull(metadata, "metadata");
         ZeroDataEntityCodec<ID, T> entityCodec = new ZeroDataEntityCodec<>(
                 currentMetadata,
                 Objects.requireNonNull(payloadCodec, "payloadCodec"),
                 codecVersion);
-        RedisDataEnvelopeStore store = new RedisDataEnvelopeStore(
+        InMemoryRedisDataEnvelopeStore store = new InMemoryRedisDataEnvelopeStore(
                 currentMetadata.namespace(),
                 currentMetadata.collection(),
                 keyStrategy,
@@ -124,6 +152,26 @@ public final class RedisDataAdapter extends AbstractRepositoryAdapter {
         ZeroDataEnvelopeCrudRepository<ID, T> repository = new ZeroDataEnvelopeCrudRepository<>(entityCodec, store);
         registerRepository(name, repository);
         return repository;
+    }
+
+    /**
+     * Registers an explicitly local zcode repository without a disk journal.
+     *
+     * @param name repository name; non-null.
+     * @param metadata mapping metadata; non-null.
+     * @param payloadCodec payload codec; non-null.
+     * @param codecVersion payload codec version; positive.
+     * @param <ID> identifier type.
+     * @param <T> entity type.
+     * @return registered local repository.
+     */
+    public <ID, T extends VersionedEntity<ID>> ZeroDataEnvelopeCrudRepository<ID, T>
+            registerInMemoryZcodeRepository(
+                    final String name,
+                    final ZeroDataObjectMetadata metadata,
+                    final ZeroPayloadCodec<T> payloadCodec,
+                    final int codecVersion) {
+        return registerInMemoryZcodeRepository(name, metadata, payloadCodec, codecVersion, null);
     }
 
     /**

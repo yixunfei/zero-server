@@ -190,7 +190,8 @@ final class DefaultGameRuntime implements GameRuntime {
                     RuntimeErrorCode.RUNTIME_COMPONENT_START_FAILED,
                     RuntimeFailurePhase.START,
                     componentId,
-                    "component=" + componentId);
+                    "component=" + componentId,
+                    safeCause(failure));
         }
         startedComponents.record(componentId, lifecycle);
         tracker.started(componentId, elapsed(startedAt));
@@ -249,7 +250,13 @@ final class DefaultGameRuntime implements GameRuntime {
                 RuntimeErrorCode.RUNTIME_COMPONENT_START_FAILED,
                 RuntimeFailurePhase.START,
                 null,
-                "runtime=start");
+                "runtime=start",
+                safeCause(failure));
+    }
+
+    /** 已经是安全装配异常的失败不再把其可能包含的业务文本作为 cause 重新暴露。 */
+    private Throwable safeCause(final Throwable failure) {
+        return failure instanceof RuntimeAssemblyException ? null : failure;
     }
 
     private RuntimeAssemblyException reuseFailure() {

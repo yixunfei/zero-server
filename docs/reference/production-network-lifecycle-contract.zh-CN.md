@@ -246,3 +246,10 @@ ZeroProductionNetworkFocusedTestPlan
 ```
 
 当前网络 minimum slice 状态是 `minimum-slice-implemented / productionReady=false`。任何未覆盖扩展都应单独评估设计、兼容性、性能、安全和验证范围；合入公共契约前必须经过维护者评审。
+# 2026-09-28 报告核实补充
+
+`ServerFactory.tcp(...)` 的无 lifecycle 重载现在主动失败，避免调用方误把裸 Netty 帧入口当成已鉴权的生产入口。使用 production lifecycle 时，连接级 admission 和 frame budget 在握手阶段同样生效；鉴权/重放策略由 `SecurityChain` 注入，默认 fail-closed。
+
+UDP 的 peer 表只提供远端地址上下文、open/close 生命周期、容量和空闲回收。它不提供 KCP 级可靠传输、重传、拥塞控制或自动鉴权。超长 datagram 被计数并丢弃，socket 继续服务其他 peer；来源封禁由上层网关或业务策略选择。
+
+KCP 当前没有实现，`ServerFactory.kcpUnsupported(...)` 是明确的 fail-fast 能力边界。

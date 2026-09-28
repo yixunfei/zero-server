@@ -1,8 +1,8 @@
 package group.zn.zero.player;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import group.zn.zero.actor.scheduler.LocalActorScheduler;
 import group.zn.zero.cache.InMemoryCacheService;
 import group.zn.zero.data.repository.InMemoryCrudRepository;
@@ -15,6 +15,19 @@ import org.junit.jupiter.api.Test;
 
 /** 玩家异步快照必须回到正确 lane 且不能倒退版本。 @author zn */
 class PlayerLoadConcurrencyTest {
+    /** 同一账号第二次登录被拒绝，不覆盖已建立的会话。 */
+    @Test void duplicateLoginShouldBeRejectedWithoutOverwritingSession() {
+        try (var service = service(new InMemoryCacheService<>())) {
+            service.login(new PlayerLoginRequest("account", "token-1", "trace-1"))
+                    .toCompletableFuture().join();
+            var duplicate = service.login(new PlayerLoginRequest("account", "token-2", "trace-2"));
+            var failure = assertThrows(CompletionException.class,
+                    () -> duplicate.toCompletableFuture().join());
+            assertEquals(PlayerErrorCode.ACCOUNT_ALREADY_ONLINE,
+                    ((group.zn.zero.core.error.ZeroException) failure.getCause()).errorCode());
+            assertEquals(1L, service.querySession("account", "q").toCompletableFuture().join().orElseThrow());
+        }
+    }
     /** 先返回的新版本不被较早请求的迟到旧版本覆盖。 */
     @Test void delayedOldSnapshotDoesNotReplaceNewerProfile() {
         var cache = new ControlledCache();
@@ -44,7 +57,8 @@ class PlayerLoadConcurrencyTest {
             }
         }
     }
-    private static LocalPlayerService service(ControlledCache cache) {
+    private static LocalPlayerService service(
+            group.zn.zero.cache.CacheService<Long, PlayerProfile> cache) {
         return new LocalPlayerService(new LocalActorScheduler(), account -> 1L, new InMemoryCrudRepository<>(), cache);
     }
     /** 依序提供受控读取结果。 */

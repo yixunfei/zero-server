@@ -16,6 +16,8 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -51,13 +53,36 @@ public final class SiProtocolDslParser {
             final String schemaName,
             final String source,
             final ProtocolIdRange configuredRange) {
+        Map<String, String> types = declarations(source);
+        ProtocolDslDocument document = parseProjectFile(namespace, schemaName, source, configuredRange, types);
+        ProtocolDslValidator.validate(document);
+        return document;
+    }
+
+    /** 第一遍只登记类型；返回可变有序映射，供工程解析器合并并检查重复。 */
+    Map<String, String> declarations(final String source) {
+        Map<String, String> types = new LinkedHashMap<>();
+        for (Block block : readTopLevel(preprocess(source).lines()).blocks()) {
+            if (("enum".equals(block.kind()) || "struct".equals(block.kind()))
+                    && types.putIfAbsent(block.name(), block.kind()) != null) {
+                throw parseError(block.lineNumber(), "duplicate type: " + block.name());
+            }
+        }
+        return types;
+    }
+
+    /** 第二遍使用全工程符号解析字段；统一校验由工程解析器执行。 */
+    ProtocolDslDocument parseProjectFile(
+            final String namespace, final String schemaName, final String source,
+            final ProtocolIdRange configuredRange, final Map<String, String> types) {
         Objects.requireNonNull(namespace, "namespace");
         Objects.requireNonNull(schemaName, "schemaName");
         Objects.requireNonNull(source, "source");
         PreprocessedSource preprocessed = preprocess(source);
         TopLevel topLevel = readTopLevel(preprocessed.lines());
-        Set<String> enumNames = declaredNames(topLevel.blocks(), "enum");
-        Set<String> messageNames = declaredNames(topLevel.blocks(), "struct");
+        Set<String> enumNames = new HashSet<>();
+        Set<String> messageNames = new HashSet<>();
+        types.forEach((name, kind) -> ("enum".equals(kind) ? enumNames : messageNames).add(name));
         ProtocolTypeParser typeParser = new ProtocolTypeParser(enumNames, messageNames);
 
         List<ProtocolEnum> enums = new ArrayList<>();
@@ -84,9 +109,7 @@ public final class SiProtocolDslParser {
         addProtocolMethods(schemaName, ProtocolDirection.SERVER_TO_CLIENT, serverToClient,
                 normalizeServerStart(range.serverToClientStart()), protocols, messages, methods);
 
-        ProtocolDslDocument document = new ProtocolDslDocument(namespace, protocols, enums, messages, methods);
-        ProtocolDslValidator.validate(document);
-        return document;
+        return new ProtocolDslDocument(namespace, protocols, enums, messages, methods);
     }
 
     private PreprocessedSource preprocess(final String source) {
@@ -165,7 +188,7 @@ public final class SiProtocolDslParser {
     }
 
     private boolean isTopLevelStart(final String text) {
-        return text.startsWith("@")
+        return (text.startsWith("@") && !text.startsWith("@id"))
                 || "client_to_server:".equals(text)
                 || "server_to_client:".equals(text)
                 || text.startsWith("enum ")
@@ -184,16 +207,6 @@ public final class SiProtocolDslParser {
             return "struct";
         }
         return "";
-    }
-
-    private Set<String> declaredNames(final List<Block> blocks, final String kind) {
-        Set<String> names = new HashSet<>();
-        for (Block block : blocks) {
-            if (kind.equals(block.kind()) && !names.add(block.name())) {
-                throw parseError(block.lineNumber(), "duplicate " + kind + " name: " + block.name());
-            }
-        }
-        return names;
     }
 
     private ProtocolEnum parseEnum(final Block block) {
@@ -238,7 +251,7 @@ public final class SiProtocolDslParser {
             String fieldName = text.substring(split + 1).trim();
             FieldOptions options = readFieldOptions(pendingAnnotations);
             pendingAnnotations.clear();
-            ParsedType parsedType = typeParser.parseFieldType(typeExpression);
+            ParsedType parsedType = parseFieldType(typeParser, typeExpression, line.number());
             fields.add(new ProtocolField(
                     fieldName,
                     parsedType.type(),
@@ -277,7 +290,7 @@ public final class SiProtocolDslParser {
                     methodName,
                     fields,
                     combineComment(line.comment(), pendingAnnotations),
-                    line.number()));
+                    line.number(), explicitId(pendingAnnotations, line.number())));
             pendingAnnotations.clear();
         }
         if (!pendingAnnotations.isEmpty()) {
@@ -303,7 +316,7 @@ public final class SiProtocolDslParser {
             }
             String typeExpression = token.substring(0, split).trim();
             String name = token.substring(split + 1).trim();
-            ParsedType parsedType = typeParser.parseFieldType(typeExpression);
+            ParsedType parsedType = parseFieldType(typeParser, typeExpression, lineNumber);
             fields.add(new ProtocolField(name, parsedType.type(), order++, parsedType.nullable(), false, ""));
         }
         return fields;
@@ -317,8 +330,18 @@ public final class SiProtocolDslParser {
             final List<ProtocolDefinition> protocols,
             final List<ProtocolMessage> messages,
             final List<ProtocolMethod> methods) {
-        int id = startId;
+        long nextId = startId;
+        boolean explicit = drafts.stream().anyMatch(draft -> draft.explicitId() != null);
         for (MethodDraft draft : drafts) {
+            if (explicit && draft.explicitId() == null) {
+                throw parseError(draft.lineNumber(), "all methods in this direction must declare @id(...)");
+            }
+            long selected = explicit ? draft.explicitId() : nextId;
+            int parity = direction == ProtocolDirection.CLIENT_TO_SERVER ? 1 : 0;
+            if (selected <= 0 || selected > Integer.MAX_VALUE || selected % 2 != parity) {
+                throw parseError(draft.lineNumber(), "protocol id must be positive int with direction parity: " + selected);
+            }
+            int id = (int) selected;
             String messageName = toUpperCamel(schemaName) + toUpperCamel(draft.methodName()) + "Protocol";
             String eventName = messageName.substring(0, messageName.length() - "Protocol".length());
             String boName = eventName + "EventBO";
@@ -339,8 +362,30 @@ public final class SiProtocolDslParser {
                     draft.comment(),
                     draft.parameters(),
                     false));
-            id += 2;
+            nextId += 2;
         }
+    }
+
+    private ParsedType parseFieldType(final ProtocolTypeParser parser, final String text, final int line) {
+        try {
+            return parser.parseFieldType(text);
+        } catch (ZeroException ex) {
+            throw parseError(line, ex.message(), ex);
+        }
+    }
+
+    private Integer explicitId(final List<String> annotations, final int line) {
+        Integer id = null;
+        for (String annotation : annotations) {
+            if (!annotation.startsWith("@id")) {
+                continue;
+            }
+            if (id != null || !annotation.matches("@id\\(\\d+\\)")) {
+                throw parseError(line, "expected one @id(positiveInteger) annotation");
+            }
+            id = parseInt(line, annotation.substring(4, annotation.length() - 1), "protocol id");
+        }
+        return id;
     }
 
     private int normalizeClientStart(final int value) {
@@ -500,8 +545,10 @@ public final class SiProtocolDslParser {
      * @param parameters 参数列表。
      * @param comment 注释。
      * @param lineNumber 声明行号。
+     * @param explicitId 显式稳定协议号，可为空。
      */
-    private record MethodDraft(String methodName, List<ProtocolField> parameters, String comment, int lineNumber) {
+    private record MethodDraft(String methodName, List<ProtocolField> parameters, String comment,
+                               int lineNumber, Integer explicitId) {
     }
 
     /**

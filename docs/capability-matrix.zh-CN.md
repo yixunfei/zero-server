@@ -1,6 +1,8 @@
 # zeroServer 能力矩阵
 
-本文给出 `0.1.0-SNAPSHOT` 的实现状态和明确边界，核对日期为 2026-09-18。状态只描述当前仓库代码与测试，不等同于生产容量或稳定性承诺；`productionReady=false`。
+本文给出 `0.1.0-SNAPSHOT` 的实现状态和明确边界，核对日期为 2026-09-28。状态只描述当前仓库代码与测试，不等同于生产容量或稳定性承诺；`productionReady=false`。
+
+2026-09-28 报告核实补充：TCP 默认工厂现在要求显式 production lifecycle；Redis 本地实现仅可通过显式 prototype 入口使用；Nacos/Kafka 已有真实 adapter 但外部集群证据仍需项目提供；KCP、可靠 UDP、跨节点 replay、可靠房间事件日志和跨进程 world ownership 仍是明确缺口。逐项源码、证据和迁移步骤见[报告核实迁移说明](migrations/20260928-report-audit-remediation.md)及任务审计矩阵。
 
 2026-09-26 增量复核了全仓质量基线、Production 按需装配与 `local + net` 入口，见[质量报告](reports/quality-baseline-20260926.zh-CN.md)。其余能力条目沿用上述盘点日期，不表示本轮逐项重新验收。
 

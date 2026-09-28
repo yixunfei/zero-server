@@ -19,9 +19,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 /**
- * Netty UDP 伪连接。
+ * Netty UDP 远端地址上下文。
  *
- * <p>UDP 无连接，本对象只表示一次远端地址上下文。
+ * <p>UDP 无连接，本对象在同一远端地址的多个数据报之间复用，不提供可靠传输。
  *
  * @author zn
  */

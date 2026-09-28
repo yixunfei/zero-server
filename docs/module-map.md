@@ -1,5 +1,13 @@
 # zeroServer 模块图
 
+2026-09-27 codegen 入口：`CodegenProjectConfig` 读取 CLI/GUI 共用工程设置；`CodegenExecution` 协调只读预览、检查和执行；
+`SiProtocolProjectParser` 登记全工程符号，`SiProtocolDslParser` 解析显式 `@id(...)`。
+`DefaultCodeGenerator.plan` 只渲染；`GeneratedOutputPlan` 负责文件索引；`ManagedOutput` 负责摘要归属与过期计划；
+`OutputManifest`、`OutputTransaction`、`OutputFiles` 分别管理清单、加锁恢复、底层文件操作。
+依赖方向仍为 codegen → runtime/protocol；Gson 从测试依赖提升为 codegen 的 JSON 配置依赖，不引入核心模块。
+禁止生成器反向调用业务 BO 或修改 DSL；未完成事务必须先恢复，手改生成物和 BOImp 不得自动清理。
+行为、目标支持与验证边界见[codegen 迁移说明](migrations/20260927-codegen-generalization.md)。
+
 
 性能增量入口（2026-09-23）：`zero-event/bus/InMemoryEventBus` 负责单版本注册快照和异步续调；
 `zero-aoi/ObserverState` 保存观察者代次和原始序号，候选工作区由 `InMemoryAoiIndex` 管理；

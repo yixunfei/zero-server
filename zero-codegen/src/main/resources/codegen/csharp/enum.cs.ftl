@@ -1,7 +1,8 @@
 /*
  * ${generatedMarker}. Do not edit manually.
  */
-namespace ${namespace};
+namespace ${namespace}
+{
 
 /// <summary>
 /// ${comment}
@@ -12,4 +13,5 @@ public enum ${name}
     /// <summary>${value.comment}</summary>
     ${value.name} = ${value.value?c}<#if value_has_next>,</#if>
 </#list>
+}
 }

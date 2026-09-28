@@ -5,7 +5,8 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace ${namespace};
+namespace ${namespace}
+{
 
 /// <summary>
 /// 生成协议 payload DTO 的轻量标记接口。
@@ -37,6 +38,10 @@ public sealed class ZeroWriter
     /// <summary>写入 byte。</summary>
     public void WriteByte(int value)
     {
+        if (value < sbyte.MinValue || value > sbyte.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(value), "byte exceeds signed byte range");
+        }
         buffer.Add((byte)value);
     }
 
@@ -71,6 +76,10 @@ public sealed class ZeroWriter
     /// <summary>写入非负 long。</summary>
     public void WriteUnsignedLong(ulong value)
     {
+        if (value > long.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(value), "unsigned long exceeds positive long range");
+        }
         WriteRawVarInt64(value);
     }
 
@@ -108,8 +117,8 @@ public sealed class ZeroWriter
     /// <summary>写入数组。</summary>
     public void WriteArray<T>(T[] values, Action<ZeroWriter, T> writer)
     {
-        ArgumentNullException.ThrowIfNull(values);
-        ArgumentNullException.ThrowIfNull(writer);
+        if (values == null) throw new ArgumentNullException(nameof(values));
+        if (writer == null) throw new ArgumentNullException(nameof(writer));
         WriteUnsignedInt(values.Length);
         foreach (T value in values)
         {
@@ -120,8 +129,8 @@ public sealed class ZeroWriter
     /// <summary>写入集合。</summary>
     public void WriteCollection<T>(ICollection<T> values, Action<ZeroWriter, T> writer)
     {
-        ArgumentNullException.ThrowIfNull(values);
-        ArgumentNullException.ThrowIfNull(writer);
+        if (values == null) throw new ArgumentNullException(nameof(values));
+        if (writer == null) throw new ArgumentNullException(nameof(writer));
         WriteUnsignedInt(values.Count);
         foreach (T value in values)
         {
@@ -133,9 +142,9 @@ public sealed class ZeroWriter
     public void WriteMap<K, V>(IDictionary<K, V> values, Action<ZeroWriter, K> keyWriter, Action<ZeroWriter, V> valueWriter)
         where K : notnull
     {
-        ArgumentNullException.ThrowIfNull(values);
-        ArgumentNullException.ThrowIfNull(keyWriter);
-        ArgumentNullException.ThrowIfNull(valueWriter);
+        if (values == null) throw new ArgumentNullException(nameof(values));
+        if (keyWriter == null) throw new ArgumentNullException(nameof(keyWriter));
+        if (valueWriter == null) throw new ArgumentNullException(nameof(valueWriter));
         WriteUnsignedInt(values.Count);
         foreach (KeyValuePair<K, V> entry in values)
         {
@@ -147,13 +156,13 @@ public sealed class ZeroWriter
     /// <summary>写入 nullable 字段 presence bitmap。</summary>
     public void WritePresenceBits(int fieldCount, Func<int, bool> presentPredicate)
     {
-        ArgumentNullException.ThrowIfNull(presentPredicate);
+        if (presentPredicate == null) throw new ArgumentNullException(nameof(presentPredicate));
         if (fieldCount < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(fieldCount));
         }
         WriteUnsignedInt(fieldCount);
-        int byteCount = (fieldCount + 7) / 8;
+        int byteCount = checked((int)(((long)fieldCount + 7) / 8));
         for (int byteIndex = 0; byteIndex < byteCount; byteIndex++)
         {
             int word = 0;
@@ -166,7 +175,7 @@ public sealed class ZeroWriter
                     word |= 1 << (bitIndex - baseIndex);
                 }
             }
-            WriteByte(word);
+            buffer.Add((byte)word);
         }
     }
 
@@ -196,12 +205,14 @@ public sealed class ZeroWriter
         {
             buffer.RemoveRange(marker, shrink);
         }
-        List<byte> encoded = new List<byte>(MaxIntBytes);
-        WriteUnsignedIntTo(encoded, length);
-        for (int index = 0; index < encoded.Count; index++)
+        uint remaining = (uint)length;
+        int position = marker;
+        while ((remaining & ~0x7Fu) != 0)
         {
-            buffer[marker + index] = encoded[index];
+            buffer[position++] = (byte)((remaining & 0x7Fu) | 0x80u);
+            remaining >>= 7;
         }
+        buffer[position] = (byte)remaining;
     }
 
     private void WriteFixedInt(int value)
@@ -240,17 +251,6 @@ public sealed class ZeroWriter
         buffer.Add((byte)value);
     }
 
-    private static void WriteUnsignedIntTo(List<byte> target, int value)
-    {
-        uint remaining = (uint)value;
-        while ((remaining & ~0x7Fu) != 0)
-        {
-            target.Add((byte)((remaining & 0x7Fu) | 0x80u));
-            remaining >>= 7;
-        }
-        target.Add((byte)remaining);
-    }
-
     private static int UnsignedIntSize(int value)
     {
         if ((value & ~0x7F) == 0)
@@ -279,7 +279,8 @@ public sealed class ZeroWriter
 public sealed class ZeroReader
 {
     private readonly byte[] buffer;
-    private readonly int limit;
+    private int limit;
+    private readonly Stack<int> objectLimits = new Stack<int>();
     private int readerIndex;
 
     /// <summary>创建读取器。</summary>
@@ -292,7 +293,7 @@ public sealed class ZeroReader
     public ZeroReader(byte[] bytes, int offset, int length)
     {
         buffer = bytes ?? throw new ArgumentNullException(nameof(bytes));
-        if (offset < 0 || length < 0 || offset + length > bytes.Length)
+        if (offset < 0 || offset > bytes.Length || length < 0 || length > bytes.Length - offset)
         {
             throw new ArgumentOutOfRangeException(nameof(length));
         }
@@ -307,7 +308,12 @@ public sealed class ZeroReader
     }
 
     /// <summary>读取 byte。</summary>
-    public byte ReadByte()
+    public sbyte ReadByte()
+    {
+        return unchecked((sbyte)ReadRawByte());
+    }
+
+    private byte ReadRawByte()
     {
         RequireReadable(1);
         return buffer[readerIndex++];
@@ -316,7 +322,7 @@ public sealed class ZeroReader
     /// <summary>读取 short。</summary>
     public short ReadShort()
     {
-        return (short)ReadInt();
+        return checked((short)ReadInt());
     }
 
     /// <summary>读取 int。</summary>
@@ -347,7 +353,12 @@ public sealed class ZeroReader
     /// <summary>读取非负 long。</summary>
     public ulong ReadUnsignedLong()
     {
-        return ReadRawVarInt64();
+        ulong value = ReadRawVarInt64();
+        if (value > long.MaxValue)
+        {
+            throw new InvalidOperationException("unsigned long exceeds positive long range");
+        }
+        return value;
     }
 
     /// <summary>读取 float。</summary>
@@ -394,8 +405,9 @@ public sealed class ZeroReader
     /// <summary>读取数组。</summary>
     public T[] ReadArray<T>(Func<ZeroReader, T> reader)
     {
-        ArgumentNullException.ThrowIfNull(reader);
+        if (reader == null) throw new ArgumentNullException(nameof(reader));
         int count = ReadUnsignedInt();
+        RequireReadable(count);
         T[] values = new T[count];
         for (int index = 0; index < count; index++)
         {
@@ -407,8 +419,9 @@ public sealed class ZeroReader
     /// <summary>读取列表。</summary>
     public List<T> ReadList<T>(Func<ZeroReader, T> reader)
     {
-        ArgumentNullException.ThrowIfNull(reader);
+        if (reader == null) throw new ArgumentNullException(nameof(reader));
         int count = ReadUnsignedInt();
+        RequireReadable(count);
         List<T> values = new List<T>(count);
         for (int index = 0; index < count; index++)
         {
@@ -421,8 +434,9 @@ public sealed class ZeroReader
     public HashSet<T> ReadSet<T>(Func<ZeroReader, T> reader)
         where T : notnull
     {
-        ArgumentNullException.ThrowIfNull(reader);
+        if (reader == null) throw new ArgumentNullException(nameof(reader));
         int count = ReadUnsignedInt();
+        RequireReadable(count);
         HashSet<T> values = new HashSet<T>();
         for (int index = 0; index < count; index++)
         {
@@ -435,9 +449,10 @@ public sealed class ZeroReader
     public Dictionary<K, V> ReadMap<K, V>(Func<ZeroReader, K> keyReader, Func<ZeroReader, V> valueReader)
         where K : notnull
     {
-        ArgumentNullException.ThrowIfNull(keyReader);
-        ArgumentNullException.ThrowIfNull(valueReader);
+        if (keyReader == null) throw new ArgumentNullException(nameof(keyReader));
+        if (valueReader == null) throw new ArgumentNullException(nameof(valueReader));
         int count = ReadUnsignedInt();
+        RequireReadable(checked(count * 2));
         Dictionary<K, V> values = new Dictionary<K, V>(count);
         for (int index = 0; index < count; index++)
         {
@@ -455,13 +470,15 @@ public sealed class ZeroReader
         {
             throw new InvalidOperationException("object length exceeds readable bytes");
         }
+        objectLimits.Push(limit);
+        limit = end;
         return end;
     }
 
     /// <summary>判断对象内是否还有可读字节。</summary>
     public bool HasRemainingInObject(int objectEnd)
     {
-        if (objectEnd < readerIndex || objectEnd > limit)
+        if (objectEnd < readerIndex || objectEnd != limit || objectLimits.Count == 0)
         {
             throw new InvalidOperationException("invalid object end index");
         }
@@ -471,22 +488,24 @@ public sealed class ZeroReader
     /// <summary>结束对象体。</summary>
     public void EndObject(int objectEnd)
     {
-        if (objectEnd < readerIndex || objectEnd > limit)
+        if (objectEnd < readerIndex || objectEnd != limit || objectLimits.Count == 0)
         {
             throw new InvalidOperationException("invalid object end index");
         }
         readerIndex = objectEnd;
+        limit = objectLimits.Pop();
     }
 
     /// <summary>读取 nullable 字段 presence bitmap。</summary>
     public bool[] ReadPresenceBits()
     {
         int fieldCount = ReadUnsignedInt();
+        int byteCount = (int)(((long)fieldCount + 7) / 8);
+        RequireReadable(byteCount);
         bool[] values = new bool[fieldCount];
-        int byteCount = (fieldCount + 7) / 8;
         for (int byteIndex = 0; byteIndex < byteCount; byteIndex++)
         {
-            int word = ReadByte();
+            int word = ReadRawByte();
             int baseIndex = byteIndex * 8;
             int end = Math.Min(fieldCount, baseIndex + 8);
             for (int bitIndex = baseIndex; bitIndex < end; bitIndex++)
@@ -525,7 +544,7 @@ public sealed class ZeroReader
         uint result = 0;
         for (int index = 0; index < 5; index++)
         {
-            byte value = ReadByte();
+            byte value = ReadRawByte();
             result |= (uint)(value & 0x7F) << shift;
             if ((value & 0x80) == 0)
             {
@@ -546,7 +565,7 @@ public sealed class ZeroReader
         ulong result = 0UL;
         for (int index = 0; index < 10; index++)
         {
-            byte value = ReadByte();
+            byte value = ReadRawByte();
             result |= (ulong)(value & 0x7F) << shift;
             if ((value & 0x80) == 0)
             {
@@ -563,9 +582,10 @@ public sealed class ZeroReader
 
     private void RequireReadable(int length)
     {
-        if (length < 0 || readerIndex + length > limit)
+        if (length < 0 || length > limit - readerIndex)
         {
             throw new InvalidOperationException("not enough readable bytes");
         }
     }
+}
 }

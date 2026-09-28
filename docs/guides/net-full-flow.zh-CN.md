@@ -156,3 +156,6 @@ runtime.start();
 创建后续组件失败也会回滚。需要生产鉴权/TLS 时仍显式传入既有 lifecycle/TLS 参数。
 `ioModule` 是可选扩展，最小 local/bootstrap 不会因此自动增加 Netty 线程。
 直接嵌入使用 `NettyIoResources.open(options)` 时，由组合根按相同顺序关闭所有借用服务器和 IO 资源。
+# 2026-09-28 报告核实补充
+
+网络接入必须先选择传输契约：生产 TCP 传入 `ProductionNetworkLifecycle`；自带安全协议的低层 TCP 才使用 `tcpUnmanaged`；UDP 需要地址上下文时使用带 `ConnectionListener`/`UdpSessionOptions` 的重载。KCP 尚未提供实现，不能通过工厂启动。

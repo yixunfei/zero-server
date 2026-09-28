@@ -1,0 +1,9 @@
+struct WireLimits {
+    byte lowByte
+    short lowShort
+    uint highUint
+    long lowLong
+    ulong highUlong
+    bytes data
+    byte[] signedBytes
+}

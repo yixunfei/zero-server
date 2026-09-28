@@ -12,6 +12,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.ArrayDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -40,6 +41,9 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
      * 默认最大批量数量。
      */
     public static final int DEFAULT_MAX_BATCH_SIZE = 1024;
+
+    /** 默认脏对象上限，防止停机期间无限增长。 */
+    public static final int DEFAULT_MAX_DIRTY_ENTRIES = 100_000;
 
     /**
      * 服务名称。
@@ -91,14 +95,20 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
      */
     private final AtomicLong flushFailureCount = new AtomicLong();
 
-    /** 单飞 flush，避免同一快照被并行保存两次。 */
+    /** 当前 flush；后续调用排队并各自获得自己的结果。 */
     private final AtomicReference<CompletableFuture<PersistenceFlushResult>> activeFlush = new AtomicReference<>();
+    /** flush 请求队列。 */
+    private final ArrayDeque<FlushRequest> queuedFlushes = new ArrayDeque<>();
+    /** flush 调度锁。 */
+    private final Object flushLock = new Object();
     /** 停机与新增脏入口的线性化锁，不在锁内等待外部 IO。 */
     private final Object admissionLock = new Object();
     /** 是否已经停止接受新的脏入口。 */
     private boolean stopping;
     /** 停机等待预算。 */
     private final Duration shutdownTimeout;
+    /** 脏对象数量上限。 */
+    private final int maxDirtyEntries;
 
     /**
      * 创建默认统一持久化管理服务。
@@ -143,6 +153,12 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
      */
     public DefaultPersistenceManager(final String serviceName, final PersistenceBindingExecutor bindingExecutor,
             final Clock clock, final Duration shutdownTimeout) {
+        this(serviceName, bindingExecutor, clock, shutdownTimeout, DEFAULT_MAX_DIRTY_ENTRIES);
+    }
+
+    /** 创建带脏对象预算的持久化管理器。 */
+    public DefaultPersistenceManager(final String serviceName, final PersistenceBindingExecutor bindingExecutor,
+            final Clock clock, final Duration shutdownTimeout, final int maxDirtyEntries) {
         this.shutdownTimeout = Objects.requireNonNull(shutdownTimeout, "shutdownTimeout");
         if (shutdownTimeout.isNegative() || shutdownTimeout.isZero()) {
             throw new IllegalArgumentException("shutdownTimeout must be positive");
@@ -150,6 +166,10 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
         this.serviceName = requireText(serviceName, "serviceName");
         this.bindingExecutor = Objects.requireNonNull(bindingExecutor, "bindingExecutor");
         this.clock = Objects.requireNonNull(clock, "clock");
+        if (maxDirtyEntries <= 0) {
+            throw new IllegalArgumentException("maxDirtyEntries must be positive");
+        }
+        this.maxDirtyEntries = maxDirtyEntries;
     }
 
     /**
@@ -209,6 +229,10 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             if (stopping) {
                 throw ZeroException.of(DataErrorCode.PERSISTENCE_FLUSH_FAILED, "persistence is stopping", null);
             }
+            if (!dirtyEntries.containsKey(key) && dirtyEntries.size() >= maxDirtyEntries) {
+                throw ZeroException.of(DataErrorCode.PERSISTENCE_DIRTY_LIMIT_EXCEEDED,
+                        "persistence dirty entry limit exceeded", null);
+            }
             dirtyEntries.put(key, new DirtyEntry<>(key, currentTargetName, id, binding, snapshotSupplier,
                     dirtyMarkCount.incrementAndGet()));
         }
@@ -237,23 +261,13 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             throw new IllegalArgumentException("maxBatchSize must be positive");
         }
         CompletableFuture<PersistenceFlushResult> future = new CompletableFuture<>();
-        while (!activeFlush.compareAndSet(null, future)) {
-            CompletableFuture<PersistenceFlushResult> existing = activeFlush.get();
-            if (existing != null) return existing;
-        }
-        try {
-            long startedAt = clock.millis();
-            List<DirtyEntry<?, ?>> batch = dirtyEntries.values().stream().limit(maxBatchSize).toList();
-            flushAttemptCount.addAndGet(batch.size());
-            FlushAccumulator accumulator = new FlushAccumulator(startedAt, batch.size());
-            flushBatch(batch, accumulator).thenApply(this::completeResult).whenComplete((result, failure) -> {
-                activeFlush.compareAndSet(future, null);
-                if (failure == null) future.complete(result);
-                else future.completeExceptionally(failure);
-            });
-        } catch (RuntimeException failure) {
-            activeFlush.compareAndSet(future, null);
-            future.completeExceptionally(failure);
+        synchronized (flushLock) {
+            if (activeFlush.get() == null) {
+                activeFlush.set(future);
+                startFlush(new FlushRequest(future, maxBatchSize));
+            } else {
+                queuedFlushes.addLast(new FlushRequest(future, maxBatchSize));
+            }
         }
         return future;
     }
@@ -277,7 +291,7 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
         PersistenceScheduleHandle handle = scheduler.scheduleAtFixedRate(
                 serviceName + "-flush",
                 currentInterval,
-                () -> flushNow().toCompletableFuture().join());
+                () -> flushNow());
         scheduleHandles.add(handle);
         return handle;
     }
@@ -346,6 +360,40 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
                     }));
         }
         return stage;
+    }
+
+    private void startFlush(final FlushRequest request) {
+        try {
+            long startedAt = clock.millis();
+            List<DirtyEntry<?, ?>> batch = dirtyEntries.values().stream()
+                    .limit(request.maxBatchSize()).toList();
+            flushAttemptCount.addAndGet(batch.size());
+            FlushAccumulator accumulator = new FlushAccumulator(startedAt, batch.size());
+            flushBatch(batch, accumulator).thenApply(this::completeResult)
+                    .whenComplete((result, failure) -> finishFlush(request, result, failure));
+        } catch (RuntimeException failure) {
+            finishFlush(request, null, failure);
+        }
+    }
+
+    private void finishFlush(final FlushRequest request, final PersistenceFlushResult result,
+            final Throwable failure) {
+        FlushRequest next = null;
+        synchronized (flushLock) {
+            activeFlush.compareAndSet(request.future(), null);
+            if (!queuedFlushes.isEmpty()) {
+                next = queuedFlushes.removeFirst();
+                activeFlush.set(next.future());
+            }
+        }
+        if (failure == null) {
+            request.future().complete(result);
+        } else {
+            request.future().completeExceptionally(failure);
+        }
+        if (next != null) {
+            startFlush(next);
+        }
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -421,6 +469,10 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             throw new IllegalArgumentException(name + " must not be blank");
         }
         return current;
+    }
+
+    /** 等待中的 flush 请求。 */
+    private record FlushRequest(CompletableFuture<PersistenceFlushResult> future, int maxBatchSize) {
     }
 
     /**

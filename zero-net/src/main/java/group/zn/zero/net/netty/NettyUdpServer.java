@@ -19,9 +19,15 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.DatagramPacket;
 import java.net.InetSocketAddress;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -55,6 +61,12 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
      * 业务执行器。
      */
     private final Executor handlerExecutor;
+
+    /** 远端地址上下文容量与空闲预算。 */
+    private final UdpSessionOptions sessionOptions;
+
+    /** 超长数据报丢弃次数。 */
+    private final AtomicLong oversizedDatagrams = new AtomicLong();
 
     /**
      * 实际绑定地址。
@@ -98,6 +110,15 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
     public NettyUdpServer(final ServerOptions options, final ProtocolFrameCodec frameCodec,
             final ServerFrameHandler frameHandler, final ConnectionListener connectionListener,
             final Executor handlerExecutor, final NettyIoResources ioResources) {
+        this(options, frameCodec, frameHandler, connectionListener, handlerExecutor,
+                ioResources, UdpSessionOptions.defaults());
+    }
+
+    /** 创建有界远端地址上下文的 UDP 服务；共享 IO 组由调用方管理。 */
+    public NettyUdpServer(final ServerOptions options, final ProtocolFrameCodec frameCodec,
+            final ServerFrameHandler frameHandler, final ConnectionListener connectionListener,
+            final Executor handlerExecutor, final NettyIoResources ioResources,
+            final UdpSessionOptions sessionOptions) {
         this.borrowedResources = ioResources;
         this.options = Objects.requireNonNull(options, "options");
         if (options.serverType() != ServerType.UDP) {
@@ -107,6 +128,12 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
         this.frameHandler = Objects.requireNonNull(frameHandler, "frameHandler");
         this.connectionListener = Objects.requireNonNull(connectionListener, "connectionListener");
         this.handlerExecutor = Objects.requireNonNull(handlerExecutor, "handlerExecutor");
+        this.sessionOptions = Objects.requireNonNull(sessionOptions, "sessionOptions");
+    }
+
+    /** @return 已丢弃的超长数据报数量；线程安全。 */
+    public long oversizedDatagramCount() {
+        return oversizedDatagrams.get();
     }
 
     /**
@@ -199,13 +226,33 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
      */
     private final class UdpFrameHandler extends SimpleChannelInboundHandler<DatagramPacket> {
 
+        /** 仅在所属 EventLoop 访问，按最后访问时间排序。 */
+        private final Map<InetSocketAddress, UdpPeer> peers = new LinkedHashMap<>(16, 0.75f, true);
+        /** 空闲回收任务。 */
+        private ScheduledFuture<?> expiryTask;
+
+        @Override
+        public void channelActive(final ChannelHandlerContext context) throws Exception {
+            long interval = sessionOptions.idleTimeout().toNanos();
+            expiryTask = context.executor().scheduleAtFixedRate(
+                    this::expireIdlePeers, interval, interval, TimeUnit.NANOSECONDS);
+            super.channelActive(context);
+        }
+
+        @Override
+        public void channelInactive(final ChannelHandlerContext context) throws Exception {
+            if (expiryTask != null) {
+                expiryTask.cancel(false);
+            }
+            peers.values().forEach(peer -> safeClose(peer.connection));
+            peers.clear();
+            super.channelInactive(context);
+        }
+
         @Override
         protected void channelRead0(final ChannelHandlerContext context, final DatagramPacket packet) {
             if (packet.content().readableBytes() > options.maxFrameLength()) {
-                context.fireExceptionCaught(ZeroException.of(
-                        NetErrorCode.INVALID_MESSAGE,
-                        "UDP datagram exceeds maxFrameLength",
-                        null));
+                oversizedDatagrams.incrementAndGet();
                 return;
             }
             byte[] bytes = ByteBufUtil.getBytes(packet.content());
@@ -219,20 +266,47 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
                         failure));
                 return;
             }
-            NettyUdpConnection connection = new NettyUdpConnection(
-                    udpConnectionId(packet.sender()),
-                    context.channel(),
-                    packet.sender(),
-                    frameCodec);
-            safeOpen(connection);
+            NettyUdpConnection connection = peer(context, packet.sender()).connection;
             try {
                 handlerExecutor.execute(() -> invokeFrameHandler(context, connection, frame));
             } catch (RuntimeException ex) {
-                safeClose(connection);
                 context.fireExceptionCaught(ZeroException.of(
                         NetErrorCode.HANDLER_FAILED,
                         "submit UDP net handler failed",
                         ex));
+            }
+        }
+
+        private UdpPeer peer(final ChannelHandlerContext context, final InetSocketAddress sender) {
+            UdpPeer existing = peers.get(sender);
+            if (existing != null) {
+                existing.lastSeenNanos = System.nanoTime();
+                return existing;
+            }
+            if (peers.size() >= sessionOptions.maxSessions()) {
+                Iterator<UdpPeer> iterator = peers.values().iterator();
+                UdpPeer evicted = iterator.next();
+                iterator.remove();
+                safeClose(evicted.connection);
+            }
+            NettyUdpConnection connection = new NettyUdpConnection(
+                    udpConnectionId(sender), context.channel(), sender, frameCodec);
+            UdpPeer created = new UdpPeer(connection, System.nanoTime());
+            peers.put(sender, created);
+            safeOpen(connection);
+            return created;
+        }
+
+        private void expireIdlePeers() {
+            long now = System.nanoTime();
+            Iterator<UdpPeer> iterator = peers.values().iterator();
+            while (iterator.hasNext()) {
+                UdpPeer peer = iterator.next();
+                if (now - peer.lastSeenNanos < sessionOptions.idleTimeout().toNanos()) {
+                    break;
+                }
+                iterator.remove();
+                safeClose(peer.connection);
             }
         }
 
@@ -251,18 +325,13 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
                 final ProtocolFrame frame) {
             try {
                 frameHandler.handle(connection, frame).whenComplete((responses, cause) -> {
-                    try {
-                        if (cause != null) {
-                            context.executor().execute(() -> context.fireExceptionCaught(cause));
-                            return;
-                        }
-                        writeResponses(connection, responses);
-                    } finally {
-                        safeClose(connection);
+                    if (cause != null) {
+                        context.executor().execute(() -> context.fireExceptionCaught(cause));
+                        return;
                     }
+                    writeResponses(connection, responses);
                 });
             } catch (RuntimeException ex) {
-                safeClose(connection);
                 context.executor().execute(() -> context.fireExceptionCaught(ZeroException.of(
                         NetErrorCode.HANDLER_FAILED,
                         "UDP net handler failed",
@@ -275,6 +344,17 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
             for (ProtocolFrame response : frames) {
                 connection.sendFrame(response);
             }
+        }
+    }
+
+    /** 单 EventLoop 所有的地址上下文。 */
+    private static final class UdpPeer {
+        private final NettyUdpConnection connection;
+        private long lastSeenNanos;
+
+        UdpPeer(final NettyUdpConnection connection, final long lastSeenNanos) {
+            this.connection = connection;
+            this.lastSeenNanos = lastSeenNanos;
         }
     }
 

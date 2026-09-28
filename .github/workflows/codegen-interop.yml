@@ -1,0 +1,51 @@
+name: Codegen interop
+on:
+  pull_request:
+    paths: ['zero-codegen/**', 'zero-protocol/**', '.github/workflows/codegen-interop.yml']
+  push:
+    branches: [main, master]
+    paths: ['zero-codegen/**', 'zero-protocol/**', '.github/workflows/codegen-interop.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  interop:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Godot 4.4.1
+        shell: pwsh
+        run: |
+          $asset = if ($IsWindows) { 'Godot_v4.4.1-stable_win64.exe.zip' } else { 'Godot_v4.4.1-stable_linux.x86_64.zip' }
+          Invoke-WebRequest "https://github.com/godotengine/godot-builds/releases/download/4.4.1-stable/$asset" -OutFile godot.zip
+          Expand-Archive godot.zip godot
+          $executable = if ($IsWindows) { Get-ChildItem godot -Filter '*_console.exe' | Select-Object -First 1 } else { Get-ChildItem godot -File | Select-Object -First 1 }
+          if (-not $IsWindows) { chmod +x $executable.FullName }
+          "GODOT_BIN=$($executable.FullName)" >> $env:GITHUB_ENV
+      - name: Quality and all target runtimes
+        shell: pwsh
+        run: |
+          mvn -Pquality -pl zero-codegen -am verify -q
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./zero-codegen/scripts/smoke-interop.ps1 -GodotExecutable $env:GODOT_BIN -RequireAll
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: codegen-interop-${{ matrix.os }}
+          path: target/codegen-interop
+          retention-days: 7

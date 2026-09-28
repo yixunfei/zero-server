@@ -6,6 +6,7 @@ import java.lang.reflect.Array;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -36,7 +37,13 @@ public final class ZeroReader {
     /**
      * 可读结束位置。
      */
-    private final int limit;
+    private int limit;
+
+    /** 对象边界栈，按需分配，避免逐层装箱。 */
+    private int[] objectLimits;
+
+    /** 当前对象嵌套深度。 */
+    private int objectDepth;
 
     /**
      * 当前读取位置。
@@ -169,7 +176,11 @@ public final class ZeroReader {
      * @return 读取值。
      */
     public short readShort() {
-        return (short) readInt();
+        int value = readInt();
+        if (value < Short.MIN_VALUE || value > Short.MAX_VALUE) {
+            throw invalid("short exceeds signed short range");
+        }
+        return (short) value;
     }
 
     /**
@@ -428,6 +439,13 @@ public final class ZeroReader {
         if (endIndex < readerIndex || endIndex > limit) {
             throw invalid("object length exceeds readable bytes");
         }
+        if (objectLimits == null) {
+            objectLimits = new int[8];
+        } else if (objectDepth == objectLimits.length) {
+            objectLimits = Arrays.copyOf(objectLimits, objectDepth * 2);
+        }
+        objectLimits[objectDepth++] = limit;
+        limit = endIndex;
         return endIndex;
     }
 
@@ -439,7 +457,7 @@ public final class ZeroReader {
      * @throws ZeroException 对象边界非法时抛出，必须绑定 ErrorCode。
      */
     public boolean hasRemainingInObject(final int objectEnd) {
-        if (objectEnd < readerIndex || objectEnd > limit) {
+        if (objectEnd < readerIndex || objectEnd != limit || objectDepth == 0) {
             throw invalid("invalid object end index");
         }
         return readerIndex < objectEnd;
@@ -452,10 +470,11 @@ public final class ZeroReader {
      * @throws ZeroException 对象边界非法时抛出，必须绑定 ErrorCode。
      */
     public void endObject(final int objectEnd) {
-        if (objectEnd < readerIndex || objectEnd > limit) {
+        if (objectEnd < readerIndex || objectEnd != limit || objectDepth == 0) {
             throw invalid("invalid object end index");
         }
         readerIndex = objectEnd;
+        limit = objectLimits[--objectDepth];
     }
 
     /**

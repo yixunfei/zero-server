@@ -3,6 +3,8 @@
  */
 
 const MAX_INT_BYTES = 5;
+const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder();
 
 /**
  * 生成协议 payload DTO 的轻量标记接口。
@@ -24,32 +26,36 @@ export class ZeroWriter {
   }
 
   writeByte(value: number): void {
+    requireInteger(value, -128, 127, 'byte');
+    this.writeRawByte(value);
+  }
+
+  private writeRawByte(value: number): void {
     this.buffer.push(value & 0xff);
   }
 
   writeShort(value: number): void {
+    requireInteger(value, -32768, 32767, 'short');
     this.writeInt(value);
   }
 
   writeInt(value: number): void {
+    requireInteger(value, -2147483648, 2147483647, 'int');
     this.writeRawVarInt32(((value << 1) ^ (value >> 31)) >>> 0);
   }
 
   writeUnsignedInt(value: number): void {
-    if (value < 0) {
-      throw new Error('unsigned int must not be negative');
-    }
+    requireInteger(value, 0, 2147483647, 'unsigned int');
     this.writeRawVarInt32(value >>> 0);
   }
 
   writeLong(value: bigint): void {
+    requireBigInt(value, -(1n << 63n), (1n << 63n) - 1n, 'long');
     this.writeRawVarInt64((value << 1n) ^ (value >> 63n));
   }
 
   writeUnsignedLong(value: bigint): void {
-    if (value < 0n) {
-      throw new Error('unsigned long must not be negative');
-    }
+    requireBigInt(value, 0n, (1n << 63n) - 1n, 'unsigned long');
     this.writeRawVarInt64(value);
   }
 
@@ -66,7 +72,7 @@ export class ZeroWriter {
   }
 
   writeString(value: string): void {
-    this.writeByteArray(new TextEncoder().encode(value ?? ''));
+    this.writeByteArray(UTF8_ENCODER.encode(value ?? ''));
   }
 
   writeByteArray(value: Uint8Array | null | undefined): void {
@@ -120,7 +126,7 @@ export class ZeroWriter {
           word |= 1 << (bitIndex - base);
         }
       }
-      this.writeByte(word);
+      this.writeRawByte(word);
     }
   }
 
@@ -151,19 +157,19 @@ export class ZeroWriter {
   private writeRawVarInt32(value: number): void {
     let remaining = value >>> 0;
     while ((remaining & ~0x7f) !== 0) {
-      this.writeByte((remaining & 0x7f) | 0x80);
+      this.writeRawByte((remaining & 0x7f) | 0x80);
       remaining >>>= 7;
     }
-    this.writeByte(remaining);
+    this.writeRawByte(remaining);
   }
 
   private writeRawVarInt64(value: bigint): void {
     let remaining = BigInt.asUintN(64, value);
     while ((remaining & ~0x7fn) !== 0n) {
-      this.writeByte(Number((remaining & 0x7fn) | 0x80n));
+      this.writeRawByte(Number((remaining & 0x7fn) | 0x80n));
       remaining >>= 7n;
     }
-    this.writeByte(Number(remaining));
+    this.writeRawByte(Number(remaining));
   }
 }
 
@@ -172,10 +178,13 @@ export class ZeroWriter {
  */
 export class ZeroReader {
   private index: number;
-  private readonly limit: number;
+  private limit: number;
+  private readonly objectLimits: number[] = [];
   private readonly view: DataView;
 
   constructor(private readonly buffer: Uint8Array, offset = 0, length = buffer.length - offset) {
+    requireInteger(offset, 0, buffer.length, 'offset');
+    requireInteger(length, 0, buffer.length - offset, 'length');
     this.index = offset;
     this.limit = offset + length;
     this.view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
@@ -186,12 +195,19 @@ export class ZeroReader {
   }
 
   readByte(): number {
+    const value = this.readRawByte();
+    return value > 127 ? value - 256 : value;
+  }
+
+  private readRawByte(): number {
     this.requireReadable(1);
     return this.buffer[this.index++];
   }
 
   readShort(): number {
-    return this.readInt();
+    const value = this.readInt();
+    requireInteger(value, -32768, 32767, 'short');
+    return value;
   }
 
   readInt(): number {
@@ -214,7 +230,7 @@ export class ZeroReader {
 
   readUnsignedLong(): bigint {
     const value = this.readRawVarInt64();
-    if (value < 0n) {
+    if (value > (1n << 63n) - 1n) {
       throw new Error('unsigned long exceeds positive long range');
     }
     return value;
@@ -242,7 +258,7 @@ export class ZeroReader {
     this.requireReadable(length);
     const bytes = this.buffer.subarray(this.index, this.index + length);
     this.index += length;
-    return new TextDecoder().decode(bytes);
+    return UTF8_DECODER.decode(bytes);
   }
 
   readByteArray(): Uint8Array {
@@ -258,6 +274,7 @@ export class ZeroReader {
 
   readArray<T>(itemReader: (reader: ZeroReader) => T): T[] {
     const count = this.readUnsignedInt();
+    this.requireReadable(count);
     const values: T[] = [];
     for (let index = 0; index < count; index++) {
       values.push(itemReader(this));
@@ -276,6 +293,7 @@ export class ZeroReader {
 
   readMap<K, V>(keyReader: (reader: ZeroReader) => K, valueReader: (reader: ZeroReader) => V): Map<K, V> {
     const count = this.readUnsignedInt();
+    this.requireReadable(count * 2);
     const values = new Map<K, V>();
     for (let index = 0; index < count; index++) {
       values.set(keyReader(this), valueReader(this));
@@ -289,29 +307,33 @@ export class ZeroReader {
     if (end < this.index || end > this.limit) {
       throw new Error('object length exceeds readable bytes');
     }
+    this.objectLimits.push(this.limit);
+    this.limit = end;
     return end;
   }
 
   hasRemainingInObject(objectEnd: number): boolean {
-    if (objectEnd < this.index || objectEnd > this.limit) {
+    if (objectEnd < this.index || objectEnd !== this.limit || this.objectLimits.length === 0) {
       throw new Error('invalid object end index');
     }
     return this.index < objectEnd;
   }
 
   endObject(objectEnd: number): void {
-    if (objectEnd < this.index || objectEnd > this.limit) {
+    if (objectEnd < this.index || objectEnd !== this.limit || this.objectLimits.length === 0) {
       throw new Error('invalid object end index');
     }
     this.index = objectEnd;
+    this.limit = this.objectLimits.pop()!;
   }
 
   readPresenceBits(): boolean[] {
     const fieldCount = this.readUnsignedInt();
-    const values = new Array<boolean>(fieldCount);
     const byteCount = Math.floor((fieldCount + 7) / 8);
+    this.requireReadable(byteCount);
+    const values = new Array<boolean>(fieldCount);
     for (let byteIndex = 0; byteIndex < byteCount; byteIndex++) {
-      const word = this.readByte();
+      const word = this.readRawByte();
       const base = byteIndex * 8;
       const end = Math.min(fieldCount, base + 8);
       for (let bitIndex = base; bitIndex < end; bitIndex++) {
@@ -325,7 +347,7 @@ export class ZeroReader {
     let shift = 0;
     let result = 0;
     for (let index = 0; index < 5; index++) {
-      const value = this.readByte();
+      const value = this.readRawByte();
       result |= (value & 0x7f) << shift;
       if ((value & 0x80) === 0) {
         if (index === 4 && (value & 0xf0) !== 0) {
@@ -342,7 +364,7 @@ export class ZeroReader {
     let shift = 0n;
     let result = 0n;
     for (let index = 0; index < 10; index++) {
-      const value = this.readByte();
+      const value = this.readRawByte();
       result |= BigInt(value & 0x7f) << shift;
       if ((value & 0x80) === 0) {
         if (index === 9 && (value & 0xfe) !== 0) {
@@ -371,4 +393,16 @@ function encodeUnsignedInt(value: number): number[] {
   }
   result.push(remaining);
   return result;
+}
+
+function requireInteger(value: number, min: number, max: number, name: string): void {
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new RangeError(name + ' must be an integer in [' + min + ', ' + max + ']');
+  }
+}
+
+function requireBigInt(value: bigint, min: bigint, max: bigint, name: string): void {
+  if (typeof value !== 'bigint' || value < min || value > max) {
+    throw new RangeError(name + ' exceeds supported 64-bit range');
+  }
 }

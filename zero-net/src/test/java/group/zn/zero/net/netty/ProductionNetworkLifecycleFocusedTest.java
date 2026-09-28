@@ -43,6 +43,26 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class ProductionNetworkLifecycleFocusedTest {
+    /** 首个鉴权帧也必须受入站限流，拒绝后不调用鉴权策略。 */
+    @Test void admissionFrameShouldBeRateLimitedBeforeHandshake() {
+        AtomicInteger handshakes = new AtomicInteger();
+        NetworkRateLimiter limiter = new NetworkRateLimiter() {
+            @Override public boolean allowConnection(final IConnection connection) { return true; }
+            @Override public boolean allowAdmissionFrame(final IConnection connection, final ProtocolFrame frame) {
+                return false;
+            }
+        };
+        ProductionNetworkPolicy policy = (connection, frame) -> {
+            handshakes.incrementAndGet();
+            return NetworkAdmissionDecision.allow();
+        };
+        try (Fixture fixture = new Fixture(fastConfig(), policy, limiter, Runnable::run)) {
+            fixture.write(frame(1, 1, "login"));
+            assertEquals(0, handshakes.get());
+            assertFalse(fixture.channel.isActive());
+            assertTrue(fixture.observedError(NetErrorCode.RATE_LIMITED));
+        }
+    }
     /** 异步 replay 完成时必须复核原鉴权代际，不能以替换或过期主体执行。 */
     @Test void replayCompletionRejectsChangedIdentity() {
         for (boolean expired : new boolean[]{true, false}) {

@@ -6,6 +6,19 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 2026-09-28 报告核实与边界修复
+
+- 完成网络、外部系统、安全、数据缓存、Actor/runtime 与游戏域报告的逐项核查；修复 TCP 默认裸入口、握手限流、UDP peer/超长包、数据库错误分类、持久化 flush、玩家重复登录、world 异步迁移和状态同步摘要校验。
+- Redis 本地实现改为显式 prototype 入口，生产注册必须提供真实 `RedisClient`；Nacos/Kafka 保持真实 adapter 和外部依赖 fail-closed 语义；KCP/可靠 UDP/分布式 replay 等未实现能力继续显式 fail-fast。
+- 0.x API/默认行为变化与迁移步骤见[迁移说明](docs/migrations/20260928-report-audit-remediation.md)，逐条真实性、证据和剩余风险见任务审计矩阵。
+
+### 2026-09-27 协议工具通用性与工程化升级
+
+- 统一四端 signed byte/short 与非负 int/long 边界，拒绝截断和超界对象；Godot 读取失败返回 null DTO，并保留可查询错误状态。
+- `.si` 工程支持跨文件类型引用、来源诊断和方法 `@id(...)`；JSON 项目配置可在 CLI/GUI 共用，新增 validate/plan/check/prune/recover 及机器报告。
+- 生成物使用摘要归属清单、文件锁与可恢复写入；显式清理仅删除未手改的过期产物，BOImp 始终保留。统一源码 LF，减少重复生成写入。
+- 验证 Java 21、C# 8 / .NET Standard 2.1、.NET 8、TS ES2020 / Node / Chrome、Godot；补充两平台 CI。优化 GD 对象回填复制、C# 回填临时分配与 TS UTF-8 编码器复用。迁移及实测证据见[说明](docs/migrations/20260927-codegen-generalization.md)。
+
 ### 2026-09-26 协议生成工具多端升级
 
 - Java、C#、TypeScript、GDScript 生成改为统一渲染与输出预检；跨语言路径冲突、非生成文件和错误目录在写盘前失败，BOImp 与同内容文件继续保留。

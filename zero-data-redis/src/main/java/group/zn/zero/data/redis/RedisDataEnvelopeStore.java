@@ -23,7 +23,14 @@ import java.util.Set;
  *
  * @author zn
  */
-public final class RedisDataEnvelopeStore implements ZeroDataEnvelopeStore {
+/**
+ * @deprecated This is the in-memory prototype implementation. Use
+ * {@link RedisDriverEnvelopeStore} for Redis-backed production persistence or
+ * {@link InMemoryRedisDataEnvelopeStore} when an explicitly local store is
+ * desired.
+ */
+@Deprecated(forRemoval = false)
+public class RedisDataEnvelopeStore implements ZeroDataEnvelopeStore {
 
     /**
      * 数据命名空间。

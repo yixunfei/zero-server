@@ -4,7 +4,8 @@
 using System;
 using System.Collections.Generic;
 
-namespace ${namespace};
+namespace ${namespace}
+{
 
 /// <summary>
 /// ${comment}
@@ -16,4 +17,5 @@ public sealed class ${name} : IZeroGeneratedPayload
     public ${field.type} ${field.name} { get; set; }<#if field.defaultValue?has_content> = ${field.defaultValue};</#if>
 
 </#list>
+}
 }

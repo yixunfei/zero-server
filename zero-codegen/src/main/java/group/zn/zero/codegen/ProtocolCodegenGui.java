@@ -2,9 +2,9 @@ package group.zn.zero.codegen;
 
 import group.zn.zero.codegen.model.CodegenLanguage;
 import group.zn.zero.codegen.model.CodegenRequest;
-import group.zn.zero.codegen.model.JavaArtifactKind;
 import group.zn.zero.core.error.ZeroException;
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
@@ -12,9 +12,8 @@ import java.awt.Insets;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.EnumMap;
-import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import javax.swing.BorderFactory;
@@ -30,6 +29,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.UIManager;
@@ -228,6 +228,15 @@ public final class ProtocolCodegenGui {
      */
     private final JButton generateButton = new JButton("生成");
 
+    /** 只读预览按钮，执行期间禁用。 */
+    private final JButton previewButton = new JButton("预览变更");
+
+    /** 项目读取按钮，执行期间禁用。 */
+    private final JButton loadButton = new JButton("打开项目");
+
+    /** 项目保存按钮，执行期间禁用。 */
+    private final JButton saveButton = new JButton("保存项目");
+
     /**
      * 运行日志输出区域。
      */
@@ -249,9 +258,19 @@ public final class ProtocolCodegenGui {
      * 只在点击生成时写入显式指定的输出目录。</p>
      */
     public static void showWindow() {
+        showWindow(Map.of());
+    }
+
+    /** 在 EDT 打开已校验的工程参数；不触发生成或写盘。 */
+    static void showWindow(final Map<String, String> settings) {
+        Map<String, String> snapshot = Map.copyOf(settings);
         SwingUtilities.invokeLater(() -> {
             installLookAndFeel();
-            new ProtocolCodegenGui().frame.setVisible(true);
+            ProtocolCodegenGui gui = new ProtocolCodegenGui();
+            if (snapshot.containsKey("--input")) {
+                gui.loadProject(snapshot);
+            }
+            gui.frame.setVisible(true);
         });
     }
 
@@ -269,9 +288,41 @@ public final class ProtocolCodegenGui {
     private JPanel createContent() {
         JPanel root = new JPanel(new BorderLayout(12, 12));
         root.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
-        root.add(new JScrollPane(createFormPanel()), BorderLayout.CENTER);
+        root.add(createTabs(), BorderLayout.CENTER);
+        root.add(createToolbar(), BorderLayout.NORTH);
         root.add(createLogPanel(), BorderLayout.SOUTH);
         return root;
+    }
+
+    private JTabbedPane createTabs() {
+        JPanel form = createFormPanel();
+        GridBagLayout layout = (GridBagLayout) form.getLayout();
+        JPanel common = new JPanel(new GridBagLayout());
+        JPanel targets = new JPanel(new GridBagLayout());
+        JPanel advanced = new JPanel(new GridBagLayout());
+        for (Component component : form.getComponents()) {
+            GridBagConstraints placement = layout.getConstraints(component);
+            JPanel target = placement.gridy <= 5 ? common : placement.gridy < 17 ? targets : advanced;
+            target.add(component, placement);
+        }
+        JTabbedPane tabs = new JTabbedPane();
+        tabs.addTab("工程", new JScrollPane(common));
+        tabs.addTab("语言设置", new JScrollPane(targets));
+        tabs.addTab("Java 高级布局", new JScrollPane(advanced));
+        return tabs;
+    }
+
+    private JPanel createToolbar() {
+        JPanel bar = new JPanel();
+        loadButton.addActionListener(ignored -> chooseProject(false));
+        saveButton.addActionListener(ignored -> chooseProject(true));
+        previewButton.addActionListener(ignored -> runGeneration("plan"));
+        generateButton.addActionListener(ignored -> runGeneration("generate"));
+        bar.add(loadButton);
+        bar.add(saveButton);
+        bar.add(previewButton);
+        bar.add(generateButton);
+        return bar;
     }
 
     private JPanel createFormPanel() {
@@ -341,10 +392,6 @@ public final class ProtocolCodegenGui {
         addField(panel, constraints, 27, "Java BOImp 包名", javaBoImplPackageField, null);
         addField(panel, constraints, 28, "Java Dispatcher 包名", javaDispatcherPackageField, null);
 
-        constraints.gridx = 2;
-        constraints.gridy = 29;
-        generateButton.addActionListener(ignored -> runGeneration());
-        panel.add(generateButton, constraints);
         return panel;
     }
 
@@ -493,7 +540,7 @@ public final class ProtocolCodegenGui {
         }
     }
 
-    private void runGeneration() {
+    private void runGeneration(final String mode) {
         ProtocolCodegenOptions options;
         try {
             options = buildOptions();
@@ -507,7 +554,10 @@ public final class ProtocolCodegenGui {
         SwingWorker<Void, String> worker = new SwingWorker<>() {
             @Override
             protected Void doInBackground() {
-                new ProtocolCodegenRunner().run(options, message -> publish(message));
+                CodegenExecution.Report report = CodegenExecution.execute(options, mode);
+                publish(mode + ": " + report.messages() + " messages, " + report.protocols() + " protocols");
+                report.files().forEach(file -> publish(file.status() + " " + file.path()));
+                publish("renderMs=" + report.renderMillis() + " outputMs=" + report.outputMillis());
                 return null;
             }
 
@@ -524,7 +574,8 @@ public final class ProtocolCodegenGui {
                 try {
                     get();
                     appendLog("Done.");
-                    JOptionPane.showMessageDialog(frame, "生成完成", "zero-codegen", JOptionPane.INFORMATION_MESSAGE);
+                    JOptionPane.showMessageDialog(frame, "plan".equals(mode) ? "预览完成，未写入文件" : "生成完成",
+                            "zero-codegen", JOptionPane.INFORMATION_MESSAGE);
                 } catch (InterruptedException ex) {
                     Thread.currentThread().interrupt();
                     showError(ex);
@@ -538,157 +589,89 @@ public final class ProtocolCodegenGui {
         worker.execute();
     }
 
+    private Map<String, JTextField> fields() {
+        return Map.ofEntries(
+                Map.entry("--protoId", protoIdField), Map.entry("--out", outputField), Map.entry("--pkg", packageField),
+                Map.entry("--outJava", javaOutField), Map.entry("--outCs", csharpOutField),
+                Map.entry("--outTs", typescriptOutField), Map.entry("--outGd", gdscriptOutField),
+                Map.entry("--csNs", csharpNamespaceField), Map.entry("--tsNs", typescriptNamespaceField),
+                Map.entry("--gdNs", gdscriptNamespaceField), Map.entry("--javaDtoSuffix", javaDtoSuffixField),
+                Map.entry("--csDtoSuffix", csharpDtoSuffixField), Map.entry("--tsDtoSuffix", typescriptDtoSuffixField),
+                Map.entry("--gdDtoSuffix", gdscriptDtoSuffixField), Map.entry("--outJavaDto", javaDtoOutField),
+                Map.entry("--outJavaCodec", javaCodecOutField), Map.entry("--outJavaProtocol", javaProtocolOutField),
+                Map.entry("--outJavaBo", javaBoOutField), Map.entry("--outJavaBoImpl", javaBoImplOutField),
+                Map.entry("--outJavaDispatcher", javaDispatcherOutField), Map.entry("--javaDtoPkg", javaDtoPackageField),
+                Map.entry("--javaCodecPkg", javaCodecPackageField), Map.entry("--javaProtocolPkg", javaProtocolPackageField),
+                Map.entry("--javaBoPkg", javaBoPackageField), Map.entry("--javaBoImplPkg", javaBoImplPackageField),
+                Map.entry("--javaDispatcherPkg", javaDispatcherPackageField));
+    }
+
+    private Map<String, String> projectValues() {
+        Map<String, String> values = new LinkedHashMap<>();
+        List<String> inputs = new ArrayList<>();
+        for (int i = 0; i < inputPathModel.size(); i++) {
+            inputs.add(inputPathModel.get(i).toString());
+        }
+        values.put("--input", String.join("\n", inputs));
+        fields().entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
+            String value = entry.getValue().getText().trim();
+            if (!value.isEmpty() || entry.getKey().endsWith("Suffix")) {
+                values.put(entry.getKey(), value);
+            }
+        });
+        values.put("--genBoImpl", Boolean.toString(boImplBox.isSelected()));
+        values.put("--genJava", Boolean.toString(javaBox.isSelected()));
+        values.put("--genCs", Boolean.toString(csharpBox.isSelected()));
+        values.put("--genTs", Boolean.toString(typescriptBox.isSelected()));
+        values.put("--genGd", Boolean.toString(gdscriptBox.isSelected()));
+        return values;
+    }
+
+    private void chooseProject(final boolean save) {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setSelectedFile(new File("codegen.json"));
+        int decision = save ? chooser.showSaveDialog(frame) : chooser.showOpenDialog(frame);
+        if (decision != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        Path path = chooser.getSelectedFile().toPath();
+        try {
+            if (save) {
+                Map<String, String> values = projectValues();
+                ProtocolCodegenCli.toCodegenOptions(values);
+                CodegenProjectConfig.write(path, values);
+            } else {
+                loadProject(CodegenProjectConfig.read(path));
+            }
+            appendLog((save ? "Saved " : "Loaded ") + path);
+        } catch (RuntimeException ex) {
+            showError(ex);
+        }
+    }
+
+    private void loadProject(final Map<String, String> values) {
+        ProtocolCodegenOptions options = ProtocolCodegenCli.toCodegenOptions(values);
+        fields().forEach((key, field) -> field.setText(values.getOrDefault(key,
+                key.endsWith("Suffix") ? values.getOrDefault("--dtoSuffix", CodegenRequest.DEFAULT_DTO_SUFFIX) : "")));
+        outputField.setText(options.outputDir().toString());
+        packageField.setText(options.namespace());
+        inputPathModel.clear();
+        options.inputPaths().forEach(this::addInputPath);
+        boImplBox.setSelected(options.generateBoImpl());
+        javaBox.setSelected(options.languages().contains(CodegenLanguage.JAVA));
+        csharpBox.setSelected(options.languages().contains(CodegenLanguage.CSHARP));
+        typescriptBox.setSelected(options.languages().contains(CodegenLanguage.TYPESCRIPT));
+        gdscriptBox.setSelected(options.languages().contains(CodegenLanguage.GDSCRIPT));
+    }
+
     private ProtocolCodegenOptions buildOptions() {
-        if (inputPathModel.isEmpty()) {
-            throw new IllegalArgumentException("请至少添加一个 .si 文件或目录");
-        }
-        String output = outputField.getText().trim();
-        if (output.isBlank()) {
-            throw new IllegalArgumentException("输出目录不能为空");
-        }
-        String namespace = packageField.getText().trim();
-        if (namespace.isBlank()) {
-            throw new IllegalArgumentException("包名不能为空");
-        }
-        List<CodegenLanguage> languages = selectedLanguages();
-        if (languages.isEmpty()) {
-            throw new IllegalArgumentException("请至少选择一种目标语言");
-        }
-        List<Path> inputPaths = new ArrayList<>();
-        for (int index = 0; index < inputPathModel.size(); index++) {
-            inputPaths.add(inputPathModel.get(index));
-        }
-        String protoId = protoIdField.getText().trim();
-        return new ProtocolCodegenOptions(
-                inputPaths,
-                Path.of(output),
-                namespace,
-                protoId.isBlank() ? null : Path.of(protoId),
-                boImplBox.isSelected(),
-                languages,
-                outputDirs(),
-                namespaces(namespace),
-                dtoSuffixes(),
-                javaArtifactOutputDirs(),
-                javaArtifactPackages());
-    }
-
-    private List<CodegenLanguage> selectedLanguages() {
-        LinkedHashSet<CodegenLanguage> languages = new LinkedHashSet<>();
-        if (javaBox.isSelected()) {
-            languages.add(CodegenLanguage.JAVA);
-        }
-        if (csharpBox.isSelected()) {
-            languages.add(CodegenLanguage.CSHARP);
-        }
-        if (typescriptBox.isSelected()) {
-            languages.add(CodegenLanguage.TYPESCRIPT);
-        }
-        if (gdscriptBox.isSelected()) {
-            languages.add(CodegenLanguage.GDSCRIPT);
-        }
-        return List.copyOf(languages);
-    }
-
-    private Map<CodegenLanguage, Path> outputDirs() {
-        return outputDirs(javaOutField.getText(), csharpOutField.getText(),
-                typescriptOutField.getText(), gdscriptOutField.getText());
-    }
-
-    static Map<CodegenLanguage, Path> outputDirs(final String java, final String csharp,
-            final String typescript, final String gdscript) {
-        Map<CodegenLanguage, Path> dirs = new EnumMap<>(CodegenLanguage.class);
-        putOutputDir(dirs, CodegenLanguage.JAVA, java);
-        putOutputDir(dirs, CodegenLanguage.CSHARP, csharp);
-        putOutputDir(dirs, CodegenLanguage.TYPESCRIPT, typescript);
-        putOutputDir(dirs, CodegenLanguage.GDSCRIPT, gdscript);
-        return dirs;
-    }
-
-    private static void putOutputDir(final Map<CodegenLanguage, Path> dirs,
-            final CodegenLanguage language, final String text) {
-        String value = text.trim();
-        if (!value.isBlank()) {
-            dirs.put(language, Path.of(value));
-        }
-    }
-
-    private Map<CodegenLanguage, String> namespaces(final String javaNamespace) {
-        return namespaces(javaNamespace, csharpNamespaceField.getText(),
-                typescriptNamespaceField.getText(), gdscriptNamespaceField.getText());
-    }
-
-    static Map<CodegenLanguage, String> namespaces(final String javaNamespace, final String csharp,
-            final String typescript, final String gdscript) {
-        Map<CodegenLanguage, String> namespaces = new EnumMap<>(CodegenLanguage.class);
-        namespaces.put(CodegenLanguage.JAVA, javaNamespace);
-        namespaces.put(CodegenLanguage.CSHARP, CodegenNamespaceDefaults.csharp(javaNamespace));
-        putNamespace(namespaces, CodegenLanguage.CSHARP, csharp);
-        putNamespace(namespaces, CodegenLanguage.TYPESCRIPT, typescript);
-        putNamespace(namespaces, CodegenLanguage.GDSCRIPT, gdscript);
-        return namespaces;
-    }
-
-    private static void putNamespace(final Map<CodegenLanguage, String> namespaces,
-            final CodegenLanguage language, final String text) {
-        String value = text.trim();
-        if (!value.isBlank()) {
-            namespaces.put(language, value);
-        }
-    }
-
-    private Map<CodegenLanguage, String> dtoSuffixes() {
-        Map<CodegenLanguage, String> suffixes = new EnumMap<>(CodegenLanguage.class);
-        suffixes.put(CodegenLanguage.JAVA, javaDtoSuffixField.getText().trim());
-        suffixes.put(CodegenLanguage.CSHARP, csharpDtoSuffixField.getText().trim());
-        suffixes.put(CodegenLanguage.TYPESCRIPT, typescriptDtoSuffixField.getText().trim());
-        suffixes.put(CodegenLanguage.GDSCRIPT, gdscriptDtoSuffixField.getText().trim());
-        return suffixes;
-    }
-
-    private Map<JavaArtifactKind, Path> javaArtifactOutputDirs() {
-        Map<JavaArtifactKind, Path> dirs = new EnumMap<>(JavaArtifactKind.class);
-        putJavaArtifactOutputDir(dirs, JavaArtifactKind.DTO, javaDtoOutField);
-        putJavaArtifactOutputDir(dirs, JavaArtifactKind.CODEC, javaCodecOutField);
-        putJavaArtifactOutputDir(dirs, JavaArtifactKind.PROTOCOL, javaProtocolOutField);
-        putJavaArtifactOutputDir(dirs, JavaArtifactKind.BO, javaBoOutField);
-        putJavaArtifactOutputDir(dirs, JavaArtifactKind.BO_IMPL, javaBoImplOutField);
-        putJavaArtifactOutputDir(dirs, JavaArtifactKind.DISPATCHER, javaDispatcherOutField);
-        return dirs;
-    }
-
-    private void putJavaArtifactOutputDir(
-            final Map<JavaArtifactKind, Path> dirs,
-            final JavaArtifactKind kind,
-            final JTextField field) {
-        String value = field.getText().trim();
-        if (!value.isBlank()) {
-            dirs.put(kind, Path.of(value));
-        }
-    }
-
-    private Map<JavaArtifactKind, String> javaArtifactPackages() {
-        Map<JavaArtifactKind, String> packages = new EnumMap<>(JavaArtifactKind.class);
-        putJavaArtifactPackage(packages, JavaArtifactKind.DTO, javaDtoPackageField);
-        putJavaArtifactPackage(packages, JavaArtifactKind.CODEC, javaCodecPackageField);
-        putJavaArtifactPackage(packages, JavaArtifactKind.PROTOCOL, javaProtocolPackageField);
-        putJavaArtifactPackage(packages, JavaArtifactKind.BO, javaBoPackageField);
-        putJavaArtifactPackage(packages, JavaArtifactKind.BO_IMPL, javaBoImplPackageField);
-        putJavaArtifactPackage(packages, JavaArtifactKind.DISPATCHER, javaDispatcherPackageField);
-        return packages;
-    }
-
-    private void putJavaArtifactPackage(
-            final Map<JavaArtifactKind, String> packages,
-            final JavaArtifactKind kind,
-            final JTextField field) {
-        String value = field.getText().trim();
-        if (!value.isBlank()) {
-            packages.put(kind, value);
-        }
+        return ProtocolCodegenCli.toCodegenOptions(projectValues());
     }
 
     private void setGenerating(final boolean generating) {
+        previewButton.setEnabled(!generating);
+        loadButton.setEnabled(!generating);
+        saveButton.setEnabled(!generating);
         generateButton.setEnabled(!generating);
         generateButton.setText(generating ? "生成中" : "生成");
     }

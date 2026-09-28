@@ -22,8 +22,8 @@ S1-04 先固化运行时边界：协议定义、协议方向、协议注册、�
 标量编码：
 
 - `boolean`：1 字节，`0` 为 false，非 0 为 true。
-- `byte`：1 字节原样写入。
-- `short`：按 signed `int` 编码。
+- `byte`：signed 8 位，范围 -128..127，线格式为原始 1 字节；C# 映射为 `sbyte`。
+- `short`：signed 16 位，范围 -32768..32767，按 signed `int` 编码；超界输入拒绝。
 - `int`：ZigZag + VarInt，支持完整 `int` 范围。
 - `long`：ZigZag + VarLong，支持完整 `long` 范围。
 - 非负 ID、长度、数量、版本：Unsigned VarInt/VarLong，当前 Java API 约束在非负 `int`/`long` 范围内。
@@ -264,7 +264,25 @@ zero-codegen/src/test/resources/protocol-dsl/sample/
 
 ### 2026-09-26 多端生成与验证
 
-`DefaultCodeGenerator` 将 Java、C#、TypeScript、GDScript 后端的产物收集到 `GeneratedOutputPlan`，完成渲染后统一检查目标路径冲突、既有文件归属和上级目录类型。预检失败不写入任何目标；通过后仍按生成顺序更新，仅首次创建 BOImp，同内容文件保留原时间戳。普通协议生成不提供磁盘写入故障的整体回滚，也不自动删除旧布局产物。
+`DefaultCodeGenerator` 将 Java、C#、TypeScript、GDScript 后端的产物收集到 `GeneratedOutputPlan`，完成渲染后统一检查目标路径冲突、既有文件归属和上级目录类型。预检失败不写入任何目标；仅首次创建 BOImp，同内容文件保留原时间戳。2026-09-27 起，工程生成增加摘要清单、失败回滚、显式恢复和过期文件清理，见[迁移说明](migrations/20260927-codegen-generalization.md)。
+
+### 跨文件类型和稳定协议号
+
+同一次输入内的所有 `.si` 文件共享枚举和 struct 符号，无需 import；文件基名和类型名必须唯一。重复输入目录/文件会去重。
+为可重排的业务协议使用显式 ID：
+
+```text
+client_to_server:
+    @id(9001)
+    checkLimits(WireLimits limits)
+```
+
+`WireLimits` 可以来自另一个输入文件。C2S 为正奇数，S2C 为正偶数；重复 ID、错误奇偶性和超过 int 上界在生成前失败。
+同一文件同一方向启用 `@id` 后，每个方法都必须显式声明。删除和重排不会改变其它显式 ID；开发期新增方法自行分配未占用 ID。
+未使用 `@id` 时仍按 `protoId.txt` 起点和方法顺序分配，插入/重排会改变后续 ID；它仅适用于尚未要求稳定编号的原型。
+
+四端非负标量统一为 `uint/id/count`：0..2^31−1，`ulong`：0..2^63−1；TS long/ulong 必须使用 bigint。
+对象长度成为读取硬边界，`beginObject` / `endObject` 必须按嵌套顺序配对；未知对象尾部字段仍可跳过。
 
 标准 `.si` 工程的四端编译、往返及固定字节向量由 `zero-codegen/scripts/smoke-interop.ps1` 验证。GDScript 生成模板修复嵌套 codec 的作用域访问及整数类型推断，可在 Godot 4.7.2 执行；协议 ID、字段顺序和线格式未改变。升级步骤见[迁移说明](migrations/20260926-codegen-upgrade.md)。
 

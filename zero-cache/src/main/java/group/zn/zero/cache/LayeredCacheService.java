@@ -2,6 +2,9 @@ package group.zn.zero.cache;
 
 import group.zn.zero.core.error.ZeroException;
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -26,6 +29,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author zn
  */
 public class LayeredCacheService<K, V> implements CacheService<K, V> {
+
+    /** 最大写回重试积压，防止后端长期不可用时无界增长。 */
+    private static final int MAX_WRITE_BACK_QUEUE = 1024;
 
     /**
      * 一级本地缓存。
@@ -89,6 +95,15 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
      * 积压数量。
      */
     private final AtomicLong backlogCount = new AtomicLong();
+
+    /** 写回队列中的积压数量，不包含外部观测预留值。 */
+    private final AtomicLong queuedBacklogCount = new AtomicLong();
+
+    /** 写回失败后保留的有限重试项。 */
+    private final ArrayDeque<PendingWrite<K, V>> writeBackQueue = new ArrayDeque<>();
+
+    /** 写回队列锁。 */
+    private final Object writeBackLock = new Object();
 
     /**
      * 是否降级。
@@ -276,8 +291,44 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
      * @return 清理后的积压数量；线程安全。
      */
     public long clearBacklog() {
+        synchronized (writeBackLock) {
+            writeBackQueue.clear();
+        }
+        queuedBacklogCount.set(0L);
         backlogCount.set(0L);
         return 0L;
+    }
+
+    /**
+     * 重试此前因后端故障而保留的写回项。
+     *
+     * <p>调用方应在 Actor 线程之外调用。版本冲突表示 L2 已有更新，
+     * 该项会被丢弃；后端失败会重新进入有界队列并保持降级状态。
+     *
+     * @param maxAttempts 本次最多尝试数量；必须大于等于 0。
+     * @return 成功写回的条目数；不可为空；异步完成。
+     */
+    public CompletionStage<Integer> retryWriteBacks(final int maxAttempts) {
+        if (maxAttempts < 0) {
+            throw new IllegalArgumentException("maxAttempts must be non-negative");
+        }
+        if (l2Store == null || maxAttempts == 0) {
+            return CompletableFuture.completedFuture(0);
+        }
+        List<PendingWrite<K, V>> batch = new ArrayList<>(maxAttempts);
+        synchronized (writeBackLock) {
+            while (batch.size() < maxAttempts && !writeBackQueue.isEmpty()) {
+                batch.add(writeBackQueue.removeFirst());
+                queuedBacklogCount.decrementAndGet();
+                backlogCount.decrementAndGet();
+            }
+        }
+        CompletionStage<Integer> chain = CompletableFuture.completedFuture(0);
+        for (PendingWrite<K, V> pending : batch) {
+            chain = chain.thenCompose(count -> retryWriteBack(pending)
+                    .thenApply(saved -> count + (saved ? 1 : 0)));
+        }
+        return chain;
     }
 
     /**
@@ -363,6 +414,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
                     : Objects.requireNonNull(l2Store.putIfVersion(key, entry), "backend result");
         } catch (RuntimeException failure) {
             markBackendFailure();
+            enqueueWriteBack(key, entry);
             storeL1IfCurrent(key, entry, token);
             return CompletableFuture.completedFuture(value);
         }
@@ -370,6 +422,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
         write.whenComplete((saved, failure) -> {
             if (failure != null && !(failure instanceof java.util.concurrent.CancellationException)) {
                 markBackendFailure();
+                enqueueWriteBack(key, entry);
             }
             // 后端不可用时保留既有降级能力；明确版本拒绝则不得污染 L1。
             if (!result.isCancelled()
@@ -385,6 +438,44 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
             }
         });
         return result;
+    }
+
+    private CompletionStage<Boolean> retryWriteBack(final PendingWrite<K, V> pending) {
+        CompletionStage<Boolean> write;
+        try {
+            write = Objects.requireNonNull(l2Store.putIfVersion(pending.key(), pending.entry()), "backend result");
+        } catch (RuntimeException failure) {
+            markBackendFailure();
+            enqueueWriteBack(pending.key(), pending.entry());
+            return CompletableFuture.completedFuture(false);
+        }
+        return write.handle((saved, failure) -> {
+            if (failure != null) {
+                markBackendFailure();
+                enqueueWriteBack(pending.key(), pending.entry());
+                return false;
+            }
+            return Boolean.TRUE.equals(saved);
+        });
+    }
+
+    private void enqueueWriteBack(final K key, final CacheStoreEntry<V> entry) {
+        if (l2Store == null) {
+            return;
+        }
+        synchronized (writeBackLock) {
+            if (writeBackQueue.size() == MAX_WRITE_BACK_QUEUE) {
+                writeBackQueue.removeFirst();
+                queuedBacklogCount.decrementAndGet();
+                backlogCount.decrementAndGet();
+            }
+            writeBackQueue.addLast(new PendingWrite<>(key, entry));
+            queuedBacklogCount.incrementAndGet();
+            backlogCount.incrementAndGet();
+        }
+    }
+
+    private record PendingWrite<K, V>(K key, CacheStoreEntry<V> entry) {
     }
 
     private <T> CompletionStage<T> backend(final java.util.function.Supplier<CompletionStage<T>> operation) {

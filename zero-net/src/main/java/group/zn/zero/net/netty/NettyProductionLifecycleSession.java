@@ -173,6 +173,13 @@ final class NettyProductionLifecycleSession {
     boolean onFrame(final ProtocolFrame frame) {
         requireEventLoop();
         ProtocolFrame current = Objects.requireNonNull(frame, "frame");
+        if (state == ConnectionLifecycleState.ACCEPTED
+                || state == ConnectionLifecycleState.HANDSHAKING
+                || state == ConnectionLifecycleState.AUTHENTICATING) {
+            if (!admitAdmissionFrame(current)) {
+                return false;
+            }
+        }
         return switch (state) {
             case ACCEPTED -> {
                 handleHandshake(current);
@@ -185,6 +192,20 @@ final class NettyProductionLifecycleSession {
             case ESTABLISHED -> handleEstablishedFrame(current);
             case DRAINING, REJECTED, CLOSED -> false;
         };
+    }
+
+    private boolean admitAdmissionFrame(final ProtocolFrame frame) {
+        try {
+            if (lifecycle.rateLimiter().allowAdmissionFrame(connection, frame)) {
+                return true;
+            }
+            reject(ConnectionLifecycleEventType.RATE_LIMIT_EXCEEDED, NetErrorCode.RATE_LIMITED,
+                    ConnectionRejectionReason.FRAME_RATE_LIMITED, NetworkRateLimitScope.FRAME, null);
+        } catch (RuntimeException failure) {
+            reject(ConnectionLifecycleEventType.CHANNEL_ERROR, NetErrorCode.HANDLER_FAILED,
+                    ConnectionRejectionReason.INTERNAL_FAILURE, NetworkRateLimitScope.FRAME, failure);
+        }
+        return false;
     }
 
     /**

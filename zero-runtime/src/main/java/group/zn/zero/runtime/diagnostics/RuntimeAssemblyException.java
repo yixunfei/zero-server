@@ -6,7 +6,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 不透传 provider 原始消息或 cause 的运行时装配异常。
+ * 对外消息安全但保留原始 cause 的运行时装配异常。
  *
  * @author zn
  */
@@ -39,6 +39,18 @@ public final class RuntimeAssemblyException extends ZeroException {
         this.componentId = componentId;
     }
 
+    /** 创建保留原始 cause 的安全装配异常。 */
+    public RuntimeAssemblyException(
+            final RuntimeErrorCode errorCode,
+            final RuntimeFailurePhase phase,
+            final ComponentId componentId,
+            final String message,
+            final Throwable cause) {
+        super(Objects.requireNonNull(errorCode, "errorCode"), Objects.requireNonNull(message, "message"), cause);
+        this.phase = Objects.requireNonNull(phase, "phase");
+        this.componentId = componentId;
+    }
+
     /**
      * 使用固定错误说明和安全上下文创建异常。
      *
@@ -59,6 +71,21 @@ public final class RuntimeAssemblyException extends ZeroException {
             message = message + " [" + safeContext + "]";
         }
         return new RuntimeAssemblyException(checkedCode, phase, componentId, message);
+    }
+
+    /** 使用安全上下文和原始 cause 创建异常。 */
+    public static RuntimeAssemblyException failure(
+            final RuntimeErrorCode errorCode,
+            final RuntimeFailurePhase phase,
+            final ComponentId componentId,
+            final String safeContext,
+            final Throwable cause) {
+        RuntimeErrorCode checkedCode = Objects.requireNonNull(errorCode, "errorCode");
+        String message = checkedCode.message();
+        if (safeContext != null && !safeContext.isBlank()) {
+            message = message + " [" + safeContext + "]";
+        }
+        return new RuntimeAssemblyException(checkedCode, phase, componentId, message, cause);
     }
 
     /**

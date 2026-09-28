@@ -1,5 +1,11 @@
 # zeroServer 总体架构
 
+## 2026-09-28 网络与外部系统边界
+
+网络和中间件能力采用显式 provider 选择：TCP 生产入口必须装配 `ProductionNetworkLifecycle`，`tcpUnmanaged` 只适合已经拥有自身安全契约的协议；UDP 地址上下文、限流、鉴权、重放和可靠性不是同一个开关。KCP 尚未实现，`kcpUnsupported` 保持 fail-fast。
+
+Redis、Kafka、Nacos 的真实 adapter 不改变核心模块的低依赖原则。没有真实 client、认证或外部集群时，生产装配失败而不回退内存实现。跨节点 replay store、可靠事件日志、事务和补偿由项目组合根选择，框架不将单机实现提升为集群保证。
+
 本文说明分层职责与设计方向。当前模块、入口和依赖以[模块图](module-map.md)为准；实现程度见[能力矩阵](capability-matrix.zh-CN.md)。实际装配从[按需装配指南](guides/modular-composition-guide.zh-CN.md)开始。
 
 ## 1. 架构目标

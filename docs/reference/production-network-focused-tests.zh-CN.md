@@ -24,3 +24,6 @@ mvn -B -ntp -f examples/rpg-tcp-generated/pom.xml test exec:java
 单测使用可控时钟、内存连接、鉴权/限流替身和 Actor 消息端口；TCP 示例使用本机临时端口，不连接外部中间件。扩展时需继续验证状态、ErrorCode、线程归属、资源关闭和安全日志，不能只断言请求成功。
 
 生命周期和下一步安全边界见[生产网络契约](production-network-lifecycle-contract.zh-CN.md)，完整网关与真实恢复工作见[优化路线图](../optimization-roadmap.zh-CN.md)。
+# 2026-09-28 报告核实补充
+
+focused 测试现在覆盖：TCP 默认工厂 fail-fast、production handshake/frame 限流、UDP 地址 peer 复用与空闲回收、超长包计数/丢弃后继续收包，以及 KCP 未实现时的显式错误边界。测试只证明本地状态机和预算，不代表 TLS/WAF/DDoS、KCP、可靠 UDP 或公网容量已经通过。

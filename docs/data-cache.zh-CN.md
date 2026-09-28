@@ -1,5 +1,12 @@
 # 数据与缓存设计
 
+## 2026-09-28 报告核实补充
+
+- `RedisDataEnvelopeStore` 是明确的内存 prototype，不提供重启持久化或多实例共享；生产装配必须使用 `RedisDataAdapter.registerDriverRepository` 注入真实 `RedisClient`。需要本地原型时显式使用 `registerInMemoryZcodeRepository`。
+- PostgreSQL 条件写按 SQLState 区分版本冲突、并发冲突、后端不可用和一般写失败；Mongo 条件写按 DuplicateKey、瞬态和网络异常分类。调用方不得把所有 `WRITE_FAILED` 当成版本冲突重试。
+- Mongo 全量读取有 `maxFindAll` 上限，超过上限返回 `READ_LIMIT_EXCEEDED`；大集合请使用分页/流式 adapter。`saveAll` 仍逐条提交，框架不承诺跨后端事务，`findByIds` 也不承诺批量查询。
+- `DefaultPersistenceManager` 的每次 flush 有独立 future，脏对象登记有界；写回失败由 `LayeredCacheService.retryWriteBacks` 提供有界重试。L2 为空是纯本地缓存的显式选择，不等同于分布式一致性。
+
 ## 2026-09-26 并发安全补充
 
 分层缓存的每次读取都绑定读取代际。`invalidate`、版本化写入或显式突变会推进该代际；迟到的 L2/loader 回填只有在代际仍匹配且当前条目未被更新时才能写入 L1，因此超时请求不会复活已经失效或被新版本替换的值。singleflight 的 action stage 会继承调用方取消信号，取消只释放本次等待者，不会无条件取消仍被其他等待者共享的加载。

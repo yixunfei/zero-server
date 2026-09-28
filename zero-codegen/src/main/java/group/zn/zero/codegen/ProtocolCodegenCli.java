@@ -1,5 +1,6 @@
 package group.zn.zero.codegen;
 
+import com.google.gson.Gson;
 import group.zn.zero.codegen.model.CodegenLanguage;
 import group.zn.zero.codegen.model.CodegenRequest;
 import group.zn.zero.codegen.model.JavaArtifactKind;
@@ -37,6 +38,7 @@ public final class ProtocolCodegenCli {
      * 支持的命令行参数集合。
      */
     private static final Set<String> KNOWN_OPTIONS = Set.of(
+            "--config", "--mode", "--json",
             "--input",
             "--out",
             "--pkg",
@@ -79,6 +81,7 @@ public final class ProtocolCodegenCli {
      * 必须显式携带值的命令行参数集合。
      */
     private static final Set<String> VALUE_OPTIONS = Set.of(
+            "--config", "--mode",
             "--input",
             "--out",
             "--pkg",
@@ -153,6 +156,10 @@ public final class ProtocolCodegenCli {
               --tsNs <namespace>   TypeScript namespace marker. Default follows --pkg.
               --gdNs <namespace>   GDScript namespace marker. Default follows --pkg.
               --gui                Launch Swing GUI mode.
+              --config <file>      Load a JSON project; CLI settings override it.
+              --mode <mode>        generate (default), validate, plan, check (drift exits 3),
+                                   prune (regenerate + remove unchanged stale files), recover.
+              --json               Emit one JSON report; errors use the same JSON envelope.
               --help               Print this help.
             """;
 
@@ -185,42 +192,77 @@ public final class ProtocolCodegenCli {
     static int execute(final String[] args, final PrintStream out, final PrintStream err) {
         Objects.requireNonNull(out, "out");
         Objects.requireNonNull(err, "err");
+        boolean json = args != null && java.util.Arrays.asList(args).contains("--json");
         try {
             Map<String, String> options = parseArgs(args == null ? new String[0] : args);
             if (options.containsKey("--help") || options.containsKey("-h")) {
                 out.print(USAGE);
                 return 0;
             }
-            if (options.containsKey("--gui") || options.isEmpty()) {
-                return launchGui(out, err);
+            if (options.containsKey("--config")) {
+                Map<String, String> merged = CodegenProjectConfig.read(Path.of(options.get("--config")));
+                merged.putAll(options);
+                options = merged;
             }
-            ProtocolCodegenOptions codegenOptions = toCodegenOptions(options);
-            new ProtocolCodegenRunner().run(codegenOptions, out::println);
-            return 0;
+            if (options.containsKey("--gui") || options.isEmpty()) {
+                if (options.containsKey("--input") || options.containsKey("--config")) {
+                    toCodegenOptions(options);
+                }
+                return launchGui(out, err, options);
+            }
+            CodegenExecution.Report report = CodegenExecution.execute(
+                    toCodegenOptions(options), options.getOrDefault("--mode", "generate"));
+            if (json) {
+                out.println(new Gson().toJson(report));
+            } else {
+                out.println(report.mode() + ": " + report.messages() + " messages, " + report.protocols() + " protocols");
+                report.files().forEach(file -> out.println(file.status() + " " + file.path()));
+                out.println("renderMs=" + report.renderMillis() + " outputMs=" + report.outputMillis());
+            }
+            return report.exitCode();
         } catch (IllegalArgumentException ex) {
+            if (json) {
+                return jsonError(out, 2, "INVALID_ARGUMENT", ex.getMessage());
+            }
             err.println(ex.getMessage());
             err.print(USAGE);
             return 2;
         } catch (ZeroException ex) {
+            if (json) {
+                return jsonError(out, 1, String.valueOf(ex.code()), ex.message());
+            }
             err.println(ex.code() + ": " + ex.message());
             return 1;
         } catch (RuntimeException ex) {
+            if (json) {
+                return jsonError(out, 1, "CODEGEN_FAILED", String.valueOf(ex.getMessage()));
+            }
             err.println("codegen failed: " + ex.getMessage());
             return 1;
         }
     }
 
-    private static int launchGui(final PrintStream out, final PrintStream err) {
+    private static int jsonError(final PrintStream out, final int exit, final String code, final String message) {
+        out.println(new Gson().toJson(Map.of("exitCode", exit, "error", code, "message", message)));
+        return exit;
+    }
+
+    /** 判断配置字段是否为已登记工具参数；无副作用。 */
+    static boolean isKnownOption(final String key) {
+        return KNOWN_OPTIONS.contains(key);
+    }
+
+    private static int launchGui(final PrintStream out, final PrintStream err, final Map<String, String> options) {
         if (GraphicsEnvironment.isHeadless()) {
             err.println("GUI mode requires a graphical desktop environment.");
             out.print(USAGE);
             return 2;
         }
-        ProtocolCodegenGui.showWindow();
+        ProtocolCodegenGui.showWindow(options);
         return 0;
     }
 
-    private static ProtocolCodegenOptions toCodegenOptions(final Map<String, String> options) {
+    static ProtocolCodegenOptions toCodegenOptions(final Map<String, String> options) {
         String input = required(options, "--input");
         String namespace = options.getOrDefault("--pkg", DEFAULT_PACKAGE);
         Path output = Path.of(options.getOrDefault("--out", DEFAULT_OUTPUT_DIR));
@@ -256,12 +298,20 @@ public final class ProtocolCodegenCli {
             if (!KNOWN_OPTIONS.contains(key)) {
                 throw new IllegalArgumentException("unsupported argument: " + key);
             }
+            if (values.containsKey(key) && !"--input".equals(key)) {
+                throw new IllegalArgumentException("duplicate argument: " + key);
+            }
             boolean hasValue = index + 1 < args.length && !args[index + 1].startsWith("-");
             if (VALUE_OPTIONS.contains(key)) {
                 if (!hasValue) {
                     throw new IllegalArgumentException("missing value for argument: " + key);
                 }
-                values.put(key, args[++index]);
+                String value = args[++index];
+                if ("--input".equals(key)) {
+                    values.merge(key, value.replace(',', '\n'), (left, right) -> left + "\n" + right);
+                } else {
+                    values.put(key, value);
+                }
             } else if (isBooleanOption(key) && hasValue) {
                 values.put(key, args[++index]);
             } else {
@@ -436,7 +486,7 @@ public final class ProtocolCodegenCli {
 
     private static List<Path> parseInputPaths(final String input) {
         List<Path> paths = new ArrayList<>();
-        for (String item : input.split(",")) {
+        for (String item : input.split("\\R")) {
             String value = item.trim();
             if (!value.isBlank()) {
                 paths.add(Path.of(value));
