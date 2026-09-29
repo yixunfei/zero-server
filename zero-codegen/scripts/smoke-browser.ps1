@@ -42,6 +42,7 @@ $startInfo.CreateNoWindow = $true
 $startInfo.RedirectStandardOutput = $true
 $startInfo.RedirectStandardError = $true
 foreach ($argument in @('--headless', '--no-sandbox', '--disable-gpu', '--no-first-run', '--dump-dom',
+    '--disable-dev-shm-usage', '--allow-file-access-from-files', '--virtual-time-budget=5000',
     "--user-data-dir=$profile", $html)) {
     $startInfo.ArgumentList.Add($argument)
 }
@@ -65,9 +66,11 @@ try {
 $browserOutput | Set-Content (Join-Path $WorkDir 'browser-output.txt') -Encoding utf8
 $browserErrors | Set-Content (Join-Path $WorkDir 'browser-errors.txt') -Encoding utf8
 if ($exitCode -ne 0 -or -not $browserOutput -or $browserOutput -match '<pre[^>]*>[^<]*FAIL:') {
-    throw "Browser payload execution failed; inspect $WorkDir/browser-errors.txt or specify -BrowserExecutable."
+    throw "Browser payload execution failed; inspect $WorkDir/browser-output.txt and $WorkDir/browser-errors.txt or specify -BrowserExecutable."
 }
 foreach ($vector in $ExpectedVectors) {
-    if (-not $browserOutput.Contains($vector)) { throw "Missing browser vector: $vector" }
+    if (-not $browserOutput.Contains($vector)) {
+        throw "Missing browser vector: $vector; inspect $WorkDir/browser-output.txt and $WorkDir/browser-errors.txt."
+    }
 }
 Write-Output 'Browser payload vectors and invalid-input checks match Java.'
