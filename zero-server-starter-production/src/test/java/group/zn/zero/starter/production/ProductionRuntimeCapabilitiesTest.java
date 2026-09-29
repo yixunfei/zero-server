@@ -96,8 +96,6 @@ class ProductionRuntimeCapabilitiesTest {
         assertEquals(
                 List.of(
                         MavenCoordinate.zero("zero-core"),
-                        MavenCoordinate.zero("zero-log"),
-                        MavenCoordinate.zero("zero-monitor"),
                         MavenCoordinate.zero("zero-net"),
                         MavenCoordinate.zero("zero-runtime-bootstrap"),
                         MavenCoordinate.zero("zero-runtime-net")),

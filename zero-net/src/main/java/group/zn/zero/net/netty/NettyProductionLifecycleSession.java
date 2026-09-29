@@ -5,6 +5,7 @@ import group.zn.zero.net.IConnection;
 import group.zn.zero.net.error.NetErrorCode;
 import group.zn.zero.net.lifecycle.ConnectionLifecycleEventType;
 import group.zn.zero.net.lifecycle.ConnectionLifecycleObservation;
+import group.zn.zero.net.lifecycle.ConnectionLifecycleObserver;
 import group.zn.zero.net.lifecycle.ConnectionLifecycleResult;
 import group.zn.zero.net.lifecycle.ConnectionLifecycleState;
 import group.zn.zero.net.lifecycle.ConnectionRejectionReason;
@@ -54,7 +55,7 @@ final class NettyProductionLifecycleSession {
     private final Runnable establishedCallback;
     /** observer 失败回调。 */
     private final Consumer<Throwable> observerFailureCallback;
-    /** 保持单连接事件提交顺序的 observer 调度器。 */
+    /** 保持单连接事件提交顺序的 observer 调度器；未启用观测时为空。 */
     private final OrderedObserverDispatcher observerDispatcher;
     /** 鉴权期间的有界 frame 队列。 */
     private final Queue<ProtocolFrame> pendingFrames = new ArrayDeque<>();
@@ -103,7 +104,8 @@ final class NettyProductionLifecycleSession {
         this.readyFrameConsumer = Objects.requireNonNull(readyFrameConsumer, "readyFrameConsumer");
         this.establishedCallback = Objects.requireNonNull(establishedCallback, "establishedCallback");
         this.observerFailureCallback = Objects.requireNonNull(observerFailureCallback, "observerFailureCallback");
-        this.observerDispatcher = new OrderedObserverDispatcher(lifecycle.observerExecutor());
+        this.observerDispatcher = lifecycle.observer() == ConnectionLifecycleObserver.noOp()
+                ? null : new OrderedObserverDispatcher(lifecycle.observerExecutor());
     }
 
     /**
@@ -436,7 +438,9 @@ final class NettyProductionLifecycleSession {
         transition(ConnectionLifecycleState.ESTABLISHED);
         missedHeartbeats = 0;
         establishedCallback.run();
-        scheduleHeartbeatCheck();
+        if (lifecycle.config().heartbeatEnabled()) {
+            scheduleHeartbeatCheck();
+        }
         drainPendingFrames();
     }
 
@@ -712,6 +716,9 @@ final class NettyProductionLifecycleSession {
             final NetworkRateLimitScope scope,
             final NetErrorCode errorCode,
             final long latencyNanos) {
+        if (observerDispatcher == null) {
+            return;
+        }
         ConnectionLifecycleObservation observation = new ConnectionLifecycleObservation(
                 Instant.now(),
                 lifecycle.config().listener(),

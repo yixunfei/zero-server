@@ -2,7 +2,7 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>group.zn.zero</groupId><artifactId>zero-parent</artifactId><version>0.1.0-SNAPSHOT</version><relativePath>../zero-parent/pom.xml</relativePath>
+        <groupId>group.zn.zero</groupId><artifactId>zero-parent</artifactId><version>0.1.0</version><relativePath>../zero-parent/pom.xml</relativePath>
     </parent>
     <artifactId>zero-world</artifactId>
     <name>zeroServer World</name>

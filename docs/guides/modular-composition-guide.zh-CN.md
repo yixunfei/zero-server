@@ -120,7 +120,7 @@ try (ZeroProductionRuntime runtime = assembly.build()) {
 }
 ```
 
-具体配置键以 `ZeroProductionRuntimeConfigKeys` 和 [Redis 消费者](../../examples/modular-composition/redis/src/test/java/group/zn/zero/examples/composition/RedisConsumerTest.java) 为准。`diagnose()` 不创建 client；`build()` 创建受管资源，`start()` 执行真实健康检查。Kafka 还需要日志能力；network 需要显式策略、日志、监控和不会内联远程 IO 的执行器，传入 `null` rateLimiter 使用默认限流器。
+具体配置键以 `ZeroProductionRuntimeConfigKeys` 和 [Redis 消费者](../../examples/modular-composition/redis/src/test/java/group/zn/zero/examples/composition/RedisConsumerTest.java) 为准。`diagnose()` 不创建 client；`build()` 创建受管资源，`start()` 执行真实健康检查。Kafka 还需要日志能力；network 只需要显式策略和不会内联远程 IO 的执行器，日志/监控 observer、限流器、安全链和心跳检查按需注入；传入 `null` rateLimiter 表示不限制速率。
 
 应用扩展通过 `ProductionModuleFactory` 或 `.configure(composition -> ...)` 注册。Adapter 默认选择先应用，应用的显式 override 后应用。自定义模块不需要修改全量 Starter 的固定组件列表。
 

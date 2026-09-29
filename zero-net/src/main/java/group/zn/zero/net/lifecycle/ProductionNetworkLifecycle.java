@@ -19,7 +19,7 @@ public final class ProductionNetworkLifecycle {
     private final ProductionNetworkConfig config;
     /** 握手、鉴权、心跳和重连策略。 */
     private final ProductionNetworkPolicy policy;
-    /** Explicit transport-neutral security chain. */
+    /** 显式注入的安全链；未选择时为空。 */
     private final SecurityChain securityChain;
     /** 连接与 frame 限流器。 */
     private final NetworkRateLimiter rateLimiter;
@@ -44,7 +44,7 @@ public final class ProductionNetworkLifecycle {
         this(
                 config,
                 policy,
-                SecurityChain.failClosed(),
+                null,
                 NetworkRateLimiter.permitAll(),
                 ConnectionLifecycleObserver.noOp(),
                 authenticationExecutor,
@@ -56,6 +56,7 @@ public final class ProductionNetworkLifecycle {
      *
      * @param config 生产网络配置；不可为空。
      * @param policy 握手、鉴权、心跳和重连策略；不可为空。
+     * @param securityChain 可选安全链；为空时由 policy 鉴权，非空时强制执行鉴权、TLS 与重放检查。
      * @param rateLimiter 连接与 frame 限流器；不可为空。
      * @param observer 生命周期 observer；不可为空。
      * @param authenticationExecutor 受管鉴权执行器；不可为空；调用方负责生命周期。
@@ -71,8 +72,9 @@ public final class ProductionNetworkLifecycle {
             final Executor authenticationExecutor,
             final Executor observerExecutor) {
         this.config = Objects.requireNonNull(config, "config");
-        this.policy = Objects.requireNonNull(policy, "policy");
-        this.securityChain = Objects.requireNonNull(securityChain, "securityChain");
+        ProductionNetworkPolicy checkedPolicy = Objects.requireNonNull(policy, "policy");
+        this.policy = securityChain == null ? checkedPolicy : new SecurityNetworkPolicy(checkedPolicy, securityChain);
+        this.securityChain = securityChain;
         this.rateLimiter = Objects.requireNonNull(rateLimiter, "rateLimiter");
         this.observer = Objects.requireNonNull(observer, "observer");
         this.authenticationExecutor = Objects.requireNonNull(authenticationExecutor, "authenticationExecutor");
@@ -86,7 +88,7 @@ public final class ProductionNetworkLifecycle {
             final ConnectionLifecycleObserver observer,
             final Executor authenticationExecutor,
             final Executor observerExecutor) {
-        this(config, policy, SecurityChain.failClosed(), rateLimiter, observer, authenticationExecutor, observerExecutor);
+        this(config, policy, null, rateLimiter, observer, authenticationExecutor, observerExecutor);
     }
 
 
@@ -99,6 +101,11 @@ public final class ProductionNetworkLifecycle {
         return policy;
     }
 
+    /**
+     * 返回显式注入的安全链；未注入时返回 {@code null}。
+     *
+     * @return 安全链，或空值；线程安全。
+     */
     public SecurityChain securityChain() {
         return securityChain;
     }

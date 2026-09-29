@@ -6,6 +6,36 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+## 0.1.0 - 2026-09-29
+
+### 生产网络生命周期最小可定制化
+
+- production network lifecycle 不再隐式启用每 IP 默认限流或 fail-closed 安全链；调用方按需注入 `NetworkRateLimiter`、`SecurityChain`、`ConnectionLifecycleObserver` 和 `ProductionNetworkPolicy`。
+- 心跳检查改为显式启用，保留握手/鉴权超时、入站预算和失败关闭等最小资源保护。
+- 默认 no-op observer 跳过观测对象、单连接观测队列和执行器提交；显式 observer 仍按单连接顺序投递。
+- 修复 KCP runtime 对可选监控类的隐式加载：最小消费者无日志/监控依赖也可启动；显式安装监控模块时仍接入采样。
+- 移除私有默认 IP 桶及三项旧限流配置；网络 provider 不再依赖日志/监控能力，可选遥测工具的依赖改为 optional。显式安全链在生命周期组合根执行，直接构造和 runtime 入口保持一致。
+- 0.x 行为迁移见 `docs/migrations/20260928-production-network-minimal-customization.md`。
+
+### 2026-09-28 KCP 高级传输
+
+- ZKCP/ZKCI 升级到 v1，提供可选 HMAC-SHA256、ChaCha20-Poly1305、AES-GCM、XOR/Reed-Solomon FEC 和可注册自定义策略。
+- 增加 NAT challenge/response、`KcpClient.rebind()`、会话租约、冻结/迁移/代际 fencing，以及独立 `zero-net-kcp-redis` Lua 适配器。
+- 这是 0.x 破坏性协议/API 变更；旧客户端必须重新登录并消费 v1 连接描述，详见 `docs/migrations/20260928-kcp-advanced-transport.md`。
+
+### 2026-09-28 KCP 多场景与开箱即用优化
+
+- 新增五类预设、分组配置与交叉校验、可信控制面连接描述、受管 Java 客户端及显式恢复/回退状态机。
+- 新增可选 zero-runtime-kcp，一次安装接入命名配置、资源生命周期和低基数指标；提供独立 TLS/UDP main 示例。
+- 按截止时间调度、主动发送、socket flush 合并、HMAC 暂存复用和按整帧实际引用释放预算，改善空闲与持续发送路径。
+- 0.x KcpOptions 构造及默认帧上限变更、弱网测试和本机性能证据见[迁移说明](docs/migrations/20260928-kcp-scenario-optimization.md)。
+
+### 2026-09-28 KCP 服务端闭环
+
+- 新增独立 `zero-net-kcp` Adapter，使用 java-Kcp 算法与框架 Netty IO，提供真实可靠收发、帧编解码、有界队列与可观测错误。
+- 支持已认证 TLS TCP 登录签发票据、HMAC 数据报认证、重放/地址校验、过期回收以及校验控制连接拥有权的显式 TCP 回退。
+- 移除 KCP fail-fast 占位 API；新增真实 TLS/UDP Java 联调例子和故障测试。线格式、限制与 0.x 迁移见 [KCP 迁移说明](docs/migrations/20260928-kcp-support.md)。
+
 ### 2026-09-28 九项报告补充复核
 
 - 房间消费者异常不再回滚已经发布的状态；默认历史容量仍为 1024，增加容量选择及原子窗口/缺口查询。

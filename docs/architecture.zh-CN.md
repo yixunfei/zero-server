@@ -2,7 +2,7 @@
 
 ## 2026-09-28 网络与外部系统边界
 
-网络和中间件能力采用显式 provider 选择：TCP 生产入口必须装配 `ProductionNetworkLifecycle`，`tcpUnmanaged` 只适合已经拥有自身安全契约的协议；UDP 地址上下文、限流、鉴权、重放和可靠性不是同一个开关。KCP 尚未实现，`kcpUnsupported` 保持 fail-fast。
+网络和中间件能力采用显式 provider 选择：TCP 生产入口必须装配 `ProductionNetworkLifecycle`，`tcpUnmanaged` 只适合已经拥有自身安全契约的协议；UDP 地址上下文、限流、鉴权、重放和可靠性不是同一个开关。KCP 由可选 `zero-net-kcp` Adapter 与 `zero-runtime-kcp` 场景装配提供，依赖已认证 TCP 控制通道与独立票据绑定，详见 [KCP 契约](reference/kcp-transport-contract.zh-CN.md)。
 
 Redis、Kafka、Nacos 的真实 adapter 不改变核心模块的低依赖原则。没有真实 client、认证或外部集群时，生产装配失败而不回退内存实现。跨节点 replay store、可靠事件日志、事务和补偿由项目组合根选择，框架不将单机实现提升为集群保证。
 

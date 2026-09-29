@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>group.zn.zero</groupId>
+        <artifactId>zero-parent</artifactId>
+        <version>0.1.0</version>
+        <relativePath>../zero-parent/pom.xml</relativePath>
+    </parent>
+    <artifactId>zero-net-kcp</artifactId>
+    <name>zeroServer KCP Adapter</name>
+    <description>受管 IO、TCP 授权和有界队列的 java-Kcp 适配器。</description>
+    <dependencies>
+        <dependency>
+            <groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version><scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId><artifactId>bcpkix-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version><scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId><artifactId>zero-net</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.l42111996</groupId><artifactId>kcp-base</artifactId>
+            <version>${java-kcp.version}</version>
+            <exclusions>
+                <exclusion><groupId>io.netty</groupId><artifactId>*</artifactId></exclusion>
+                <exclusion><groupId>org.slf4j</groupId><artifactId>*</artifactId></exclusion>
+                <exclusion><groupId>org.jctools</groupId><artifactId>*</artifactId></exclusion>
+            </exclusions>
+        </dependency>
+    </dependencies>
+</project>

@@ -2,7 +2,7 @@
 
 本文给出 `0.1.0-SNAPSHOT` 的实现状态和明确边界，核对日期为 2026-09-28。状态只描述当前仓库代码与测试，不等同于生产容量或稳定性承诺；`productionReady=false`。
 
-2026-09-28 报告核实补充：TCP 默认工厂现在要求显式 production lifecycle；Redis 本地实现仅可通过显式 prototype 入口使用；Nacos/Kafka 已有真实 adapter 但外部集群证据仍需项目提供；KCP、可靠 UDP、跨节点 replay、可靠房间事件日志和跨进程 world ownership 仍是明确缺口。逐项源码、证据和迁移步骤见[报告核实迁移说明](migrations/20260928-report-audit-remediation.md)及任务审计矩阵。
+2026-09-28 报告核实补充：TCP 默认工厂要求显式 production lifecycle；Redis 本地实现仅可通过显式 prototype 入口使用；Nacos/Kafka 已有真实 adapter 但外部集群证据仍需项目提供。KCP 后续在本分支补齐服务端接入闭环，见 [KCP 迁移与验证](migrations/20260928-kcp-support.md)；普通 UDP 的可靠性、跨节点 replay、可靠房间事件日志和跨进程 world ownership 仍是明确缺口。其他逐项源码、证据见[报告核实迁移说明](migrations/20260928-report-audit-remediation.md)。
 
 2026-09-26 增量复核了全仓质量基线、Production 按需装配与 `local + net` 入口，见[质量报告](reports/quality-baseline-20260926.zh-CN.md)。其余能力条目沿用上述盘点日期，不表示本轮逐项重新验收。
 
@@ -32,8 +32,9 @@
 | --- | --- | --- | --- |
 | Zero Binary Protocol | implemented | Reader/Writer、Buffer、Frame、nullable、集合、注册表 | 完整跨版本演进工具和更多语言性能证据 |
 | 协议 DSL/Codegen | implemented | Java/C#/TypeScript/GDScript、DTO/Codec/EventBO/Dispatcher/ErrorCode/测试/文档 | 更多 IDE 集成、正式制品发布和兼容 diff 工具 |
-| Netty TCP/UDP/HTTP | implemented | 最小服务器、连接、Frame 桥、TCP 粘包拆包 | WebSocket/KCP 真实 Adapter、完整网关 |
-| 生产 TCP 生命周期 | minimum-slice | 状态机、握手、异步鉴权端口、心跳、预算、限流、重连协调、observer | TLS/WAF/DDoS、真实账号鉴权、容量/长稳、完整背压 |
+| Netty TCP/UDP/HTTP | implemented | 最小服务器、连接、Frame 桥、TCP 粘包拆包 | WebSocket 真实 Adapter、完整网关 |
+| KCP Adapter | minimum-slice | java-Kcp 可靠收发、五场景预设、受管 Java 客户端/恢复、可选 runtime 配置/监控、TLS 授权、背压、弱网矩阵和独立示例 | 公网容量/长稳、多语言客户端、加密 UDP、NAT 漂移、跨节点会话恢复 |
+| 生产 TCP 生命周期 | minimum-slice | 状态机、握手、异步鉴权端口、显式心跳检查、预算、可注入限流/安全链/重连/observer | observer 队列容量、容量/长稳证据；账号鉴权、玩家限流与网关防护属于按需策略，不强制提供默认实现 |
 | RPC 抽象 | implemented | request/response、oneway、broadcast、代理、路由、超时 | 完整重试策略、流式 RPC、跨集群治理 |
 | Kafka RPC | minimum-slice | producer/consumer、reply、pending、超时轮、资源回收、遥测 SPI | 完整重平衡、跨机房、故障注入、容量和长稳 |
 | Nacos discovery | minimum-slice | 注册、查询、订阅、健康更新、RPC metadata | Nacos 集群/鉴权规模验证、订阅背压和灾备 |

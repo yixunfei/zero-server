@@ -7,7 +7,7 @@
     <parent>
         <groupId>group.zn.zero</groupId>
         <artifactId>zero-server</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <version>0.1.0</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -25,6 +25,7 @@
         <freemarker.version>2.3.34</freemarker.version>
         <commons.csv.version>1.14.1</commons.csv.version>
         <netty.version>4.2.17.Final</netty.version>
+        <java-kcp.version>1.6.2</java-kcp.version>
         <kafka.clients.version>4.2.0</kafka.clients.version>
         <mongodb.driver.version>5.9.2</mongodb.driver.version>
         <jedis.version>8.0.0</jedis.version>

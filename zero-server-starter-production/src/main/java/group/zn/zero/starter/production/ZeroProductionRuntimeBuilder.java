@@ -5,6 +5,7 @@ import group.zn.zero.core.config.ZeroConfig;
 import group.zn.zero.log.LogSink;
 import group.zn.zero.net.lifecycle.NetworkRateLimiter;
 import group.zn.zero.net.lifecycle.ProductionNetworkPolicy;
+import group.zn.zero.net.lifecycle.ConnectionLifecycleObserver;
 import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
 import group.zn.zero.runtime.kafka.KafkaRuntime;
 import group.zn.zero.runtime.mongo.MongoRuntime;
@@ -32,8 +33,10 @@ public final class ZeroProductionRuntimeBuilder {
     private CacheValueCodec<Object> redisCacheValueCodec;
     private ProductionModuleFactory kafkaModule = KafkaRuntime.module();
     private ProductionNetworkPolicy networkPolicy;
-    private SecurityChain securityChain = SecurityChain.failClosed();
+    private SecurityChain securityChain;
     private NetworkRateLimiter networkRateLimiter;
+    /** 按需接入的网络观测下游；不随日志或指标模块自动启用。 */
+    private ConnectionLifecycleObserver networkObserver;
     private Function<String, String> systemPropertyLookup = System::getProperty;
     private Function<String, String> environmentLookup = System::getenv;
     private boolean consumed;
@@ -97,6 +100,19 @@ public final class ZeroProductionRuntimeBuilder {
         return this;
     }
 
+    /**
+     * 显式接入网络观测下游；未调用时使用 no-op，即使已安装日志和监控模块。
+     * @param observer 线程安全的观测器；不可为空，下游资源由调用方管理。
+     * @return 当前可变 builder；非线程安全。
+     * @throws NullPointerException 观测器为空。
+     * @throws IllegalStateException builder 已被消费。
+     */
+    public ZeroProductionRuntimeBuilder networkObserver(final ConnectionLifecycleObserver observer) {
+        mutable();
+        networkObserver = Objects.requireNonNull(observer, "observer");
+        return this;
+    }
+
 
     public ZeroProductionAssemblyReport diagnose() {
         mutable();
@@ -118,7 +134,7 @@ public final class ZeroProductionRuntimeBuilder {
                 .install(PostgresqlRuntime.module())
                 .install(RedisRuntime.module(redisCacheValueCodec))
                 .install(NacosRuntime.module())
-                .install(NetworkRuntime.module(networkPolicy, networkRateLimiter, securityChain));
+                .install(NetworkRuntime.module(networkPolicy, networkRateLimiter, securityChain, networkObserver));
     }
 
     private void mutable() {

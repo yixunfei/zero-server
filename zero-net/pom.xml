@@ -7,13 +7,13 @@
     <parent>
         <groupId>group.zn.zero</groupId>
         <artifactId>zero-parent</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <version>0.1.0</version>
         <relativePath>../zero-parent/pom.xml</relativePath>
     </parent>
 
     <artifactId>zero-net</artifactId>
     <name>zeroServer Net</name>
-    <description>网络接入层抽象，提供 Netty TCP/UDP/HTTP 最小实现并预留 KCP/WebSocket 扩展。</description>
+    <description>网络接入层抽象及 Netty TCP/UDP/HTTP；KCP 由独立 zero-net-kcp Adapter 提供。</description>
 
     <dependencies>
         <dependency>

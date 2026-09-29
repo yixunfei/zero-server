@@ -1,0 +1,17 @@
+groups:
+  - name: zero-kcp-example
+    rules:
+      - alert: KcpHighRejectionRatio
+        expr: rate(zero_kcp_rejected_total[5m]) / clamp_min(rate(zero_kcp_received_total[5m]), 1) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "KCP rejection ratio is high for {{ $labels.listener }}"
+      - alert: KcpFailureObserved
+        expr: increase(zero_kcp_failures_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Inspect KCP failure/close reasons for {{ $labels.listener }}"

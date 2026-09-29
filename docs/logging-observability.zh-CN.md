@@ -1,5 +1,10 @@
 # 日志与可观测性设计
 
+## 2026-09-28 KCP 遥测
+
+可选 zero-runtime-kcp 对接已有 MetricRegistry，每秒在后台执行域采样。zero_kcp_* 覆盖授权/绑定数、数据报、错误、固定关闭/拒绝原因、算法更新/flush 和预算。
+标签仅为配置级 listener 和固定 reason；禁止 conv、身份、地址或密钥。上游全局 Snmp 不作为实例/连接统计。示例仪表盘和告警见 examples/kcp-tcp-login/observability。
+
 本文描述 zeroServer 当前已经实现的日志与监控公共模型。完整 API、接入示例和生产晋升边界见 [可观测性最小运行时](guides/observability-runtime.zh-CN.md)。
 
 当前状态：`minimum-slice-implemented / confirmed=true / productionReady=false`
@@ -132,7 +137,7 @@ MonitorRuntime.createDefault(rules, sinks)
 
 ## 7. 生产连接生命周期遥测
 
-`zero-net` 继续只暴露中立的 `ConnectionLifecycleObserver`，不依赖 `zero-log` 或 `zero-monitor`。`zero-server-starter-production` 的 `ProductionNetworkTelemetryObserver` 组合 Starter 提供的 `LogAppender` 与 `MetricRegistry`。
+`zero-net` 继续只暴露中立的 `ConnectionLifecycleObserver`，不依赖 `zero-log` 或 `zero-monitor`。`zero-runtime-net` 中可选的 `ProductionNetworkTelemetryObserver` 组合调用方提供的 `LogAppender` 与 `MetricRegistry`。网络默认使用 no-op，安装日志/监控模块本身不会启用网络遥测；通过 `networkObserver(...)` 或 `NetworkRuntime.module(policy, limiter, securityChain, observer)` 显式注入。仅使用该可选工具的消费者需要声明 optional 的 `zero-log`、`zero-monitor` 依赖。
 
 每个 Netty production 连接在共享受管 observer executor 之前维护一个轻量有序 drain：同一连接最多提交一个活动 drain，并按会话提交顺序执行 observer 事件；不同连接仍可由共享执行器并发处理。这保证延迟或多线程执行器不会把同一连接的 close 遥测执行到此前的 accept 遥测之前。当前单连接 observer 待执行队列没有独立容量上限、背压或丢弃策略，慢 observer 仍可能造成积压，因此该顺序保证不构成容量、长稳或 production ready 证明。
 

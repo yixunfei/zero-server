@@ -6,7 +6,7 @@
 
 zeroServer 是面向游戏服务端的 Java 21 模块化框架。通过事件、Actor 和协议代码生成开发业务，通过独立 Adapter 接入网络、RPC、数据库和运维能力。
 
-当前版本为 `0.1.0-SNAPSHOT` 开发预览，`productionReady=false`。本地原型、组件装配和多种真实 Adapter 已实现；完整服务治理、安全运营、容量和长稳仍需完善。具体状态统一维护在[能力矩阵](docs/capability-matrix.zh-CN.md)。
+当前版本为 `0.1.0` GitHub 源码预览版，`productionReady=false`。本次不发布 Maven 制品。本地原型、组件装配和多种真实 Adapter 已实现；完整服务治理、安全运营、容量和长稳仍需完善。升级与破坏性变化见[0.1.0 迁移说明](docs/migrations/0.1.0.zh-CN.md)，能力状态统一维护在[能力矩阵](docs/capability-matrix.zh-CN.md)。
 
 ## 从需要的场景开始
 
@@ -30,7 +30,7 @@ java scripts/ZeroLocalDoctor.java
 java scripts/RunLocalPrototype.java --fromKeywords "rpg scene sync" --projectName my-game --packageName group.example.mygame
 ```
 
-最后一条命令安装当前 SNAPSHOT，生成 `target/generated/my-game`，执行测试和本地业务流程。结束后资源关闭，入口退出。打开生成工程的 `BUSINESS_GUIDE.md`，从 `.si` 协议和 `XXXEventBOImp` 开始改业务。
+最后一条命令安装当前框架版本，生成 `target/generated/my-game`，执行测试和本地业务流程。结束后资源关闭，入口退出。打开生成工程的 `BUSINESS_GUIDE.md`，从 `.si` 协议和 `XXXEventBOImp` 开始改业务。
 
 需要最小依赖时，在安装工件后生成：
 

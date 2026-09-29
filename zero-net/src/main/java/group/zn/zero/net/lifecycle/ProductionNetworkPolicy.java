@@ -49,7 +49,8 @@ public interface ProductionNetworkPolicy {
     /**
      * 判断已建立连接收到的帧是否为心跳。
      *
-     * <p>该方法在 Netty IO 线程执行，只允许有界、非阻塞计算。</p>
+     * <p>该方法在 Netty IO 线程执行，只允许有界、非阻塞计算。识别由策略显式定义，
+     * 独立于心跳超时检查开关；关闭超时检查后仍可消费客户端保活帧。</p>
      *
      * @param connection 传输连接；不可为空。
      * @param frame 协议帧；不可为空。

@@ -73,7 +73,7 @@ zero.discovery.mode=local|nacos
 
 PAF1 不维护旧 selector 兼容层。production network 的 `zero.net.lifecycle.enabled` 保留其既有解析边界，不属于本切片的 Adapter selector 破坏性收敛范围。
 
-Network enabled 继续使用 `Boolean.parseBoolean` 语义；只有结果为 true 且 builder 显式提供 `networkPolicy(...)` 时才选择 provider。默认 builder 的 direct remote IO executor 会被拒绝，调用方必须提供不会内联的受管执行器。自定义 `networkRateLimiter(...)` 时，默认三项限流参数保持不消费，延续旧入口语义。
+Network enabled 继续使用 `Boolean.parseBoolean` 语义；只有结果为 true 且 builder 显式提供 `networkPolicy(...)` 时才选择 provider。默认 builder 的 direct remote IO executor 会被拒绝，调用方必须提供不会内联的受管执行器。网络限流器、安全链、observer 和心跳检查均为显式可选能力；未传限流器使用 permit-all，未传 observer 使用 no-op。
 
 ## 3. Production 必填隔离配置
 

@@ -33,7 +33,7 @@ public final class NettyIoResources implements AutoCloseable {
 
     private NettyIoResources(final ServerOptions options) {
         transport = effective(options.tuning().transport());
-        EventLoopGroup acceptors = options.serverType() == ServerType.UDP ? null
+        EventLoopGroup acceptors = datagram(options) ? null
                 : NettyTransportFactory.eventLoops(transport, options.bossThreads());
         try {
             workers = NettyTransportFactory.eventLoops(transport, options.workerThreads());
@@ -83,12 +83,38 @@ public final class NettyIoResources implements AutoCloseable {
 
     void validate(final ServerOptions options) {
         if (closed.get() || transport != effective(options.tuning().transport())
-                || (options.serverType() != ServerType.UDP && boss == null)) {
+                || (!datagram(options) && boss == null)) {
             throw new IllegalStateException("Netty IO resources are closed or incompatible with server transport");
         }
     }
 
     EventLoopGroup boss() { return boss; }
+
+    /**
+     * 为 UDP/KCP Adapter 绑定一个独立 socket；不转移 IO 组所有权，线程安全。
+     * @param options 数据报设置，传输必须与资源匹配。
+     * @param handler 新建的、未共享的入站处理器。
+     * @return bind 信号；调用者须保存并在失败和停止时关闭其 channel。
+     * @throws IllegalStateException 资源关闭或传输不匹配。
+     * @throws IllegalArgumentException 设置不是数据报服务器。
+     */
+    public io.netty.channel.ChannelFuture bindDatagram(final ServerOptions options,
+            final io.netty.channel.ChannelHandler handler) {
+        validate(options);
+        if (!datagram(options)) throw new IllegalArgumentException("datagram server required");
+        return new io.netty.bootstrap.Bootstrap().group(workers)
+                .channel(NettyTransportFactory.datagramChannel(options.tuning().transport()))
+                .option(io.netty.channel.ChannelOption.RCVBUF_ALLOCATOR,
+                        new io.netty.channel.FixedRecvByteBufAllocator(65535))
+                .option(io.netty.channel.ChannelOption.WRITE_BUFFER_WATER_MARK,
+                        new io.netty.channel.WriteBufferWaterMark(options.tuning().writeLowWaterMark(),
+                                options.tuning().writeHighWaterMark()))
+                .handler(Objects.requireNonNull(handler, "handler")).bind(options.host(), options.port());
+    }
+
+    private static boolean datagram(final ServerOptions options) {
+        return options.serverType() == ServerType.UDP || options.serverType() == ServerType.KCP;
+    }
     EventLoopGroup workers() { return workers; }
     boolean inEventLoop() { return inGroup(workers) || boss != null && inGroup(boss); }
 

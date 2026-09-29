@@ -126,9 +126,7 @@ public final class StandardRuntimeCapabilityModel {
         addExternal(model, RPC_SERVICE_RESOLVER, List.of(), "zero-rpc");
         addExternal(model, NETWORK_LIFECYCLE, List.of(
                 CONFIG,
-                EXECUTORS,
-                LOG_APPENDER,
-                MONITOR_RUNTIME), "zero-net");
+                EXECUTORS), "zero-net");
         addMultiple(model, INFRASTRUCTURE_LIFECYCLES, List.of(), "zero-runtime");
         addMultiple(model, APPLICATION_LIFECYCLES, List.of(PERSISTENCE_MANAGER), "zero-runtime");
     }

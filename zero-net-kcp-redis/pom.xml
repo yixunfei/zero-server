@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>group.zn.zero</groupId><artifactId>zero-parent</artifactId><version>0.1.0</version><relativePath>../zero-parent/pom.xml</relativePath></parent>
+  <artifactId>zero-net-kcp-redis</artifactId><name>zeroServer KCP Redis Session Adapter</name>
+  <description>KCP 会话租约与迁移屏障的可选 Redis 适配器。</description>
+  <dependencies>
+    <dependency><groupId>group.zn.zero</groupId><artifactId>zero-net-kcp</artifactId></dependency>
+    <dependency><groupId>redis.clients</groupId><artifactId>jedis</artifactId><version>${jedis.version}</version></dependency>
+  </dependencies>
+</project>

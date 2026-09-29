@@ -18,6 +18,7 @@ import java.util.regex.Pattern;
  * @param reconnectWindow 玩家 Actor 重连协调窗口。
  * @param maxInboundFrames 单连接鉴权等待队列与业务 in-flight 总预算上限。
  * @param tlsRequired 是否要求底层连接已完成 TLS 握手。
+ * @param heartbeatEnabled 是否显式启用心跳检查任务。
  * @author zn
  */
 public record ProductionNetworkConfig(
@@ -28,7 +29,8 @@ public record ProductionNetworkConfig(
         int allowedMissedHeartbeats,
         Duration reconnectWindow,
         int maxInboundFrames,
-        boolean tlsRequired) {
+        boolean tlsRequired,
+        boolean heartbeatEnabled) {
 
     /**
      * 默认握手超时。
@@ -92,7 +94,7 @@ public record ProductionNetworkConfig(
     }
 
     /**
-     * 创建用户已确认的首轮默认配置。
+     * 创建带有界预算与接入超时的最小配置；心跳检查默认关闭。
      *
      * @param listener 低基数监听入口名；不可为空。
      * @return 默认配置；不可为空；线程安全。
@@ -106,6 +108,7 @@ public record ProductionNetworkConfig(
                 DEFAULT_ALLOWED_MISSED_HEARTBEATS,
                 DEFAULT_RECONNECT_WINDOW,
                 DEFAULT_MAX_INBOUND_FRAMES,
+                false,
                 false);
     }
 
@@ -136,11 +139,12 @@ public record ProductionNetworkConfig(
                 allowedMissedHeartbeats,
                 reconnectWindow,
                 maxInboundFrames,
-                tlsRequired);
+                tlsRequired,
+                heartbeatEnabled);
     }
 
     /**
-     * 返回替换心跳参数后的新配置。
+     * 返回替换心跳参数并显式启用心跳检查的新配置。
      *
      * @param interval 新心跳间隔；不可为空且必须为正数。
      * @param missed 新允许丢失次数；必须大于 0。
@@ -155,7 +159,8 @@ public record ProductionNetworkConfig(
                 missed,
                 reconnectWindow,
                 maxInboundFrames,
-                tlsRequired);
+                tlsRequired,
+                true);
     }
 
     /**
@@ -173,7 +178,8 @@ public record ProductionNetworkConfig(
                 allowedMissedHeartbeats,
                 reconnectWindow,
                 limit,
-                tlsRequired);
+                tlsRequired,
+                heartbeatEnabled);
     }
 
     /**
@@ -191,8 +197,29 @@ public record ProductionNetworkConfig(
                 allowedMissedHeartbeats,
                 reconnectWindow,
                 maxInboundFrames,
-                required);
+                required,
+                heartbeatEnabled);
     }
+
+    /**
+     * 返回显式开启或关闭心跳检查后的配置。
+     *
+     * @param enabled 是否调度心跳检查任务。
+     * @return 新配置；不可为空；线程安全。
+     */
+    public ProductionNetworkConfig withHeartbeatEnabled(final boolean enabled) {
+        return new ProductionNetworkConfig(
+                listener,
+                handshakeTimeout,
+                authenticationTimeout,
+                heartbeatInterval,
+                allowedMissedHeartbeats,
+                reconnectWindow,
+                maxInboundFrames,
+                tlsRequired,
+                enabled);
+    }
+
     private static void requirePositive(final Duration value, final String name) {
         Duration current = Objects.requireNonNull(value, name);
         if (current.isZero() || current.isNegative()) {

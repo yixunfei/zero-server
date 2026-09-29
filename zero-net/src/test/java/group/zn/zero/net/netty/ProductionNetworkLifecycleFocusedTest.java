@@ -12,6 +12,7 @@ import group.zn.zero.net.ServerFrameHandler;
 import group.zn.zero.net.error.NetErrorCode;
 import group.zn.zero.net.lifecycle.ConnectionLifecycleEventType;
 import group.zn.zero.net.lifecycle.ConnectionLifecycleObservation;
+import group.zn.zero.net.lifecycle.ConnectionLifecycleObserver;
 import group.zn.zero.net.lifecycle.ConnectionLifecycleState;
 import group.zn.zero.net.lifecycle.ConnectionRejectionReason;
 import group.zn.zero.net.lifecycle.NetworkAdmissionDecision;
@@ -21,6 +22,7 @@ import group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
 import group.zn.zero.net.lifecycle.ProductionNetworkPolicy;
 import group.zn.zero.protocol.ProtocolFrame;
+import group.zn.zero.security.SecurityChain;
 import io.netty.channel.embedded.EmbeddedChannel;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -95,7 +97,7 @@ class ProductionNetworkLifecycleFocusedTest {
     void pnft01HandshakeTimeoutShouldRejectAndClose() {
         ProductionNetworkConfig config = fastConfig().withAdmissionTimeouts(
                 Duration.ofMillis(10),
-                Duration.ofSeconds(1));
+                Duration.ofSeconds(1)).withHeartbeatEnabled(false);
         try (Fixture fixture = new Fixture(config, acceptingPolicy(), NetworkRateLimiter.permitAll(), Runnable::run)) {
             fixture.channel.advanceTimeBy(11, TimeUnit.MILLISECONDS);
             fixture.runPending();
@@ -212,6 +214,137 @@ class ProductionNetworkLifecycleFocusedTest {
         }
     }
 
+    /** 心跳超时默认关闭；显式识别的客户端保活帧仍交给 policy 消费。 */
+    @Test
+    void heartbeatTimeoutShouldBeOptIn() {
+        AtomicInteger heartbeatChecks = new AtomicInteger();
+        ProductionNetworkPolicy policy = new ProductionNetworkPolicy() {
+            @Override
+            public NetworkAdmissionDecision validateHandshake(
+                    final IConnection connection, final ProtocolFrame handshakeFrame) {
+                return NetworkAdmissionDecision.allow();
+            }
+
+            @Override
+            public boolean isHeartbeat(final IConnection connection, final ProtocolFrame frame) {
+                heartbeatChecks.incrementAndGet();
+                return frame.protocolId() == 9;
+            }
+        };
+        try (Fixture fixture = new Fixture(
+                ProductionNetworkConfig.defaults("heartbeat-disabled"), policy,
+                NetworkRateLimiter.permitAll(), Runnable::run)) {
+            fixture.write(frame(1, 1, "handshake"));
+            fixture.channel.advanceTimeBy(60, TimeUnit.SECONDS);
+            fixture.runPending();
+            assertTrue(fixture.channel.isActive());
+            fixture.write(frame(9, 1, "heartbeat"));
+            assertTrue(fixture.channel.isActive());
+            assertEquals(1, heartbeatChecks.get());
+            assertEquals(0, fixture.businessCalls.get());
+            assertFalse(fixture.observedEvent(ConnectionLifecycleEventType.HEARTBEAT_TIMEOUT));
+        }
+    }
+
+    /** 关闭心跳检查仍保留参数，并且其他配置复制方法不意外开启检查。 */
+    @Test
+    void heartbeatToggleShouldPreserveSettings() {
+        var enabled = ProductionNetworkConfig.defaults("toggle").withHeartbeat(Duration.ofSeconds(3), 4);
+        assertTrue(enabled.heartbeatEnabled());
+        var disabled = enabled.withHeartbeatEnabled(false)
+                .withAdmissionTimeouts(Duration.ofSeconds(1), Duration.ofSeconds(2))
+                .withMaxInboundFrames(5).withTlsRequired(true);
+        assertFalse(disabled.heartbeatEnabled());
+        assertEquals(Duration.ofSeconds(3), disabled.heartbeatInterval());
+        assertEquals(Duration.ofSeconds(12), disabled.heartbeatTimeout());
+        assertTrue(disabled.withHeartbeatEnabled(true).heartbeatEnabled());
+    }
+
+    /** 鉴权超时不依赖心跳开关；迟到成功不得重新打开已关闭连接。 */
+    @Test
+    void authenticationTimeoutMustRemainWhenHeartbeatIsDisabled() {
+        var authentication = new CompletableFuture<NetworkAdmissionDecision>();
+        var config = ProductionNetworkConfig.defaults("auth-timeout")
+                .withAdmissionTimeouts(Duration.ofSeconds(1), Duration.ofMillis(10));
+        try (Fixture fixture = new Fixture(config, pendingAuthenticationPolicy(authentication),
+                NetworkRateLimiter.permitAll(), Runnable::run)) {
+            fixture.write(frame(1, 1, "handshake"));
+            fixture.channel.advanceTimeBy(11, TimeUnit.MILLISECONDS);
+            fixture.runPending();
+            assertFalse(fixture.channel.isActive());
+            assertTrue(fixture.observedReason(ConnectionRejectionReason.AUTHENTICATION_TIMEOUT));
+            authentication.complete(NetworkAdmissionDecision.allow());
+            fixture.runPending();
+            assertFalse(fixture.listenerOpened.get());
+            assertEquals(0, fixture.businessCalls.get());
+        }
+    }
+
+    /** 显式连接限流在握手前生效。 */
+    @Test
+    void connectionLimiterMustRejectBeforeHandshake() {
+        AtomicInteger handshakes = new AtomicInteger();
+        ProductionNetworkPolicy policy = (connection, frame) -> {
+            handshakes.incrementAndGet();
+            return NetworkAdmissionDecision.allow();
+        };
+        try (Fixture fixture = new Fixture(ProductionNetworkConfig.defaults("connection-limit"),
+                policy, connection -> false, Runnable::run)) {
+            fixture.write(frame(1, 1, "handshake"));
+            assertFalse(fixture.channel.isActive());
+            assertEquals(0, handshakes.get());
+            assertTrue(fixture.observedReason(ConnectionRejectionReason.CONNECTION_RATE_LIMITED));
+        }
+    }
+
+    /** 心跳默认关闭时，显式安全链的业务重放拒绝仍不可绕过。 */
+    @Test
+    void explicitSecurityChainMustCheckReplayWhenHeartbeatIsDisabled() {
+        var now = java.time.Instant.now();
+        var identity = new group.zn.zero.security.SecurityContext("alice", now, now.plusSeconds(60),
+                "tcp", "peer", "trusted", "trace", "session",
+                java.util.Set.of("network.request"), java.util.Map.of());
+        var chain = new SecurityChain(request -> CompletableFuture.completedFuture(
+                group.zn.zero.security.AuthenticationProvider.AuthenticationResult.accepted(identity)),
+                group.zn.zero.security.ReplayProtection.failClosed(), null, false);
+        try (Fixture fixture = new Fixture(ProductionNetworkConfig.defaults("replay-disabled-heartbeat"),
+                acceptingPolicy(), NetworkRateLimiter.permitAll(), Runnable::run, chain)) {
+            fixture.write(frame(1, 1, "handshake"));
+            assertTrue(fixture.listenerOpened.get());
+            fixture.write(frame(2, 1, "business"));
+            assertEquals(0, fixture.businessCalls.get());
+            assertTrue(fixture.observedEvent(ConnectionLifecycleEventType.FRAME_REJECTED));
+            assertTrue(fixture.observedReason(ConnectionRejectionReason.REPLAY_DETECTED));
+        }
+    }
+
+    /** 显式安全链必须执行其鉴权 provider，不能回退到 permissive policy。 */
+    @Test
+    void explicitSecurityChainMustEnforceAuthentication() {
+        AtomicInteger policyAuthentications = new AtomicInteger();
+        ProductionNetworkPolicy policy = new ProductionNetworkPolicy() {
+            @Override
+            public NetworkAdmissionDecision validateHandshake(
+                    final IConnection connection, final ProtocolFrame handshakeFrame) {
+                return NetworkAdmissionDecision.allow();
+            }
+
+            @Override
+            public CompletionStage<NetworkAdmissionDecision> authenticate(
+                    final IConnection connection, final ProtocolFrame handshakeFrame) {
+                policyAuthentications.incrementAndGet();
+                return CompletableFuture.completedFuture(NetworkAdmissionDecision.allow());
+            }
+        };
+        try (Fixture fixture = new Fixture(fastConfig(), policy, NetworkRateLimiter.permitAll(),
+                Runnable::run, SecurityChain.failClosed())) {
+            fixture.write(frame(1, 1, "handshake"));
+            assertFalse(fixture.channel.isActive());
+            assertEquals(0, policyAuthentications.get());
+            assertTrue(fixture.observedReason(ConnectionRejectionReason.AUTHENTICATION_REJECTED));
+        }
+    }
+
     /**
      * PNFT-06：验证鉴权期间有界队列达到上限后拒绝连接，不会无界积压。
      */
@@ -219,7 +352,7 @@ class ProductionNetworkLifecycleFocusedTest {
     void pnft06AdmissionQueueOverflowShouldRejectConnection() {
         CompletableFuture<NetworkAdmissionDecision> authentication = new CompletableFuture<>();
         ProductionNetworkPolicy policy = pendingAuthenticationPolicy(authentication);
-        ProductionNetworkConfig config = fastConfig().withMaxInboundFrames(2);
+        ProductionNetworkConfig config = fastConfig().withMaxInboundFrames(2).withHeartbeatEnabled(false);
         try (Fixture fixture = new Fixture(config, policy, NetworkRateLimiter.permitAll(), Runnable::run)) {
             fixture.write(frame(1, 1, "handshake"));
             fixture.write(frame(2, 1, "queued-1"));
@@ -247,12 +380,19 @@ class ProductionNetworkLifecycleFocusedTest {
 
             /** 拒绝业务 frame。 */
             @Override
+            public boolean allowAdmissionFrame(final IConnection connection, final ProtocolFrame frame) {
+                return true;
+            }
+
+            /** 拒绝已建立连接的业务 frame。 */
+            @Override
             public boolean allowFrame(final IConnection connection, final ProtocolFrame frame) {
                 return false;
             }
         };
         try (Fixture fixture = new Fixture(fastConfig(), acceptingPolicy(), limiter, Runnable::run)) {
             fixture.write(frame(1, 1, "handshake"));
+            assertTrue(fixture.listenerOpened.get());
             fixture.write(frame(2, 1, "business"));
 
             assertFalse(fixture.channel.isActive());
@@ -402,6 +542,42 @@ class ProductionNetworkLifecycleFocusedTest {
         }
     }
 
+    /** 默认 no-op observer 不应创建观测任务或依赖 observer executor。 */
+    @Test
+    void noOpObserverShouldAvoidExecutorSubmission() {
+        AtomicInteger submissions = new AtomicInteger();
+        AtomicInteger businessCalls = new AtomicInteger();
+        Executor rejectingExecutor = command -> submissions.incrementAndGet();
+        ProductionNetworkLifecycle lifecycle = new ProductionNetworkLifecycle(
+                fastConfig(),
+                acceptingPolicy(),
+                NetworkRateLimiter.permitAll(),
+                ConnectionLifecycleObserver.noOp(),
+                Runnable::run,
+                rejectingExecutor);
+        EmbeddedChannel channel = new EmbeddedChannel(new NettyFrameChannelHandler(
+                (connection, request) -> {
+                    businessCalls.incrementAndGet();
+                    return CompletableFuture.completedFuture(List.of());
+                },
+                new ConnectionListener() { },
+                Runnable::run,
+                lifecycle));
+        try {
+            channel.writeInbound(frame(1, 1, "handshake"));
+            channel.runPendingTasks();
+            channel.writeInbound(frame(2, 1, "business"));
+            channel.runPendingTasks();
+            assertEquals(1, businessCalls.get());
+            assertTrue(channel.isActive());
+            channel.close();
+            channel.runPendingTasks();
+            assertEquals(0, submissions.get());
+        } finally {
+            channel.finishAndReleaseAll();
+        }
+    }
+
     private static ProductionNetworkConfig fastConfig() {
         return ProductionNetworkConfig.defaults("focused-test")
                 .withAdmissionTimeouts(Duration.ofSeconds(1), Duration.ofSeconds(1))
@@ -519,6 +695,15 @@ class ProductionNetworkLifecycleFocusedTest {
                 final ProductionNetworkPolicy policy,
                 final NetworkRateLimiter limiter,
                 final Executor authenticationExecutor) {
+            this(config, policy, limiter, authenticationExecutor, null);
+        }
+
+        Fixture(
+                final ProductionNetworkConfig config,
+                final ProductionNetworkPolicy policy,
+                final NetworkRateLimiter limiter,
+                final Executor authenticationExecutor,
+                final SecurityChain securityChain) {
             ServerFrameHandler handler = (currentConnection, frame) -> {
                 businessCalls.incrementAndGet();
                 return CompletableFuture.completedFuture(List.of());
@@ -531,13 +716,11 @@ class ProductionNetworkLifecycleFocusedTest {
                     listenerOpened.set(true);
                 }
             };
-            ProductionNetworkLifecycle lifecycle = new ProductionNetworkLifecycle(
-                    config,
-                    policy,
-                    limiter,
-                    observations::add,
-                    authenticationExecutor,
-                    Runnable::run);
+            ProductionNetworkLifecycle lifecycle = securityChain == null
+                    ? new ProductionNetworkLifecycle(config, policy, limiter, observations::add,
+                            authenticationExecutor, Runnable::run)
+                    : new ProductionNetworkLifecycle(config, policy, securityChain, limiter, observations::add,
+                            authenticationExecutor, Runnable::run);
             channel = new EmbeddedChannel(new NettyFrameChannelHandler(handler, listener, Runnable::run, lifecycle));
             runPending();
         }

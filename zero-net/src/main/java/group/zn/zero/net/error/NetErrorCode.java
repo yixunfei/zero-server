@@ -122,12 +122,7 @@ public enum NetErrorCode implements ErrorCode {
     /**
      * 生命周期 observer 执行失败。
      */
-    OBSERVER_FAILED("ZERO-NET-OBSERVER-FAILED", "network lifecycle observer failed"),
-
-    /**
-     * KCP 服务器尚未接入。
-     */
-    KCP_NOT_IMPLEMENTED("ZERO-NET-KCP-NOT-IMPLEMENTED", "kcp server is not implemented");
+    OBSERVER_FAILED("ZERO-NET-OBSERVER-FAILED", "network lifecycle observer failed");
 
     /**
      * 错误码。

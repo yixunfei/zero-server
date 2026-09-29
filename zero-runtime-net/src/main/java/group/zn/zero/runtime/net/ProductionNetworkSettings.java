@@ -25,9 +25,7 @@ record ProductionNetworkSettings(List<ConfigSource> configSources) {
         configSources = List.copyOf(Objects.requireNonNull(configSources, "configSources"));
     }
 
-    static ProductionNetworkSettings resolve(
-            final ProductionConfigResolver resolver,
-            final boolean useConfiguredRateLimiter) {
+    static ProductionNetworkSettings resolve(final ProductionConfigResolver resolver) {
         ProductionConfigResolver checked = Objects.requireNonNull(resolver, "resolver");
         List<ResolvedProductionSetting> settings = new ArrayList<>();
         ResolvedProductionSetting listener = readDefaultable(
@@ -38,28 +36,27 @@ record ProductionNetworkSettings(List<ConfigSource> configSources) {
                 checked, ZeroProductionRuntimeConfigKeys.NETWORK_AUTHENTICATION_TIMEOUT_MILLIS);
         ResolvedProductionSetting heartbeat = readDefaultable(
                 checked, ZeroProductionRuntimeConfigKeys.NETWORK_HEARTBEAT_INTERVAL_MILLIS);
+        ResolvedProductionSetting heartbeatEnabled = readDefaultable(
+                checked, ZeroProductionRuntimeConfigKeys.NETWORK_HEARTBEAT_ENABLED);
         ResolvedProductionSetting missed = readDefaultable(
                 checked, ZeroProductionRuntimeConfigKeys.NETWORK_ALLOWED_MISSED_HEARTBEATS);
         ResolvedProductionSetting reconnect = readDefaultable(
                 checked, ZeroProductionRuntimeConfigKeys.NETWORK_RECONNECT_WINDOW_MILLIS);
         ResolvedProductionSetting inbound = readDefaultable(
                 checked, ZeroProductionRuntimeConfigKeys.NETWORK_MAX_INBOUND_FRAMES);
-        settings.addAll(List.of(listener, handshake, authentication, heartbeat, missed, reconnect, inbound));
+        settings.addAll(List.of(listener, handshake, authentication, heartbeat, heartbeatEnabled,
+                missed, reconnect, inbound));
 
         networkConfig(
                 listener.orElse(ZeroProductionRuntimeConfigKeys.DEFAULT_NETWORK_LISTENER),
                 positiveInt(handshake, millis(ProductionNetworkConfig.DEFAULT_HANDSHAKE_TIMEOUT)),
                 positiveInt(authentication, millis(ProductionNetworkConfig.DEFAULT_AUTHENTICATION_TIMEOUT)),
                 positiveInt(heartbeat, millis(ProductionNetworkConfig.DEFAULT_HEARTBEAT_INTERVAL)),
+                booleanValue(heartbeatEnabled),
                 positiveInt(missed, ProductionNetworkConfig.DEFAULT_ALLOWED_MISSED_HEARTBEATS),
                 positiveInt(reconnect, millis(ProductionNetworkConfig.DEFAULT_RECONNECT_WINDOW)),
                 positiveInt(inbound, ProductionNetworkConfig.DEFAULT_MAX_INBOUND_FRAMES));
 
-        if (useConfiguredRateLimiter) {
-            configuredRateLimit(checked, settings);
-        } else {
-            defaultRateLimit(settings);
-        }
         return new ProductionNetworkSettings(configSources(ProductionNetworkProvider.ID, settings));
     }
 
@@ -67,45 +64,13 @@ record ProductionNetworkSettings(List<ConfigSource> configSources) {
         return TYPED_ALIAS_PREFIX + Objects.requireNonNull(logicalKey, "logicalKey");
     }
 
-    private static void configuredRateLimit(
-            final ProductionConfigResolver resolver,
-            final List<ResolvedProductionSetting> settings) {
-        ResolvedProductionSetting permits = readDefaultable(
-                resolver, ZeroProductionRuntimeConfigKeys.NETWORK_PER_IP_PERMITS_PER_SECOND);
-        ResolvedProductionSetting burst = readDefaultable(
-                resolver, ZeroProductionRuntimeConfigKeys.NETWORK_PER_IP_BURST_CAPACITY);
-        ResolvedProductionSetting slots = readDefaultable(
-                resolver, ZeroProductionRuntimeConfigKeys.NETWORK_RATE_LIMIT_SLOTS);
-        settings.addAll(List.of(permits, burst, slots));
-        validateRateLimit(
-                positiveInt(permits, ZeroProductionRuntimeConfigKeys.DEFAULT_NETWORK_PER_IP_PERMITS_PER_SECOND),
-                positiveInt(burst, ZeroProductionRuntimeConfigKeys.DEFAULT_NETWORK_PER_IP_BURST_CAPACITY),
-                positiveInt(slots, ZeroProductionRuntimeConfigKeys.DEFAULT_NETWORK_RATE_LIMIT_SLOTS));
-    }
-
-    private static void defaultRateLimit(final List<ResolvedProductionSetting> settings) {
-        settings.addAll(List.of(
-                missing(ZeroProductionRuntimeConfigKeys.NETWORK_PER_IP_PERMITS_PER_SECOND),
-                missing(ZeroProductionRuntimeConfigKeys.NETWORK_PER_IP_BURST_CAPACITY),
-                missing(ZeroProductionRuntimeConfigKeys.NETWORK_RATE_LIMIT_SLOTS)));
-        validateRateLimit(
-                ZeroProductionRuntimeConfigKeys.DEFAULT_NETWORK_PER_IP_PERMITS_PER_SECOND,
-                ZeroProductionRuntimeConfigKeys.DEFAULT_NETWORK_PER_IP_BURST_CAPACITY,
-                ZeroProductionRuntimeConfigKeys.DEFAULT_NETWORK_RATE_LIMIT_SLOTS);
-    }
-
-    private static void validateRateLimit(
-            final int permitsPerSecond,
-            final int burstCapacity,
-            final int slots) {
-        try {
-            ProductionIpConnectionRateLimiter.validateSettings(permitsPerSecond, burstCapacity, slots);
-        } catch (IllegalArgumentException failure) {
-            String key = burstCapacity < permitsPerSecond
-                    ? ZeroProductionRuntimeConfigKeys.NETWORK_PER_IP_BURST_CAPACITY
-                    : ZeroProductionRuntimeConfigKeys.NETWORK_RATE_LIMIT_SLOTS;
-            throw new InvalidSettingException(key, failure);
+    private static boolean booleanValue(final ResolvedProductionSetting setting) {
+        String value = setting.orElse("false");
+        if (!"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value)) {
+            throw new InvalidSettingException(setting.logicalKey(),
+                    new IllegalArgumentException("expected boolean"));
         }
+        return Boolean.parseBoolean(value);
     }
 
     private static ProductionNetworkConfig networkConfig(
@@ -113,6 +78,7 @@ record ProductionNetworkSettings(List<ConfigSource> configSources) {
             final int handshakeMillis,
             final int authenticationMillis,
             final int heartbeatMillis,
+            final boolean heartbeatEnabled,
             final int allowedMissedHeartbeats,
             final int reconnectMillis,
             final int maxInboundFrames) {
@@ -125,7 +91,8 @@ record ProductionNetworkSettings(List<ConfigSource> configSources) {
                     allowedMissedHeartbeats,
                     Duration.ofMillis(reconnectMillis),
                     maxInboundFrames,
-                    false);
+                    false,
+                    heartbeatEnabled);
         } catch (IllegalArgumentException | ArithmeticException failure) {
             throw new InvalidSettingException(
                     ZeroProductionRuntimeConfigKeys.NETWORK_LISTENER, failure);
@@ -174,10 +141,6 @@ record ProductionNetworkSettings(List<ConfigSource> configSources) {
                 ConfigSourceKind.PROGRAMMATIC,
                 owner.value() + ".programmatic",
                 values));
-    }
-
-    private static ResolvedProductionSetting missing(final String key) {
-        return new ResolvedProductionSetting(key, java.util.Optional.empty(), java.util.Optional.empty());
     }
 
     private static int millis(final Duration duration) {

@@ -4,7 +4,7 @@ import group.zn.zero.net.lifecycle.NetworkRateLimiter;
 import group.zn.zero.net.lifecycle.ProductionNetworkConfig;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
 import group.zn.zero.net.lifecycle.ProductionNetworkPolicy;
-import group.zn.zero.net.lifecycle.SecurityNetworkPolicy;
+import group.zn.zero.net.lifecycle.ConnectionLifecycleObserver;
 import group.zn.zero.security.SecurityChain;
 import group.zn.zero.runtime.api.ComponentId;
 import group.zn.zero.runtime.bootstrap.RuntimeBasics;
@@ -15,9 +15,6 @@ import group.zn.zero.runtime.config.ConfigKey;
 import group.zn.zero.runtime.config.ConfigSchema;
 import group.zn.zero.runtime.config.ConfigSource;
 import group.zn.zero.runtime.config.ConfigSourceKind;
-import group.zn.zero.runtime.log.LogRuntime;
-import group.zn.zero.runtime.monitor.MonitorRuntimeComponent;
-import group.zn.zero.runtime.net.NetworkRuntime;
 import group.zn.zero.runtime.production.ProductionAdapterException;
 import group.zn.zero.runtime.production.ProductionAdapterDiagnostic;
 import group.zn.zero.runtime.production.ProductionAdapterFailurePhase;
@@ -54,6 +51,16 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
     private static final ConfigKey<Integer> HEARTBEAT_INTERVAL_MILLIS = positiveInteger(
             ZeroProductionRuntimeConfigKeys.NETWORK_HEARTBEAT_INTERVAL_MILLIS,
             millis(ProductionNetworkConfig.DEFAULT_HEARTBEAT_INTERVAL));
+    private static final ConfigKey<Boolean> HEARTBEAT_ENABLED = ConfigKey.builder(
+                    ID,
+                    ZeroProductionRuntimeConfigKeys.NETWORK_HEARTBEAT_ENABLED,
+                    Boolean.class,
+                    Boolean::valueOf)
+            .acceptedSources(SOURCES)
+            .alias(ConfigSourceKind.PROGRAMMATIC, ProductionNetworkSettings.typedAlias(
+                    ZeroProductionRuntimeConfigKeys.NETWORK_HEARTBEAT_ENABLED))
+            .defaultValue(false)
+            .build();
     private static final ConfigKey<Integer> ALLOWED_MISSED_HEARTBEATS = positiveInteger(
             ZeroProductionRuntimeConfigKeys.NETWORK_ALLOWED_MISSED_HEARTBEATS,
             ProductionNetworkConfig.DEFAULT_ALLOWED_MISSED_HEARTBEATS);
@@ -63,45 +70,29 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
     private static final ConfigKey<Integer> MAX_INBOUND_FRAMES = positiveInteger(
             ZeroProductionRuntimeConfigKeys.NETWORK_MAX_INBOUND_FRAMES,
             ProductionNetworkConfig.DEFAULT_MAX_INBOUND_FRAMES);
-    private static final ConfigKey<Integer> PER_IP_PERMITS_PER_SECOND = positiveInteger(
-            ZeroProductionRuntimeConfigKeys.NETWORK_PER_IP_PERMITS_PER_SECOND,
-            ZeroProductionRuntimeConfigKeys.DEFAULT_NETWORK_PER_IP_PERMITS_PER_SECOND);
-    private static final ConfigKey<Integer> PER_IP_BURST_CAPACITY = positiveInteger(
-            ZeroProductionRuntimeConfigKeys.NETWORK_PER_IP_BURST_CAPACITY,
-            ZeroProductionRuntimeConfigKeys.DEFAULT_NETWORK_PER_IP_BURST_CAPACITY);
-    private static final ConfigKey<Integer> RATE_LIMIT_SLOTS = ConfigKey.integer(
-                    ID, ZeroProductionRuntimeConfigKeys.NETWORK_RATE_LIMIT_SLOTS)
-            .acceptedSources(SOURCES)
-            .alias(ConfigSourceKind.PROGRAMMATIC, ProductionNetworkSettings.typedAlias(
-                    ZeroProductionRuntimeConfigKeys.NETWORK_RATE_LIMIT_SLOTS))
-            .defaultValue(ZeroProductionRuntimeConfigKeys.DEFAULT_NETWORK_RATE_LIMIT_SLOTS)
-            .validate(ProductionIpConnectionRateLimiter::validSlots, "bounded-power-of-two")
-            .build();
     private static final ConfigSchema CONFIG_SCHEMA = ConfigSchema.builder(ID)
             .add(LISTENER)
             .add(HANDSHAKE_TIMEOUT_MILLIS)
             .add(AUTHENTICATION_TIMEOUT_MILLIS)
             .add(HEARTBEAT_INTERVAL_MILLIS)
+            .add(HEARTBEAT_ENABLED)
             .add(ALLOWED_MISSED_HEARTBEATS)
             .add(RECONNECT_WINDOW_MILLIS)
             .add(MAX_INBOUND_FRAMES)
-            .add(PER_IP_PERMITS_PER_SECOND)
-            .add(PER_IP_BURST_CAPACITY)
-            .add(RATE_LIMIT_SLOTS)
             .build();
 
     private final ComponentDescriptor descriptor = ComponentDescriptor.builder(ID)
             .provide(NetworkRuntime.NETWORK_LIFECYCLE)
             .require(RuntimeBasics.CONFIG)
             .require(RuntimeBasics.EXECUTORS)
-            .require(LogRuntime.LOG_APPENDER)
-            .require(MonitorRuntimeComponent.MONITOR_RUNTIME)
             .configSchema(CONFIG_SCHEMA)
             .kind(ComponentKind.FOUNDATION)
             .build();
     private final ProductionNetworkPolicy policy;
     private final SecurityChain securityChain;
     private final NetworkRateLimiter customRateLimiter;
+    /** 调用方显式注入的观测器；空值选择 no-op。 */
+    private final ConnectionLifecycleObserver customObserver;
     private final List<ConfigSource> configSources;
     private final ProductionAdapterDiagnostic diagnostic = new ProductionAdapterDiagnostic(
             ProductionAdapterNames.ADAPTER_NETWORK_LIFECYCLE, ZeroProductionAdapterState.ENABLED,
@@ -111,15 +102,12 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
             final ProductionNetworkPolicy policy,
             final SecurityChain securityChain,
             final NetworkRateLimiter customRateLimiter,
+            final ConnectionLifecycleObserver customObserver,
             final List<ConfigSource> configSources) {
-        ProductionNetworkPolicy checkedPolicy = Objects.requireNonNull(policy, "policy");
-        this.securityChain = securityChain == null
-                ? SecurityChain.failClosed()
-                : securityChain;
-        this.policy = securityChain == null
-                ? checkedPolicy
-                : new SecurityNetworkPolicy(checkedPolicy, securityChain);
+        this.securityChain = securityChain;
+        this.policy = Objects.requireNonNull(policy, "policy");
         this.customRateLimiter = customRateLimiter;
+        this.customObserver = customObserver;
         this.configSources = List.copyOf(Objects.requireNonNull(configSources, "configSources"));
     }
 
@@ -127,7 +115,8 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
             final ProductionConfigResolver resolver,
             final ProductionNetworkPolicy policy,
             final NetworkRateLimiter customRateLimiter,
-            final SecurityChain securityChain) {
+            final SecurityChain securityChain,
+            final ConnectionLifecycleObserver observer) {
         ProductionConfigResolver checkedResolver = Objects.requireNonNull(resolver, "resolver");
         if (!checkedResolver.enabled(ZeroProductionRuntimeConfigKeys.NETWORK_LIFECYCLE_ENABLED)) {
             return Resolution.disabled();
@@ -136,13 +125,9 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
             throw invalidSelection("builder.networkPolicy");
         }
         try {
-            ProductionNetworkSettings settings = ProductionNetworkSettings.resolve(
-                    checkedResolver, customRateLimiter == null);
-            SecurityChain effectiveSecurity = securityChain == null
-                    ? SecurityChain.failClosed()
-                    : securityChain;
+            ProductionNetworkSettings settings = ProductionNetworkSettings.resolve(checkedResolver);
             return Resolution.enabled(new ProductionNetworkProvider(
-                    policy, effectiveSecurity, customRateLimiter, settings.configSources()));
+                    policy, securityChain, customRateLimiter, observer, settings.configSources()));
         } catch (ProductionNetworkSettings.InvalidSettingException failure) {
             throw ProductionAdapterFailures.invalidConfig(
                     ProductionAdapterNames.ADAPTER_NETWORK_LIFECYCLE,
@@ -168,16 +153,16 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
         }
         ComponentConfig config = checked.config();
         NetworkRateLimiter rateLimiter = customRateLimiter == null
-                ? defaultRateLimiter(config)
+                ? NetworkRateLimiter.permitAll()
                 : customRateLimiter;
+        ConnectionLifecycleObserver observer = customObserver == null
+                ? ConnectionLifecycleObserver.noOp() : customObserver;
         ProductionNetworkLifecycle lifecycle = new ProductionNetworkLifecycle(
                 networkConfig(config),
                 policy,
                 securityChain,
                 rateLimiter,
-                new ProductionNetworkTelemetryObserver(
-                        checked.require(LogRuntime.LOG_APPENDER),
-                        checked.require(MonitorRuntimeComponent.MONITOR_RUNTIME).registry()),
+                observer,
                 executors.remoteIoExecutor(),
                 executors.backgroundExecutor());
         return ComponentContribution.builder()
@@ -202,14 +187,8 @@ final class ProductionNetworkProvider implements RuntimeComponentProvider {
                 config.require(ALLOWED_MISSED_HEARTBEATS),
                 Duration.ofMillis(config.require(RECONNECT_WINDOW_MILLIS)),
                 config.require(MAX_INBOUND_FRAMES),
-                securityChain.tlsRequired());
-    }
-
-    private NetworkRateLimiter defaultRateLimiter(final ComponentConfig config) {
-        return new ProductionIpConnectionRateLimiter(
-                config.require(PER_IP_PERMITS_PER_SECOND),
-                config.require(PER_IP_BURST_CAPACITY),
-                config.require(RATE_LIMIT_SLOTS));
+                securityChain != null && securityChain.tlsRequired(),
+                config.require(HEARTBEAT_ENABLED));
     }
 
     private static ConfigKey<String> string(final String logicalName, final String defaultValue) {

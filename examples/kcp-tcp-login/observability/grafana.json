@@ -1,0 +1,155 @@
+{
+  "title": "zeroServer KCP",
+  "uid": "zero-kcp",
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "query": "prometheus"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Sessions",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "zero_kcp_sessions",
+          "legendFormat": "{{listener}} {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Connected",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "zero_kcp_connected",
+          "legendFormat": "{{listener}} {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Pending bytes",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "zero_kcp_pending_send_bytes",
+          "legendFormat": "{{listener}} {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Reject rate",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(zero_kcp_rejected_total[5m])",
+          "legendFormat": "{{listener}} {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Algorithm updates",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(zero_kcp_updates_total[5m])",
+          "legendFormat": "{{listener}} {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Close and reject reasons",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(zero_kcp_reason_total[5m])",
+          "legendFormat": "{{listener}} {{reason}}"
+        }
+      ]
+    }
+  ]
+}

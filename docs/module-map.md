@@ -1,5 +1,20 @@
 # zeroServer 模块图
 
+2026-09-28 高级 KCP：`zero-net-kcp` 在 ZKCP v1 数据面提供可插拔 HMAC/ChaCha20-Poly1305/AES-GCM、XOR/Reed-Solomon FEC、挑战响应路径验证和有界租约；`KcpSessionStore`/`KcpSessionCoordinator` 提供冻结、迁移、代际 fencing，`zero-net-kcp-redis` 为可选 Redis Lua 适配。`zero-runtime-kcp` 可注入会话 SPI。密钥仍只经已认证控制面传递，跨节点目标重建必须由应用安全传递新票据。
+`KcpProfile/KcpTuning/KcpLimits/KcpTimeouts` 提供场景和分组设置；`KcpConnectInfo` 是可信控制面描述；`KcpClient/KcpRecovery` 完成受管 Java 接入和显式恢复/回退。
+`KcpScheduler` 管理有界截止索引，`KcpRetainedFrame` 在整帧实际释放时回收预算；双端复用 `KcpDispatch` 和段校验。常改位置为两个模块、examples/kcp-tcp-login 和[场景指南](guides/kcp-scenarios.zh-CN.md)。
+风险包括时限调度、共享缓冲生命周期、业务重放和可选资源依赖；Redis 适配器故障时必须 fail-closed。
+
+`zero-runtime-kcp -> zero-runtime-monitor` 为 optional 编译依赖，不向消费者传递。`KcpRuntimeMonitoring` 隔离可选监控类的加载；没有该依赖时最小 `KcpRuntime.module(...)` 正常启动，没有显式安装监控 provider 时不创建采样任务。应用可显式依赖并安装监控模块，或直接使用 `KcpServer.watch(...)` 注入自己的快照消费者。`KcpOptionalDependenciesTest` 用隔离类路径验证缺少全部日志/监控模块的实际启动与关闭。
+
+2026-09-28 KCP 入口：新增 `zero-net-kcp -> zero-net -> protocol/event/security/core`，第三方 `kcp-base` 仅在 Adapter 中引入。
+`KcpServer` 负责服务生命周期与组合根 API，`KcpSessions` 负责 TCP 授权/票据注册，`KcpSession` 负责单 EventLoop 算法，
+`KcpConnection` 提供线程安全业务句柄，`KcpDispatch` 管理有界有序回调，`KcpBudget` 管理发送预留，
+`KcpDatagramCodec` 管理认证线格式和重放窗口，`KcpOptions`/`KcpTicket` 是配置/凭证。
+共享 IO 通过 `NettyIoResources.bindDatagram` 接入；禁止 `zero-net`、`zero-core` 反向依赖 KCP Adapter 或业务 BO。
+常见修改位置是该模块主代码、测试及 [KCP 契约](reference/kcp-transport-contract.zh-CN.md)；主要风险是密钥下发、
+地址绑定、异步队列预算及回退重复请求，不应自动重放业务或使用第三方自建线程池。
+
 2026-09-27 codegen 入口：`CodegenProjectConfig` 读取 CLI/GUI 共用工程设置；`CodegenExecution` 协调只读预览、检查和执行；
 `SiProtocolProjectParser` 登记全工程符号，`SiProtocolDslParser` 解析显式 `@id(...)`。
 `DefaultCodeGenerator.plan` 只渲染；`GeneratedOutputPlan` 负责文件索引；`ManagedOutput` 负责摘要归属与过期计划；
@@ -150,7 +165,9 @@ flowchart TB
 
 这些集成模块不能依赖 Starter 或无关的真实 Adapter。完整选择示例见[按需装配指南](guides/modular-composition-guide.zh-CN.md)。
 
-`ProductionAssembly.builder(profile, config)` 接受 standalone/external-test/production，`plan()` 在不创建资源的前提下返回实际 provider 图。脚手架在 `ScaffoldComponents` 选择现有集成，在 `ScaffoldConfiguration` 生成所选 Adapter 的开关及外部配置样例。示例 `examples/modular-composition/center-logic` 只依赖 bootstrap/RPC；TCP 示例的执行器由 bootstrap 管理、codegen 只存在于构建插件。脚手架 `net` 选择网络生命周期 provider，默认拒绝握手并保留内置有界限流；`runtime + net` 仅依赖 `zero-net` / `zero-runtime-net` 及其闭包，`local + net` 的 TCP 示例额外依赖 `zero-server-starter`。网络监听与生产安全策略仍由应用显式接入。入口和限制见[场景指南](quickstart.zh-CN.md)。
+`zero-runtime-net` 的生命周期 provider 仅要求 `RuntimeBasics.CONFIG` 与 `RuntimeBasics.EXECUTORS`；中立能力模型与实际 descriptor 保持一致。该模块不传递依赖 runtime-log/runtime-monitor；可选 `ProductionNetworkTelemetryObserver` 使用 optional 的 zero-log/zero-monitor，由消费者显式声明。常改入口为 `NetworkRuntime.module`、`ProductionNetworkProvider`、`ProductionNetworkSettings` 和 `ProductionNetworkLifecycle`；安全链在生命周期组合根统一包装，防止直接构造时漏执行。迁移与策略责任见[最小网络迁移](migrations/20260928-production-network-minimal-customization.md)。
+
+`ProductionAssembly.builder(profile, config)` 接受 standalone/external-test/production，`plan()` 在不创建资源的前提下返回实际 provider 图。脚手架在 `ScaffoldComponents` 选择现有集成，在 `ScaffoldConfiguration` 生成所选 Adapter 的开关及外部配置样例。示例 `examples/modular-composition/center-logic` 只依赖 bootstrap/RPC；TCP 示例的执行器由 bootstrap 管理、codegen 只存在于构建插件。脚手架 `net` 选择网络生命周期 provider，限流、安全链、observer 与心跳检查均由应用按需显式接入；未注入限流器使用 permit-all，未注入 observer 使用 no-op。`runtime + net` 仅依赖 `zero-net` / `zero-runtime-net` 及其闭包，`local + net` 的 TCP 示例额外依赖 `zero-server-starter`。网络监听与生产安全策略仍由应用显式接入。入口和限制见[场景指南](quickstart.zh-CN.md)。
 
 `zero-data/repository` 的 `RepositoryDefinition`、`RepositoryFactory`、`RepositorySource`、`RepositoryCatalog` 形成中立业务入口；工厂按需创建既有 envelope Repository。`examples/repository-composition` 演示同一余额业务切换四种来源，生命周期和执行域要求见 [Repository 指南](guides/repository-composition-guide.zh-CN.md)。`VerifyGeneratedCompositions.java` 检查生成消费者的 Maven 依赖、SDK 缺席与自定义实现选择。
 

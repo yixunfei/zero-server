@@ -15,7 +15,6 @@ import group.zn.zero.net.ServerOptions;
 import group.zn.zero.net.ServerType;
 import group.zn.zero.net.error.NetErrorCode;
 import group.zn.zero.net.http.HttpResponse;
-import group.zn.zero.net.kcp.UnsupportedKcpServer;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
 import group.zn.zero.protocol.ProtocolFrame;
@@ -273,18 +272,6 @@ class NettyServerImplementationsTest {
             server.stop();
             shutdown(handlerExecutor);
         }
-    }
-
-    /**
-     * 验证 KCP 当前为独立边界并 fail-fast。
-     */
-    @Test
-    void kcpServerShouldFailFastBeforeAdapterIsSelected() {
-        UnsupportedKcpServer server = new UnsupportedKcpServer(ServerOptions.kcp("127.0.0.1", 0));
-
-        ZeroException exception = assertThrows(ZeroException.class, server::start);
-
-        assertEquals(NetErrorCode.KCP_NOT_IMPLEMENTED, exception.errorCode());
     }
 
     private static ExecutorService newHandlerExecutor(final String name) {

@@ -5,7 +5,7 @@
     <parent>
         <groupId>group.zn.zero</groupId>
         <artifactId>zero-parent</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <version>0.1.0</version>
         <relativePath>../zero-parent/pom.xml</relativePath>
     </parent>
     <artifactId>zero-runtime-net</artifactId>
@@ -22,10 +22,22 @@
         <dependency>
             <groupId>group.zn.zero</groupId>
             <artifactId>zero-runtime-log</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>group.zn.zero</groupId>
             <artifactId>zero-runtime-monitor</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-log</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-monitor</artifactId>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>group.zn.zero</groupId>

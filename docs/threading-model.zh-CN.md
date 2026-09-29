@@ -1,5 +1,11 @@
 # 线程模型设计
 
+## 2026-09-28 KCP 调度与客户端
+
+单 socket/单会话仍绑定一个 EventLoop。服务端每会话一个截止记录、每服务一个等待计时器，每轮至多处理64个到期会话；空闲会话不更新算法，授权在250ms内复查。
+业务双端复用有界异步队列，保持 open → frames → close。整帧引用释放回收发送预算，关闭不能提前释放在途 handler 数据。
+可选 zero-runtime-kcp 复用框架执行器和 IO 所有权；监控最多一个在途后台采样。客户端无需业务自建 pump/定时线程；恢复不重放请求。详见[场景指南](guides/kcp-scenarios.zh-CN.md)。
+
 ## 2026-09-28 报告核实补充
 
 - `ExecutorActorScheduler` 对每 lane 和全局未完成消息施加有界准入；同 lane 会等待前一条异步 stage 完成后再 drain，executor 拒绝、取消和异常都会释放预算。它仍使用组合根提供的 executor，不创建集群 mailbox 或持久邮箱。

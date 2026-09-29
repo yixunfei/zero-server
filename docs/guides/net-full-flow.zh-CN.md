@@ -71,7 +71,7 @@ IO 资源由 `zero-net` 的 `NettyIoResources` 统一创建和回收。默认构
 - TCP：当前核心主线，适合长连接请求；外层 4 字节长度字段只属于 `zero-net` TCP 包帧，不改变 `zero-protocol` frame 格式。
 - UDP：当前为一报一帧的最小无连接语义，`NettyUdpConnection` 是单次远端地址上下文，不代表可靠业务 session。
 - HTTP：当前是 Netty `codec-http` 最小请求/响应模型，不提供生产 REST 路由、GM 鉴权或审计。
-- KCP：当前保留 fail-fast 边界；真实实现需基于 `java-Kcp` 与 KCP/TCP 协作登录方案提交独立 Design Proposal。
+- KCP：显式选择 `zero-net-kcp` Adapter，已实现 java-Kcp + TCP 登录票据闭环；设计、认证包格式与资源约束见 [KCP 契约](../reference/kcp-transport-contract.zh-CN.md)。
 - WebSocket / JSON / Protobuf：当前只保留 `ServerType` / `ServerCodecType` 扩展口，未实现具体 server 或 codec。
 
 ### session 使用边界
@@ -80,7 +80,7 @@ IO 资源由 `zero-net` 的 `NettyIoResources` 统一创建和回收。默认构
 - `LogicSession` 才是业务 session 示例，可记录请求频率、请求间隔、渠道编码等业务相关信息。
 - TCP session 可按连接生命周期打开和关闭。
 - UDP 没有真实连接生命周期，不能直接套用 TCP session 语义。
-- KCP 后续应基于 conv、token、UDP 地址映射和 TCP 回退策略建立独立 session 绑定规则。
+- KCP 以已认证 TCP 签发的 conv/密钥/有效期和首次 UDP 地址建立独立绑定；回退必须校验原控制连接拥有权，不自动重放请求。
 
 ## 4. 当前验证
 
@@ -99,7 +99,7 @@ IO 资源由 `zero-net` 的 `NettyIoResources` 统一创建和回收。默认构
 
 - 业务 executor 可通过 `ZeroRuntimeExecutors` 统一管理并由应用关闭；Netty IO 由 `NettyIoResources` 统一管理，默认独占或由 runtime 显式装配。业务 executor 由调用方传入。
 - 生成 dispatcher 当前同步调用 BO，响应生成仍由 handler 或业务层负责。
-- 真实 KCP、WebSocket、JSON/Protobuf 和生产 HTTP 路由都需要独立 Design Proposal 与针对性验证。
+- KCP 的独立设计与针对性测试见上述契约；WebSocket、JSON/Protobuf 和生产 HTTP 路由仍需独立 Design Proposal 与验证。
 - 如果后续修改 dispatcher 返回值、异步语义或协议线格式，属于高风险协议契约变更，必须单独确认。
 
 ## 6. 显式启用生产 TCP 生命周期
@@ -107,7 +107,7 @@ IO 资源由 `zero-net` 的 `NettyIoResources` 统一创建和回收。默认构
 local/prototype 路径保持原有语义：未传入 `ProductionNetworkLifecycle` 时，TCP 连接建立后立即触发 `ConnectionListener.onOpen`，首个 `ProtocolFrame` 直接投递业务 executor。生产路径必须同时满足以下条件：
 
 1. 配置 `zero.net.lifecycle.enabled=true`。
-2. 对 `ZeroProductionRuntimeBuilder` 显式调用 `networkPolicy(...)`；需要自定义限流时再调用 `networkRateLimiter(...)`。
+2. 对 `ZeroProductionRuntimeBuilder` 显式调用 `networkPolicy(...)`；按需调用 `networkRateLimiter(...)`、`securityChain(...)` 和 `networkObserver(...)`。未注入限流器不限制速率，未注入安全链由 `ProductionNetworkPolicy` 自己完成鉴权，未注入 observer 使用 no-op。
 3. builder 必须使用 remote IO 不会内联的 `ZeroRuntimeExecutors`，否则在构建组件图前 fail-fast。
 4. 从已构建 runtime 调用 `require(NetworkRuntime.NETWORK_LIFECYCLE)` 取得生命周期组合；该键位于 `zero-runtime-net`。
 5. 调用带 `ProductionNetworkLifecycle` 参数的 `ServerFactory.tcp(...)` 或 `NettyTcpServer` 构造。
@@ -123,7 +123,7 @@ ACCEPTED
   -> 业务 executor / generated dispatcher
 ```
 
-握手、鉴权、心跳、队列预算或限流失败时，连接绑定 `NetErrorCode`、发出 observer 事件并关闭；首轮实现不会新增客户端错误响应 frame，因此不改变现有协议线格式。默认握手/鉴权超时分别为 5 秒和 10 秒，心跳间隔 15 秒、允许丢失 2 次，重连窗口 30 秒，单连接入站 frame 预算 1024；这些值均可配置，正式部署必须按游戏类型和容量测试覆盖。
+握手、鉴权、心跳、队列预算或限流失败时，连接绑定 `NetErrorCode`、发出 observer 事件并关闭；首轮实现不会新增客户端错误响应 frame，因此不改变现有协议线格式。默认握手/鉴权超时分别为 5 秒和 10 秒，心跳检查默认关闭，启用后间隔 15 秒、允许丢失 2 次，重连窗口 30 秒，单连接入站 frame 预算 1024；这些值均可配置，正式部署必须按游戏类型和容量测试覆盖。
 
 当前切片只覆盖 TCP 最小治理，不包含真实账号/token 鉴权、TLS、WAF、DDoS 防护、完整网关、UDP/KCP/WebSocket 生命周期或生产容量承诺。
 
@@ -158,4 +158,8 @@ runtime.start();
 直接嵌入使用 `NettyIoResources.open(options)` 时，由组合根按相同顺序关闭所有借用服务器和 IO 资源。
 # 2026-09-28 报告核实补充
 
-网络接入必须先选择传输契约：生产 TCP 传入 `ProductionNetworkLifecycle`；自带安全协议的低层 TCP 才使用 `tcpUnmanaged`；UDP 需要地址上下文时使用带 `ConnectionListener`/`UdpSessionOptions` 的重载。KCP 尚未提供实现，不能通过工厂启动。
+网络接入必须先选择传输契约：生产 TCP 传入 `ProductionNetworkLifecycle`；自带安全协议的低层 TCP 才使用 `tcpUnmanaged`；UDP 需要地址上下文时使用带 `ConnectionListener`/`UdpSessionOptions` 的重载。KCP 使用独立 `KcpServer`，不通过裸 TCP/UDP 工厂隐式启用；[Java 联调例子](../../examples/kcp-tcp-login/README.zh-CN.md)覆盖登录、收发和回退。
+
+## KCP 场景化接入
+
+通过可选 zero-runtime-kcp 的 KcpRuntime.module 安装，KcpClient 自动建链/心跳，KcpRecovery 显式恢复或回退；控制面下发权威配置而不是手抄参数。[场景与配置指南](kcp-scenarios.zh-CN.md)列出五个预设、预算和业务边界。

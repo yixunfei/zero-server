@@ -1,7 +1,6 @@
 package group.zn.zero.net;
 
 import group.zn.zero.net.http.HttpRequestHandler;
-import group.zn.zero.net.kcp.UnsupportedKcpServer;
 import group.zn.zero.net.netty.NettyHttpServer;
 import group.zn.zero.net.netty.NettyTcpServer;
 import group.zn.zero.net.netty.NettyUdpServer;
@@ -9,7 +8,6 @@ import group.zn.zero.net.netty.UdpSessionOptions;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
 import group.zn.zero.protocol.codec.ProtocolFrameCodec;
 import group.zn.zero.protocol.codec.ZeroBinaryFrameCodec;
-import java.util.Objects;
 import java.util.concurrent.Executor;
 
 /**
@@ -86,16 +84,6 @@ public final class ServerFactory {
             final HttpRequestHandler handler,
             final Executor executor) {
         return new NettyHttpServer(options, handler, executor);
-    }
-
-    /**
-     * 创建暂未实现的 KCP 服务器边界。
-     *
-     * @param options 服务器配置；不可为空。
-     * @return KCP 服务器占位；不可为空；启动时 fail-fast。
-     */
-    public static IServer kcpUnsupported(final ServerOptions options) {
-        return new UnsupportedKcpServer(Objects.requireNonNull(options, "options"));
     }
 
     /**

@@ -4,11 +4,13 @@
 
 状态：`minimum-slice-implemented / confirmed=true / productionReady=false`
 
+2026-09-28：已确认最小可定制化调整。策略缺省行为和 0.x API/配置变化以[本次迁移说明](../migrations/20260928-production-network-minimal-customization.md)为准；限流、安全链、观测下游和心跳检查均按需接入。
+
 当前实现边界：
 
 - `zero-net` 已提供独立 opt-in 配置、状态机、策略端口、限流 SPI、observer、Netty 会话门控与标准 `NetErrorCode`。
 - `ZeroServerTcpApplication` 提供本地 starter 的显式 `start`/`probe`/`stop` 生命周期门面；真实 loopback 请求、线程归属、端口冲突和清理证据见 `target/acceptance-evidence/` 及迁移说明 `20260914-starter-template-tcp-lifecycle.md`。
-- `zero-server-starter-production` 已提供显式配置解析、默认有界每 IP 限流器、日志/指标 observer 与受管执行器组合。
+- `zero-server-starter-production` 提供显式配置解析与受管执行器组合；限流器、安全链和 observer 均由调用方按需注入，未注入时分别使用 permit-all、调用方 `ProductionNetworkPolicy` 和 no-op 端口。
 - `ProtocolFrame`、协议 ID、DSL、codegen、generated dispatcher、`ServerOptions` 构造和 local/prototype 默认行为均未改变。
 - PNFT-01～PNFT-10 已落为 JUnit focused tests；映射见 `docs/reference/production-network-focused-tests.zh-CN.md`。
 - 本切片仍不代表完整生产网关或 production ready；真实鉴权、TLS/WAF/DDoS、容量/长稳验证和其他传输生命周期仍需独立设计与验证。
@@ -58,7 +60,7 @@
 
 - 状态迁移必须单调、可观测、可测试。
 - 任何连接只能有一个当前生命周期状态。
-- 连接拒绝必须有明确原因、ErrorCode 分类、日志和指标。
+- 连接拒绝必须有明确原因、ErrorCode 分类和可接入的 observer 事件；日志与指标由显式 observer 记录。
 - 跨 Actor 的玩家状态恢复和旧连接踢下线必须通过消息，不允许跨线程直接改玩家状态。
 
 ## 4. 候选事件
@@ -86,11 +88,14 @@
 | --- | --- | --- |
 | 握手超时 | 5 秒 | 从 `ACCEPTED` 到 `HANDSHAKING` 完成 |
 | 鉴权超时 | 10 秒 | 从 `AUTHENTICATING` 到成功或拒绝 |
+| 心跳检查开关 | false | 显式启用后才调度超时检查 |
 | 心跳间隔 | 15 秒 | 客户端建议发送周期 |
 | 心跳丢失阈值 | 2 次 | 超过阈值后关闭或进入 draining |
 | 重连窗口 | 30 秒 | 玩家 Actor 保留旧 session 的候选窗口 |
 | 单连接入站 frame 预算 | 1024 | `ProductionNetworkConfig` 默认值，可按业务显式调整 |
-| 单 IP 新建连接速率 | 20 / 秒，突发 40 | 仅属于 production starter 示例策略；有界槽默认 16384 |
+| 单 IP 新建连接速率 | 未启用 | 需要调用方显式注入 `NetworkRateLimiter`；框架不强制默认限流 |
+
+`withHeartbeat(interval, missed)` 显式开启检查；仅修改配置键中的间隔与次数不会启用。`policy.isHeartbeat` 的帧识别独立于超时开关，允许应用在关闭服务端超时检查时继续消费客户端保活帧。
 
 ## 6. 线程与执行域边界
 
@@ -99,6 +104,7 @@
 - 鉴权如果需要远程调用，必须进入框架统一管理的远程 IO 执行域或低频虚拟线程执行域。
 - observer 事件通过每连接私有的有序 drain 提交到框架共享受管 executor；同一连接最多存在一个活动 drain，并按会话提交顺序执行，不要求共享 executor 自身为单线程。
 - 不同连接可以在共享 executor 上并发观测；有序 drain 不创建线程或线程池，也不改变 executor 生命周期。
+- 未注入 observer 或显式使用 `ConnectionLifecycleObserver.noOp()` 时，会话不创建观测队列、观测对象，也不提交 observer 任务；自定义空回调按显式 observer 处理。
 - 当前 observer 待执行队列没有独立容量上限、背压或丢弃策略；慢 observer 可能积压，不能据此宣称遥测容量、长稳或故障降级已经验证。
 - 玩家在线状态默认绑定 player actor。
 - 场景状态默认绑定 scene actor。
@@ -142,7 +148,7 @@
 安全要求：
 
 - 不输出 token、密码、完整密钥或敏感连接串。
-- 鉴权失败、限流拒绝和异常高频连接必须进入安全日志。
+- 鉴权失败、限流拒绝和异常高频连接应由调用方注入 observer 后进入安全日志；zero-net 不直接依赖日志实现。
 - 错误日志必须绑定 ErrorCode。
 
 ## 9. 指标标签候选
@@ -248,8 +254,8 @@ ZeroProductionNetworkFocusedTestPlan
 当前网络 minimum slice 状态是 `minimum-slice-implemented / productionReady=false`。任何未覆盖扩展都应单独评估设计、兼容性、性能、安全和验证范围；合入公共契约前必须经过维护者评审。
 # 2026-09-28 报告核实补充
 
-`ServerFactory.tcp(...)` 的无 lifecycle 重载现在主动失败，避免调用方误把裸 Netty 帧入口当成已鉴权的生产入口。使用 production lifecycle 时，连接级 admission 和 frame budget 在握手阶段同样生效；鉴权/重放策略由 `SecurityChain` 注入，默认 fail-closed。
+`ServerFactory.tcp(...)` 的无 lifecycle 重载现在主动失败，避免调用方误把裸 Netty 帧入口当成已鉴权的生产入口。使用 production lifecycle 时，连接级 admission 和 frame budget 在握手阶段同样生效；未注入 `SecurityChain` 时由调用方提供的 `ProductionNetworkPolicy` 负责鉴权，显式注入安全链后才启用其鉴权、TLS 和重放检查。
 
 UDP 的 peer 表只提供远端地址上下文、open/close 生命周期、容量和空闲回收。它不提供 KCP 级可靠传输、重传、拥塞控制或自动鉴权。超长 datagram 被计数并丢弃，socket 继续服务其他 peer；来源封禁由上层网关或业务策略选择。
 
-KCP 当前没有实现，`ServerFactory.kcpUnsupported(...)` 是明确的 fail-fast 能力边界。
+KCP 现由独立 `zero-net-kcp` 实现，复用 TCP 登录身份但拥有独立票据与 UDP 绑定；不直接复用 TCP 状态机。`ServerFactory.kcpUnsupported(...)` 已移除，迁移见 [KCP 说明](../migrations/20260928-kcp-support.md)。

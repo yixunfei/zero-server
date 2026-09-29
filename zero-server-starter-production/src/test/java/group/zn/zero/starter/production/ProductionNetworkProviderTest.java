@@ -2,12 +2,14 @@ package group.zn.zero.starter.production;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.net.lifecycle.NetworkAdmissionDecision;
+import group.zn.zero.net.lifecycle.ConnectionLifecycleObserver;
 import group.zn.zero.net.lifecycle.NetworkRateLimiter;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
 import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
@@ -42,14 +44,31 @@ class ProductionNetworkProviderTest {
             ProductionNetworkLifecycle lifecycle = runtime.require(
                     NetworkRuntime.NETWORK_LIFECYCLE);
             assertEquals(ZeroProductionRuntimeConfigKeys.DEFAULT_NETWORK_LISTENER, lifecycle.config().listener());
-            assertEquals("ProductionIpConnectionRateLimiter", lifecycle.rateLimiter().getClass().getSimpleName());
+            assertNull(lifecycle.securityChain());
+            assertFalse(lifecycle.config().heartbeatEnabled());
             var metadata = runtime.plan().config().stream()
                     .filter(item -> item.owner().equals(group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_NETWORK_LIFECYCLE))
                     .toList();
-            assertEquals(10, metadata.size());
+            assertEquals(8, metadata.size());
             assertTrue(metadata.stream().noneMatch(item -> item.sensitive()));
             assertTrue(metadata.stream().allMatch(item ->
                     item.validationStatus() == ConfigValidationStatus.DEFAULTED));
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
+    void heartbeatCheckShouldRequireExplicitConfiguration() {
+        ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("network-heartbeat-enabled");
+        ZeroProductionRuntime runtime = ZeroProductionRuntimeFactory.externalTestBuilder(config(Map.of(
+                        ZeroProductionRuntimeConfigKeys.NETWORK_LIFECYCLE_ENABLED, "true",
+                        ZeroProductionRuntimeConfigKeys.NETWORK_HEARTBEAT_ENABLED, "true")))
+                .executors(executors)
+                .networkPolicy((connection, frame) -> NetworkAdmissionDecision.allow())
+                .build();
+        try {
+            assertTrue(runtime.require(NetworkRuntime.NETWORK_LIFECYCLE).config().heartbeatEnabled());
         } finally {
             runtime.close();
         }
@@ -133,20 +152,22 @@ class ProductionNetworkProviderTest {
     }
 
     @Test
-    void customLimiterShouldPreserveIgnoredDefaultLimiterConfigSemantics() {
+    void customLimiterAndObserverShouldBeUsedWithoutImplicitDefaults() {
         NetworkRateLimiter customLimiter = connection -> false;
+        ConnectionLifecycleObserver observer = observation -> { };
         ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.localPrototype("network-custom-limiter");
         ZeroProductionRuntime runtime = ZeroProductionRuntimeFactory.externalTestBuilder(config(Map.of(
-                        ZeroProductionRuntimeConfigKeys.NETWORK_LIFECYCLE_ENABLED, "true",
-                        ZeroProductionRuntimeConfigKeys.NETWORK_PER_IP_PERMITS_PER_SECOND, "not-an-integer")))
+                        ZeroProductionRuntimeConfigKeys.NETWORK_LIFECYCLE_ENABLED, "true")))
                 .executors(executors)
                 .networkPolicy((connection, frame) -> NetworkAdmissionDecision.allow())
                 .networkRateLimiter(customLimiter)
+                .networkObserver(observer)
                 .build();
         try {
             assertSame(
                     customLimiter,
                     runtime.require(NetworkRuntime.NETWORK_LIFECYCLE).rateLimiter());
+            assertSame(observer, runtime.require(NetworkRuntime.NETWORK_LIFECYCLE).observer());
         } finally {
             runtime.close();
         }

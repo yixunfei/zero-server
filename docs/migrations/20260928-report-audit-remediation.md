@@ -8,7 +8,7 @@
 
 - `ServerFactory.tcp(options, handler, executor)` 和不带 lifecycle 的 codec 重载现在 fail-fast。生产入口必须传入 `ProductionNetworkLifecycle`；确实自行实现握手/鉴权的低层协议改用明确命名的 `tcpUnmanaged(...)`。
 - UDP 默认入口仍是无连接 datagram 语义。需要地址上下文、open/close 事件和会话预算时，使用带 `ConnectionListener` 与 `UdpSessionOptions` 的重载。UDP 不自动获得重传、拥塞控制或鉴权。
-- `ServerFactory.kcpUnsupported(...)` 仍是能力边界，不得用于生产流量。
+- 本报告完成时 `ServerFactory.kcpUnsupported(...)` 为能力边界；后续已由独立 KCP Adapter 替换，当前迁移入口见 [KCP 迁移说明](20260928-kcp-support.md)。
 
 ### 数据与缓存
 
@@ -27,7 +27,7 @@
 
 ## 不变但必须明确选择的能力
 
-KCP、可靠 UDP、分布式 replay store、跨进程 world ownership 和可靠房间事件日志没有被伪造实现。Nacos/Kafka/Redis 的真实 adapter 已接入，但没有外部集群、认证、故障注入和容量证据时仍按 fail-closed 处理。生产项目必须在组合根选择这些实现并完成自身的安全、事务、补偿、监控和长稳验证。
+本报告的基线没有声称实现 KCP、可靠 UDP、分布式 replay store、跨进程 world ownership 和可靠房间事件日志。KCP 后续已独立补全服务端闭环，当前能力与测试见 [KCP 迁移说明](20260928-kcp-support.md)。Nacos/Kafka/Redis 的真实 adapter 已接入，但没有外部集群、认证、故障注入和容量证据时仍按 fail-closed 处理。生产项目必须在组合根选择这些实现并完成自身的安全、事务、补偿、监控和长稳验证。
 
 ## 回滚与兼容
 

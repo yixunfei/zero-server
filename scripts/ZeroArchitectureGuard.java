@@ -59,6 +59,7 @@ public final class ZeroArchitectureGuard {
             "zero-runtime-postgresql",
             "zero-runtime-nacos",
             "zero-runtime-net",
+            "zero-runtime-kcp",
             "zero-event",
             "zero-protocol",
             "zero-codegen",
@@ -76,6 +77,8 @@ public final class ZeroArchitectureGuard {
             "zero-logic",
             "zero-security",
             "zero-net",
+            "zero-net-kcp",
+            "zero-net-kcp-redis",
             "zero-rpc-common",
             "zero-rpc",
             "zero-rpc-kafka",
@@ -97,6 +100,8 @@ public final class ZeroArchitectureGuard {
      * starter 默认运行时不允许以 compile/runtime 方式强依赖的真实 Adapter 模块。
      */
     private static final Set<String> REAL_ADAPTER_MODULES = Set.of(
+            "zero-net-kcp-redis",
+            "zero-net-kcp",
             "zero-rpc-kafka",
             "zero-data-mongo",
             "zero-data-redis",
@@ -177,6 +182,7 @@ public final class ZeroArchitectureGuard {
      * 需要在 module-map 文档中持续可定位的关键文本。
      */
     private static final List<String> MODULE_MAP_ANCHORS = List.of(
+            "zero-net-kcp",
             "zero-core",
             "zero-runtime",
             "zero-server-starter",
@@ -226,6 +232,7 @@ public final class ZeroArchitectureGuard {
         checkRuntimeBoundary(report);
         checkIntegrationBoundaries(report);
         checkFoundationBoundaries(report);
+        checkKcpBoundary(report);
         checkRpcBoundary(report);
         checkActorBoundary(report);
         checkRoomBoundary(report);
@@ -321,6 +328,21 @@ public final class ZeroArchitectureGuard {
         } else {
             report.fail("module-poms", "Missing module pom.xml files: " + String.join(", ", missing));
         }
+    }
+
+    /** KCP SDK 仅存在于独立 Adapter，框架基础网络不得反向依赖。 */
+    private static void checkKcpBoundary(final GuardReport report) throws IOException {
+        List<Dependency> runtime = dependenciesOf(report, "zero-net-kcp").stream()
+                .filter(dependency -> !dependency.isTestOnly()).toList();
+        Set<String> artifacts = runtime.stream().map(Dependency::artifactId)
+                .collect(java.util.stream.Collectors.toSet());
+        boolean valid = runtime.size() == 2 && artifacts.equals(Set.of("zero-net", "kcp-base"));
+        for (String module : List.of("zero-core", "zero-net")) {
+            valid &= dependenciesOf(report, module).stream().noneMatch(dependency ->
+                    Set.of("zero-net-kcp", "kcp-base", "kcp-fec").contains(dependency.artifactId()));
+        }
+        if (valid) report.pass("kcp-adapter-boundary", "KCP SDK remains in zero-net-kcp; core/net do not depend on it.");
+        else report.fail("kcp-adapter-boundary", "KCP adapter dependencies or core/net boundary are invalid.");
     }
 
     private static void checkZeroCoreBoundary(final GuardReport report) throws IOException {
@@ -474,6 +496,7 @@ public final class ZeroArchitectureGuard {
                 case "zero-runtime-redis" -> "zero-data-redis";
                 case "zero-runtime-postgresql" -> "zero-data-postgresql";
                 case "zero-runtime-nacos" -> "zero-discovery-nacos";
+                case "zero-runtime-kcp" -> "zero-net-kcp";
                 default -> "";
             };
             adapters.remove(allowed);

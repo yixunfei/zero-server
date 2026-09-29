@@ -1,7 +1,5 @@
 package group.zn.zero.net.lifecycle;
 
-import java.util.Objects;
-
 /**
  * 生产连接生命周期观测端口。
  *
@@ -22,11 +20,11 @@ public interface ConnectionLifecycleObserver {
     void onEvent(ConnectionLifecycleObservation observation);
 
     /**
-     * 返回无操作 observer。
+     * 返回共享无操作 observer；框架据此跳过观测分配与调度。
      *
      * @return 无操作 observer；不可为空；线程安全。
      */
     static ConnectionLifecycleObserver noOp() {
-        return observation -> Objects.requireNonNull(observation, "observation");
+        return NoOpConnectionLifecycleObserver.INSTANCE;
     }
 }

@@ -71,6 +71,10 @@ public final class ZeroProductionRuntimeConfigKeys {
     public static final String NETWORK_HEARTBEAT_INTERVAL_MILLIS =
             "zero.net.lifecycle.heartbeat-interval-millis";
 
+    /** 是否显式启用生产网络心跳检查。 */
+    public static final String NETWORK_HEARTBEAT_ENABLED =
+            "zero.net.lifecycle.heartbeat-enabled";
+
     /**
      * 允许丢失心跳次数。
      */
@@ -89,41 +93,9 @@ public final class ZeroProductionRuntimeConfigKeys {
     public static final String NETWORK_MAX_INBOUND_FRAMES = "zero.net.lifecycle.max-inbound-frames";
 
     /**
-     * production 示例每 IP 每秒新连接数。
-     */
-    public static final String NETWORK_PER_IP_PERMITS_PER_SECOND =
-            "zero.net.lifecycle.per-ip-permits-per-second";
-
-    /**
-     * production 示例每 IP 新连接突发容量。
-     */
-    public static final String NETWORK_PER_IP_BURST_CAPACITY =
-            "zero.net.lifecycle.per-ip-burst-capacity";
-
-    /**
-     * 有界 IP 限流槽数量。
-     */
-    public static final String NETWORK_RATE_LIMIT_SLOTS = "zero.net.lifecycle.rate-limit-slots";
-
-    /**
      * 默认 production listener 名称。
      */
     public static final String DEFAULT_NETWORK_LISTENER = "production-tcp";
-
-    /**
-     * 默认每 IP 每秒新连接数；只属于 production starter 示例策略。
-     */
-    public static final int DEFAULT_NETWORK_PER_IP_PERMITS_PER_SECOND = 20;
-
-    /**
-     * 默认每 IP 新连接突发容量；只属于 production starter 示例策略。
-     */
-    public static final int DEFAULT_NETWORK_PER_IP_BURST_CAPACITY = 40;
-
-    /**
-     * 默认有界限流槽数量。
-     */
-    public static final int DEFAULT_NETWORK_RATE_LIMIT_SLOTS = 16_384;
 
     /**
      * Kafka RPC 显式启用开关。

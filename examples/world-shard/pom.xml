@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <parent><groupId>group.zn.zero</groupId><artifactId>zero-parent</artifactId><version>0.1.0-SNAPSHOT</version><relativePath>../../zero-parent/pom.xml</relativePath></parent>
+  <parent><groupId>group.zn.zero</groupId><artifactId>zero-parent</artifactId><version>0.1.0</version><relativePath>../../zero-parent/pom.xml</relativePath></parent>
   <artifactId>zero-example-world-shard</artifactId>
   <name>zeroServer Example World Shard</name>
   <properties><maven.compiler.release>21</maven.compiler.release><exec.mainClass>group.zn.zero.examples.worldshard.WorldShardApplication</exec.mainClass></properties>
   <dependencies>
-    <dependency><groupId>group.zn.zero</groupId><artifactId>zero-world</artifactId><version>0.1.0-SNAPSHOT</version></dependency>
+    <dependency><groupId>group.zn.zero</groupId><artifactId>zero-world</artifactId><version>0.1.0</version></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.10.3</version><scope>test</scope></dependency>
   </dependencies>
   <build><plugins>
