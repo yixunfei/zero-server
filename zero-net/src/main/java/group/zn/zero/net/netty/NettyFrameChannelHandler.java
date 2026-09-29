@@ -135,7 +135,9 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
             sslHandler.handshakeFuture().addListener(future -> {
                 if (future.isSuccess()) {
                     connection.attributes().put(ProductionNetworkConnectionAttributes.TLS_ESTABLISHED, Boolean.TRUE);
-                    context.executor().execute(this::startProductionLifecycle);
+                    // The handshake callback already runs on this channel's EventLoop. Start the
+                    // lifecycle inline so the first decrypted frame cannot overtake initialization.
+                    startProductionLifecycle();
                 } else {
                     context.close();
                 }
