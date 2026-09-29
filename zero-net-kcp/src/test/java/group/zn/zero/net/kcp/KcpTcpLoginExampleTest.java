@@ -10,7 +10,7 @@ import group.zn.zero.net.lifecycle.NetworkAdmissionDecision;
 import group.zn.zero.net.lifecycle.NetworkRateLimiter;
 import group.zn.zero.net.lifecycle.ProductionNetworkConfig;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
-import group.zn.zero.net.lifecycle.SecurityNetworkPolicy;
+import group.zn.zero.net.lifecycle.ProductionNetworkPolicy;
 import group.zn.zero.net.netty.NettyTcpServer;
 import group.zn.zero.protocol.ProtocolFrame;
 import group.zn.zero.protocol.codec.ZeroBinaryFrameCodec;
@@ -64,7 +64,7 @@ class KcpTcpLoginExampleTest {
                     (connection, frame) -> CompletableFuture.completedFuture(List.of(frame)),
                     new ConnectionListener() { }, workers, null);
             SecurityChain security = security();
-            var policy = new SecurityNetworkPolicy((connection, frame) -> NetworkAdmissionDecision.allow(), security);
+            ProductionNetworkPolicy policy = (connection, frame) -> NetworkAdmissionDecision.allow();
             var lifecycle = new ProductionNetworkLifecycle(ProductionNetworkConfig.defaults("kcp-demo")
                     .withTlsRequired(true), policy, security, NetworkRateLimiter.permitAll(),
                     ConnectionLifecycleObserver.noOp(), workers, workers);
@@ -82,7 +82,8 @@ class KcpTcpLoginExampleTest {
                                         else ticketSent.completeExceptionally(failure);
                                     });
                         }
-                    }, workers, lifecycle, SslContextBuilder.forServer(certificate.key(), certificate.cert()).build());
+                    }, workers, lifecycle,
+                    SslContextBuilder.forServer(certificate.key(), certificate.cert()).build());
             try {
                 kcp.start();
                 tcp.start();
