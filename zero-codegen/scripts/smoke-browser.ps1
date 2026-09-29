@@ -34,6 +34,45 @@ window.onerror = text => { document.getElementById('result').textContent += 'FAI
 '@ | Set-Content (Join-Path $WorkDir 'index.html') -Encoding utf8
 $html = ([uri](Join-Path (Resolve-Path $WorkDir).Path 'index.html')).AbsoluteUri
 $profile = Join-Path $WorkDir 'profile'
+$browserUrl = $html
+$httpServer = $null
+$python = Get-Command python3, python -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($python) {
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $port = $listener.LocalEndpoint.Port
+    $listener.Stop()
+    $serverInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $serverInfo.FileName = $python.Source
+    $serverInfo.WorkingDirectory = $WorkDir
+    $serverInfo.UseShellExecute = $false
+    $serverInfo.CreateNoWindow = $true
+    $serverInfo.RedirectStandardOutput = $true
+    $serverInfo.RedirectStandardError = $true
+    foreach ($argument in @('-m', 'http.server', $port, '--bind', '127.0.0.1', '--directory', $WorkDir)) {
+        $serverInfo.ArgumentList.Add($argument)
+    }
+    $httpServer = [System.Diagnostics.Process]::Start($serverInfo)
+    $browserUrl = "http://127.0.0.1:$port/index.html"
+    $serverReady = $false
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        try {
+            $response = Invoke-WebRequest -Uri $browserUrl -UseBasicParsing -TimeoutSec 1
+            if ($response.StatusCode -eq 200) {
+                $serverReady = $true
+                break
+            }
+        } catch {
+            Start-Sleep -Milliseconds 100
+        }
+    }
+    if (-not $serverReady) {
+        $httpServer.Kill($true)
+        $httpServer.Dispose()
+        $httpServer = $null
+        $browserUrl = $html
+    }
+}
 $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = $BrowserExecutable
 $startInfo.WorkingDirectory = $WorkDir
@@ -41,9 +80,10 @@ $startInfo.UseShellExecute = $false
 $startInfo.CreateNoWindow = $true
 $startInfo.RedirectStandardOutput = $true
 $startInfo.RedirectStandardError = $true
-foreach ($argument in @('--headless', '--no-sandbox', '--disable-gpu', '--no-first-run', '--dump-dom',
+foreach ($argument in @('--headless=new', '--no-sandbox', '--disable-gpu', '--no-first-run',
+    '--no-default-browser-check', '--disable-background-networking', '--dump-dom',
     '--disable-dev-shm-usage', '--allow-file-access-from-files', '--virtual-time-budget=5000',
-    "--user-data-dir=$profile", $html)) {
+    "--user-data-dir=$profile", $browserUrl)) {
     $startInfo.ArgumentList.Add($argument)
 }
 $process = [System.Diagnostics.Process]::Start($startInfo)
@@ -62,6 +102,10 @@ try {
     $exitCode = $process.ExitCode
 } finally {
     $process.Dispose()
+    if ($httpServer) {
+        if (-not $httpServer.HasExited) { $httpServer.Kill($true) }
+        $httpServer.Dispose()
+    }
 }
 $browserOutput | Set-Content (Join-Path $WorkDir 'browser-output.txt') -Encoding utf8
 $browserErrors | Set-Content (Join-Path $WorkDir 'browser-errors.txt') -Encoding utf8
