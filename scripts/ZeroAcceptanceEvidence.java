@@ -352,7 +352,7 @@ public final class ZeroAcceptanceEvidence {
                 + "  \"schemaVersion\": 1,\n  \"ownershipSchemaVersion\": 1,\n"
                 + "  \"generator\": \"zero-codegen/project-scaffold\",\n"
                 + "  \"projectName\": \"acceptance\",\n  \"packageName\": \"group.example.acceptance\",\n"
-                + "  \"zeroVersion\": \"0.1.0-SNAPSHOT\",\n  \"template\": \"runtime\",\n"
+                + "  \"zeroVersion\": \"0.1.1\",\n  \"template\": \"runtime\",\n"
                 + "  \"prototype\": true,\n  \"connectsExternalMiddleware\": false,\n"
                 + "  \"opensNetworkPorts\": false,\n  \"runtimeProfile\": \"local\",\n"
                 + "  \"requiresExternalServices\": false,\n  \"selectedComponents\": [],\n"

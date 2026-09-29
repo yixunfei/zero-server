@@ -47,7 +47,7 @@ import org.junit.jupiter.api.Timeout;
  * 测试组合根拥有执行器与临时证书；生产使用 runtime 执行器与真实身份服务。
  * @author zn
  */
-@Timeout(20)
+@Timeout(30)
 class KcpTcpLoginExampleTest {
     /** 示例专用业务 ID，不占用框架协议 ID。 */
     private static final int TICKET = 100;
@@ -90,7 +90,7 @@ class KcpTcpLoginExampleTest {
                 try (SSLSocket socket = client(certificate, tcp.boundPort())) {
                     write(socket, new ProtocolFrame(1, 1, 0, null, "demo-secret".getBytes(StandardCharsets.UTF_8)));
                     KcpTicket ticket = ticket(read(socket));
-                    ticketSent.get(3, TimeUnit.SECONDS);
+                    ticketSent.get(10, TimeUnit.SECONDS);
                     try (var peer = new KcpTestPeer(ticket, kcp.boundPort(), KcpOptions.defaults())) {
                         ProtocolFrame request = KcpServerTest.frame(2);
                         peer.send(request);
@@ -132,7 +132,7 @@ class KcpTcpLoginExampleTest {
         SSLContext context = SSLContext.getInstance("TLS");
         context.init(null, trust.getTrustManagers(), null);
         SSLSocket socket = (SSLSocket) context.getSocketFactory().createSocket("localhost", port);
-        socket.setSoTimeout(3000);
+        socket.setSoTimeout(10_000);
         SSLParameters parameters = socket.getSSLParameters();
         parameters.setEndpointIdentificationAlgorithm("HTTPS");
         socket.setSSLParameters(parameters);

@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $output = "$Evidence/generated-dto"
 $classes = "$Evidence/generated-experiment-classes"
-& "$Jdk/bin/java.exe" -jar zero-codegen/target/zero-codegen-0.1.0-SNAPSHOT-all.jar --input scripts/performance/fixtures --out $output --pkg group.zn.zero.benchmark.generated --languages java
+& "$Jdk/bin/java.exe" -jar zero-codegen/target/zero-codegen-0.1.1-all.jar --input scripts/performance/fixtures --out $output --pkg group.zn.zero.benchmark.generated --languages java
 if ($LASTEXITCODE -ne 0) { throw 'Fixture codegen failed' }
 New-Item -ItemType Directory -Force $classes | Out-Null
 $sources = @(Get-ChildItem $output -Recurse -Filter '*.java' | ForEach-Object { '"' + $_.FullName.Replace('\', '/') + '"' })

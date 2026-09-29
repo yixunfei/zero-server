@@ -10,7 +10,7 @@
     <dependency>
       <groupId>group.zn.zero</groupId>
       <artifactId>zero-bom</artifactId>
-      <version>0.1.0-SNAPSHOT</version>
+      <version>0.1.1</version>
       <type>pom</type>
       <scope>import</scope>
     </dependency>

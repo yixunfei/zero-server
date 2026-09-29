@@ -1,6 +1,6 @@
 # 文档总览
 
-适用版本：`0.1.0-SNAPSHOT`。先按任务选入口，细节需要时再查。当前能力状态以[能力矩阵](capability-matrix.zh-CN.md)为准，后续工作统一记录在[优化路线图](optimization-roadmap.zh-CN.md)。
+适用版本：`0.1.1`。先按任务选入口，细节需要时再查。当前能力状态以[能力矩阵](capability-matrix.zh-CN.md)为准，后续工作统一记录在[优化路线图](optimization-roadmap.zh-CN.md)。
 
 ## 开始使用
 

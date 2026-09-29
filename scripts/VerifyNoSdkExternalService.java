@@ -60,7 +60,7 @@ public final class VerifyNoSdkExternalService {
 
     private static String dependency(final String group, final String artifact) {
         return "<dependency><groupId>" + group + "</groupId><artifactId>" + artifact
-                + "</artifactId><version>0.1.0-SNAPSHOT</version></dependency>";
+                + "</artifactId><version>0.1.1</version></dependency>";
     }
 
     private static void runMaven(final List<String> command, final Path log) throws IOException, InterruptedException {

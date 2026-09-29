@@ -51,7 +51,7 @@ public final class RunLocalPrototype {
     /**
      * 默认 zeroServer 版本。
      */
-    private static final String DEFAULT_ZERO_VERSION = "0.1.0-SNAPSHOT";
+    private static final String DEFAULT_ZERO_VERSION = "0.1.1";
 
     /**
      * 默认模板。
