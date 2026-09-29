@@ -3,9 +3,13 @@ param(
     [Parameter(Mandatory)][string]$WorkDir,
     [string]$BrowserExecutable,
     [switch]$Required,
+    [int]$BrowserTimeoutSeconds = 90,
     [string[]]$ExpectedVectors
 )
 $ErrorActionPreference = 'Stop'
+if ($BrowserTimeoutSeconds -lt 1) {
+    throw 'BrowserTimeoutSeconds must be at least 1.'
+}
 if (-not $BrowserExecutable) {
     $candidates = @('C:/Program Files/Google/Chrome/Application/chrome.exe',
         'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/usr/bin/google-chrome', '/usr/bin/chromium')
@@ -47,7 +51,7 @@ $stderrTask = $null
 try {
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit(30000)) {
+    if (-not $process.WaitForExit($BrowserTimeoutSeconds * 1000)) {
         $process.Kill($true)
         $process.WaitForExit()
         throw 'Browser execution timed out.'
