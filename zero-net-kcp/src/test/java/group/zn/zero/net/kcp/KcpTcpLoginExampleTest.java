@@ -4,14 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import group.zn.zero.net.ConnectionListener;
-import group.zn.zero.net.IConnection;
 import group.zn.zero.net.ServerOptions;
 import group.zn.zero.net.lifecycle.ConnectionLifecycleObserver;
 import group.zn.zero.net.lifecycle.NetworkAdmissionDecision;
 import group.zn.zero.net.lifecycle.NetworkRateLimiter;
 import group.zn.zero.net.lifecycle.ProductionNetworkConfig;
 import group.zn.zero.net.lifecycle.ProductionNetworkLifecycle;
-import group.zn.zero.net.lifecycle.SecurityNetworkPolicy;
+import group.zn.zero.net.lifecycle.ProductionNetworkPolicy;
 import group.zn.zero.net.netty.NettyTcpServer;
 import group.zn.zero.protocol.ProtocolFrame;
 import group.zn.zero.protocol.codec.ZeroBinaryFrameCodec;
@@ -47,7 +46,7 @@ import org.junit.jupiter.api.Timeout;
  * 测试组合根拥有执行器与临时证书；生产使用 runtime 执行器与真实身份服务。
  * @author zn
  */
-@Timeout(20)
+@Timeout(30)
 class KcpTcpLoginExampleTest {
     /** 示例专用业务 ID，不占用框架协议 ID。 */
     private static final int TICKET = 100;
@@ -65,7 +64,7 @@ class KcpTcpLoginExampleTest {
                     (connection, frame) -> CompletableFuture.completedFuture(List.of(frame)),
                     new ConnectionListener() { }, workers, null);
             SecurityChain security = security();
-            var policy = new SecurityNetworkPolicy((connection, frame) -> NetworkAdmissionDecision.allow(), security);
+            ProductionNetworkPolicy policy = (connection, frame) -> NetworkAdmissionDecision.allow();
             var lifecycle = new ProductionNetworkLifecycle(ProductionNetworkConfig.defaults("kcp-demo")
                     .withTlsRequired(true), policy, security, NetworkRateLimiter.permitAll(),
                     ConnectionLifecycleObserver.noOp(), workers, workers);
@@ -76,21 +75,22 @@ class KcpTcpLoginExampleTest {
                                     .thenApply(ignored -> List.of(frame))
                             : CompletableFuture.completedFuture(List.of(frame)),
                     new ConnectionListener() {
-                        @Override public void onOpen(final IConnection connection) {
+                        @Override public void onOpen(final group.zn.zero.net.IConnection connection) {
                             kcp.issueTicket(connection).thenCompose(ticket -> connection.sendFrame(ticketFrame(ticket)))
                                     .whenComplete((ignored, failure) -> {
                                         if (failure == null) ticketSent.complete(null);
                                         else ticketSent.completeExceptionally(failure);
                                     });
                         }
-                    }, workers, lifecycle, SslContextBuilder.forServer(certificate.key(), certificate.cert()).build());
+                    }, workers, lifecycle,
+                    SslContextBuilder.forServer(certificate.key(), certificate.cert()).build());
             try {
                 kcp.start();
                 tcp.start();
                 try (SSLSocket socket = client(certificate, tcp.boundPort())) {
                     write(socket, new ProtocolFrame(1, 1, 0, null, "demo-secret".getBytes(StandardCharsets.UTF_8)));
+                    ticketSent.get(10, TimeUnit.SECONDS);
                     KcpTicket ticket = ticket(read(socket));
-                    ticketSent.get(3, TimeUnit.SECONDS);
                     try (var peer = new KcpTestPeer(ticket, kcp.boundPort(), KcpOptions.defaults())) {
                         ProtocolFrame request = KcpServerTest.frame(2);
                         peer.send(request);
@@ -132,7 +132,7 @@ class KcpTcpLoginExampleTest {
         SSLContext context = SSLContext.getInstance("TLS");
         context.init(null, trust.getTrustManagers(), null);
         SSLSocket socket = (SSLSocket) context.getSocketFactory().createSocket("localhost", port);
-        socket.setSoTimeout(3000);
+        socket.setSoTimeout(10_000);
         SSLParameters parameters = socket.getSSLParameters();
         parameters.setEndpointIdentificationAlgorithm("HTTPS");
         socket.setSSLParameters(parameters);

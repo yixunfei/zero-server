@@ -1,6 +1,6 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0">
  <modelVersion>4.0.0</modelVersion>
- <parent><groupId>group.zn.zero.examples</groupId><artifactId>center-logic-kafka</artifactId><version>0.1.0</version></parent>
+ <parent><groupId>group.zn.zero.examples</groupId><artifactId>center-logic-kafka</artifactId><version>0.1.1</version></parent>
  <artifactId>center</artifactId>
  <dependencies>
   <dependency><groupId>group.zn.zero.examples</groupId><artifactId>common-contract</artifactId><version>${project.version}</version></dependency>

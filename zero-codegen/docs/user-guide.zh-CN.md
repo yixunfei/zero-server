@@ -89,7 +89,7 @@ zero-codegen/src/test/resources/protocol-dsl/standard-flow/
 CLI 示例：
 
 ```powershell
-java -jar zero-codegen/target/zero-codegen-0.1.0-SNAPSHOT-all.jar `
+java -jar zero-codegen/target/zero-codegen-0.1.1-all.jar `
   --input zero-codegen/src/test/resources/protocol-dsl/standard-flow `
   --protoId zero-codegen/src/test/resources/protocol-dsl/standard-flow/protoId.txt `
   --out target/generated-sources/zero-codegen `
@@ -111,7 +111,7 @@ java -jar zero-codegen/target/zero-codegen-0.1.0-SNAPSHOT-all.jar `
 GUI 示例：
 
 ```powershell
-java -jar zero-codegen/target/zero-codegen-0.1.0-SNAPSHOT-all.jar --gui
+java -jar zero-codegen/target/zero-codegen-0.1.1-all.jar --gui
 ```
 
 CLI 的 `--out` 与 GUI 的总输出目录采用相同布局：Java 直接写入总目录，C#、TypeScript、GDScript 分别写入其下的 `csharp/`、`typescript/`、`gdscript/`。GUI 中语言专用目录留空表示使用该布局；填写后只覆盖对应语言。C# 命名空间默认从 Java 包名转换为 PascalCase，例如 `game.live.protocol` 对应 `Game.Live.Protocol`；其他客户端命名空间默认使用 DSL 包名，也可单独覆盖。

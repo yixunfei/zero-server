@@ -6,7 +6,7 @@ rem Copy this file and edit the variables below for client projects.
 rem zero-codegen requires Java 21 or newer.
 
 set "SCRIPT_DIR=%~dp0"
-set "CODEGEN_JAR=%SCRIPT_DIR%..\target\zero-codegen-0.1.0-SNAPSHOT-all.jar"
+set "CODEGEN_JAR=%SCRIPT_DIR%..\target\zero-codegen-0.1.1-all.jar"
 set "JAVA_EXE=java"
 if not "%JAVA_HOME%"=="" if exist "%JAVA_HOME%\bin\java.exe" set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
 set "INPUT_DIR=%SCRIPT_DIR%..\src\test\resources\protocol-dsl\standard-flow"

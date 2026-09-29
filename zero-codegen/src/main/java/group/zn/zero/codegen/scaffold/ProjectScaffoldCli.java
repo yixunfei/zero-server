@@ -11,7 +11,7 @@ public final class ProjectScaffoldCli {
 
     private static final String DEFAULT_PROJECT_NAME = "zero-local-game";
     private static final String DEFAULT_PACKAGE_NAME = "group.zn.zero.localgame";
-    private static final String DEFAULT_ZERO_VERSION = "0.1.0-SNAPSHOT";
+    private static final String DEFAULT_ZERO_VERSION = "0.1.1";
 
     private ProjectScaffoldCli() {
     }
