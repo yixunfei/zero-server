@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import group.zn.zero.net.ConnectionListener;
-import group.zn.zero.net.IConnection;
 import group.zn.zero.net.ServerOptions;
 import group.zn.zero.net.lifecycle.ConnectionLifecycleObserver;
 import group.zn.zero.net.lifecycle.NetworkAdmissionDecision;
@@ -76,7 +75,7 @@ class KcpTcpLoginExampleTest {
                                     .thenApply(ignored -> List.of(frame))
                             : CompletableFuture.completedFuture(List.of(frame)),
                     new ConnectionListener() {
-                        @Override public void onOpen(final IConnection connection) {
+                        @Override public void onOpen(final group.zn.zero.net.IConnection connection) {
                             kcp.issueTicket(connection).thenCompose(ticket -> connection.sendFrame(ticketFrame(ticket)))
                                     .whenComplete((ignored, failure) -> {
                                         if (failure == null) ticketSent.complete(null);
@@ -89,8 +88,8 @@ class KcpTcpLoginExampleTest {
                 tcp.start();
                 try (SSLSocket socket = client(certificate, tcp.boundPort())) {
                     write(socket, new ProtocolFrame(1, 1, 0, null, "demo-secret".getBytes(StandardCharsets.UTF_8)));
-                    KcpTicket ticket = ticket(read(socket));
                     ticketSent.get(10, TimeUnit.SECONDS);
+                    KcpTicket ticket = ticket(read(socket));
                     try (var peer = new KcpTestPeer(ticket, kcp.boundPort(), KcpOptions.defaults())) {
                         ProtocolFrame request = KcpServerTest.frame(2);
                         peer.send(request);

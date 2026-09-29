@@ -243,7 +243,7 @@ group.zn.zero.codegen.ProtocolCodegenCli
 示例：
 
 ```powershell
-java -jar zero-codegen/target/zero-codegen-0.1.0-SNAPSHOT-all.jar `
+java -jar zero-codegen/target/zero-codegen-0.1.1-all.jar `
   --input zero-codegen/src/test/resources/protocol-dsl/sample `
   --protoId zero-codegen/src/test/resources/protocol-dsl/sample/protoId.txt `
   --out target/generated-sources/zero-codegen `
@@ -259,7 +259,7 @@ java -jar zero-codegen/target/zero-codegen-0.1.0-SNAPSHOT-all.jar `
 启动方式：
 
 ```powershell
-java -jar target/zero-codegen-0.1.0-SNAPSHOT-all.jar --gui
+java -jar target/zero-codegen-0.1.1-all.jar --gui
 ```
 
 无参数运行可在有图形桌面的环境中自动打开 GUI；无图形环境下会输出 CLI 帮助并返回失败码。GUI 和 CLI 共用 `ProtocolCodegenRunner`，因此解析、校验、FreeMarker 渲染和输出覆盖保护保持一致。
@@ -289,7 +289,7 @@ zero-codegen/docs/user-guide.zh-CN.md
 
 ```powershell
 mvn -pl zero-codegen -am package
-java -jar zero-codegen/target/zero-codegen-0.1.0-SNAPSHOT-all.jar --help
+java -jar zero-codegen/target/zero-codegen-0.1.1-all.jar --help
 ```
 
 该 jar 内含 FreeMarker 模板、DSL 标准示例资源和依赖，可用于 CLI 或 GUI。需要进一步生成 Windows/macOS/Linux 可执行文件时，可基于 JDK 21 的 `jpackage` 包装该 jar，例如：
@@ -307,7 +307,7 @@ jpackage `
   --type exe `
   --name zero-codegen `
   --input zero-codegen/target `
-  --main-jar zero-codegen-0.1.0-SNAPSHOT-all.jar `
+  --main-jar zero-codegen-0.1.1-all.jar `
   --main-class group.zn.zero.codegen.ProtocolCodegenCli `
   --dest zero-codegen/target/dist
 ```
