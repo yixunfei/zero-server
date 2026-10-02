@@ -61,3 +61,22 @@ Read `zero-scaffold.json` when a tool needs machine-readable scaffold metadata.
 - It does not implement Redis sorted set, cross-server ranking, settlement, rewards, anti-cheat, idempotent compensation or capacity planning.
 - The default selection does not connect external middleware or open network ports. Adding Redis requires an external service at startup.
 - It is not a production RankingService / SeasonService API commitment.
+
+## Assembly diagnosis and customization
+
+Run `mvn -q -Dexec.mainClass=__PACKAGE__.RuntimeAssembly exec:java` for a read-only diagnosis.
+This entry point is available for every template and does not start business services or external clients.
+It reports the profile, missing keys, selected providers and schema-declared configuration sources/values.
+Sensitive values are masked; complex values are represented by their type. `productionReady=false`.
+
+`RuntimeAssembly.plan(...)` is strict; `RuntimeAssembly.diagnose(...)` returns a shared diagnosis
+with an optional plan and a sorted missing-key list. Typed diagnostics cover declared schema keys only.
+Use the runtime instance's plan to inspect the configuration actually consumed by that build.
+
+Configuration priority: explicit programmatic/file values > system properties > environment > application defaults
+> schema defaults. Standard environment aliases replace dots/hyphens with underscores and use uppercase.
+`ZeroConfigLoader.loadStandard(defaults)` only queries keys declared in defaults or the file;
+external adapters query their explicitly declared aliases. Invalid higher-priority values fail immediately.
+
+An explicit extension catalog is identified in `zero-scaffold.json` by `catalogId` and `catalogSchemaVersion`.
+Use the same trusted `--catalog` file and selected components for subsequent scaffold `--plan`/`--apply` operations.

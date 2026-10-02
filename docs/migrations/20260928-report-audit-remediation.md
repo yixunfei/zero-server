@@ -21,7 +21,7 @@
 ### 运行时与游戏域
 
 - `LocalPlayerService.login` 对同一账号的第二次登录返回 `ACCOUNT_ALREADY_ONLINE`，不再覆盖旧 session。顶号、踢线和分布式 lease 由业务装配。
-- `LocalWorldService.migrateAsync(...)` 是推荐 API；同步 `migrate(...)` 保留为 deprecated blocking facade，不应在 Actor、Netty 或 IO 执行器中调用。
+- `LocalWorldService.migrateAsync(...)` 是推荐 API；该轮同步 `migrate(...)` 曾保留为 deprecated blocking facade。2026-10-01 已删除全部阻塞修改 facade，后续接入以 [新迁移说明](20261001-audit-reliability.zh-CN.md) 为准。
 - `SyncEnvelope` 显式传入的 `payloadHash` 必须与规范化 payload 的 SHA-256 一致；错误摘要现在在构造时拒绝。
 - 帧同步的 `MARK`、`REJECT`、`BUFFER` 和 `REPEAT_LAST` 仍是显式策略，不因报告而改变为单一业务规则。
 

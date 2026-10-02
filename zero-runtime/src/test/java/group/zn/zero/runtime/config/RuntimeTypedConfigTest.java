@@ -28,6 +28,19 @@ import org.junit.jupiter.api.Test;
  */
 class RuntimeTypedConfigTest {
 
+    /** 从文件快照桥接的非法值须定位为文件来源，且不回显原文。 */
+    @Test
+    void invalidBridgedFileValueKeepsOriginalSourceInFailure() {
+        var input = new group.zn.zero.core.config.SourcedZeroConfig(
+                Map.of(PORT.logicalName(), "invalid-file-secret", SECRET.logicalName(), "secret"),
+                Map.of(PORT.logicalName(), group.zn.zero.core.config.ConfigOrigin.FILE,
+                        SECRET.logicalName(), group.zn.zero.core.config.ConfigOrigin.FILE));
+        var failure = assertThrows(RuntimeAssemblyException.class, () -> assembler(settingsProvider(new AtomicReference<>()))
+                .configSource(new ZeroConfigSource("file-bridge", input)).build());
+        assertTrue(failure.getMessage().contains("FILE/file-bridge#" + PORT.logicalName()));
+        assertFalse(failure.toString().contains("invalid-file-secret"));
+    }
+
     private static final ComponentId SETTINGS_ID = ComponentId.of("config.provider.settings");
     private static final ComponentKey<Settings> SETTINGS =
             ComponentKey.single("config.settings", Settings.class);
@@ -77,6 +90,12 @@ class RuntimeTypedConfigTest {
                 .anyMatch(metadata -> metadata.logicalKey().equals(SECRET.logicalName()) && metadata.sensitive()));
         assertFalse(runtime.plan().toString().contains("sentinel-secret"));
         assertFalse(runtime.report().toString().contains("sentinel-secret"));
+        assertEquals(Integer.toString(settings.port()), runtime.plan().configuration().entries().stream()
+                .filter(entry -> entry.logicalKey().equals(PORT.logicalName())).findFirst().orElseThrow()
+                .effectiveValue().orElseThrow());
+        assertEquals("***", runtime.plan().configuration().entries().stream()
+                .filter(entry -> entry.logicalKey().equals(SECRET.logicalName())).findFirst().orElseThrow()
+                .effectiveValue().orElseThrow());
         assertFalse(high.toString().contains("sentinel-secret"));
         runtime.close();
     }
@@ -100,6 +119,7 @@ class RuntimeTypedConfigTest {
 
         assertEquals(RuntimeErrorCode.RUNTIME_CONFIG_INVALID, failure.errorCode());
         assertFalse(failure.toString().contains(sentinel));
+        assertTrue(failure.getMessage().contains("PROGRAMMATIC/programmatic-test#" + PORT.logicalName()));
         assertNull(failure.getCause());
         assertEquals(0, provider.createCount());
     }
@@ -155,6 +175,78 @@ class RuntimeTypedConfigTest {
         assertEquals("bridge-secret", observedSecret.get());
         assertFalse(source.toString().contains("bridge-secret"));
         runtime.close();
+    }
+
+    @Test
+    void configurationDiagnosisShouldExposeSourcesAndMaskSensitiveValues() {
+        AtomicReference<String> observedSecret = new AtomicReference<>();
+        FakeRuntimeProvider provider = settingsProvider(observedSecret);
+        MapConfigSource source = new MapConfigSource(
+                ConfigSourceKind.PROGRAMMATIC,
+                "diagnostic-source",
+                Map.of(PORT.logicalName(), "8124", SECRET.logicalName(), "diagnostic-secret"));
+
+        var diagnostics = assembler(provider).configSource(source).diagnoseConfiguration();
+
+        var port = diagnostics.entries().stream()
+                .filter(entry -> entry.logicalKey().equals(PORT.logicalName())).findFirst().orElseThrow();
+        var secret = diagnostics.entries().stream()
+                .filter(entry -> entry.logicalKey().equals(SECRET.logicalName())).findFirst().orElseThrow();
+        var label = diagnostics.entries().stream()
+                .filter(entry -> entry.logicalKey().equals(LABEL.logicalName())).findFirst().orElseThrow();
+        assertEquals("8124", port.effectiveValue().orElseThrow());
+        assertEquals(ConfigSourceKind.PROGRAMMATIC, port.sourceKind());
+        assertEquals("***", secret.effectiveValue().orElseThrow());
+        assertTrue(secret.sensitive());
+        assertTrue(label.effectiveValue().isEmpty());
+        assertFalse(diagnostics.toString().contains("diagnostic-secret"));
+        assertEquals(0, provider.createCount());
+        assertNull(observedSecret.get());
+        assertEquals(ConfigValidationStatus.ABSENT, label.status());
+        var timeout = diagnostics.entries().stream()
+                .filter(entry -> entry.logicalKey().equals(TIMEOUT.logicalName())).findFirst().orElseThrow();
+        assertEquals(ConfigValidationStatus.DEFAULTED, timeout.status());
+        assertEquals("PT5S", timeout.effectiveValue().orElseThrow());
+        assertThrows(UnsupportedOperationException.class, () -> diagnostics.entries().clear());
+    }
+
+    /** 诊断不调用扩展对象或枚举的 toString，默认值与解码值均可安全展示。 */
+    @Test
+    void diagnosticShouldAvoidUserDefinedFormatting() {
+        var object = ConfigKey.builder(SETTINGS_ID, "config.object", Object.class,
+                raw -> new Object() {
+                    @Override
+                    public String toString() { throw new AssertionError("must not format custom object"); }
+                }).build();
+        var number = ConfigKey.builder(SETTINGS_ID, "config.number", Number.class, raw -> new UnsafeNumber())
+                .defaultValue(new UnsafeNumber()).build();
+        var mode = ConfigKey.builder(SETTINGS_ID, "config.mode", DisplayMode.class, DisplayMode::valueOf)
+                .defaultValue(DisplayMode.ACTIVE).build();
+        var resolved = RuntimeConfigResolver.resolve(java.util.List.of(
+                ConfigSchema.builder(SETTINGS_ID).add(object).add(number).add(mode).build()),
+                java.util.List.of(new MapConfigSource(ConfigSourceKind.FILE, "objects", Map.of("config.object", "raw"))));
+        assertEquals(java.util.List.of("ACTIVE", "<Number>", "<Object>"), resolved.diagnostics().entries()
+                .stream().map(entry -> entry.effectiveValue().orElseThrow()).toList());
+    }
+
+    /** 模拟带自定义文本输出的配置枚举。 */
+    private enum DisplayMode {
+        /** 可用状态。 */
+        ACTIVE;
+
+        /** 禁止诊断调用该应用侧方法。@return 不返回。 */
+        @Override
+        public String toString() { throw new AssertionError("must not format enum"); }
+    }
+
+    /** 模拟不可安全调用 toString 的扩展数字。 */
+    private static final class UnsafeNumber extends java.math.BigDecimal {
+        /** 创建固定值。 */
+        private UnsafeNumber() { super(1); }
+
+        /** 禁止诊断调用该应用侧方法。@return 不返回。 */
+        @Override
+        public String toString() { throw new AssertionError("must not format custom number"); }
     }
 
     @Test

@@ -4,6 +4,8 @@
 
 2026-09-28 报告核实补充：TCP 默认工厂要求显式 production lifecycle；Redis 本地实现仅可通过显式 prototype 入口使用；Nacos/Kafka 已有真实 adapter 但外部集群证据仍需项目提供。KCP 后续在本分支补齐服务端接入闭环，见 [KCP 迁移与验证](migrations/20260928-kcp-support.md)；普通 UDP 的可靠性、跨节点 replay、可靠房间事件日志和跨进程 world ownership 仍是明确缺口。其他逐项源码、证据见[报告核实迁移说明](migrations/20260928-report-audit-remediation.md)。
 
+2026-09-30 灵活性增量：`zero-ownership` 提供与业务类型无关的 ownership lease/epoch fencing、可选 owner 路由、状态版本 CAS、requestId 幂等、带 checkpoint 元数据的可恢复迁移状态和有界容量预算；独立可选的 `zero-ownership-postgresql` 已通过隔离 PostgreSQL 单实例双 JVM 外部测试。World/Room 只是可选下游消费示例；Kafka、Nacos、监控和数据库复制集故障转移仍需应用显式选择/实现 Adapter 并单独验证，`productionReady=false`。
+
 2026-09-26 增量复核了全仓质量基线、Production 按需装配与 `local + net` 入口，见[质量报告](reports/quality-baseline-20260926.zh-CN.md)。其余能力条目沿用上述盘点日期，不表示本轮逐项重新验收。
 
 ## 状态定义
@@ -24,6 +26,7 @@
 | ErrorCode/异常 | implemented | 分类 ErrorCode、统一异常、错误日志绑定 | 业务项目仍需定义自己的稳定错误码空间 |
 | 事件总线 | implemented | 优先级、拦截器、失败后继续派发并汇总异常、有界内存死信、TraceId；默认不自动重试 | 分布式事件总线、持久死信和全局顺序 |
 | Actor 调度 | implemented | lane、同 lane 串行、跨 lane 并行、外部执行器 | 集群再平衡、迁移、持久邮箱和容量结论 |
+| 跨进程 ownership 与迁移恢复 | minimum-slice | 可选 `zero-ownership` 通用 lease/epoch fencing、generation、owner 路由、状态 CAS/requestId 幂等、checkpoint 元数据、恢复入口与容量预算；可选 PostgreSQL Adapter 经真实单实例双 JVM 集成测试 | 多数据库节点故障转移、消息通知编排、跨机房、业务状态 codec/快照策略、生产容量和长稳未证明 |
 | 受管 Scheduler | minimum-slice | once、fixed-delay、fixed-rate、取消、失败策略、观察器 | cron、持久任务、集群唯一执行、生产高频 tick |
 
 ## 协议、网络与 RPC
@@ -51,7 +54,7 @@
 | 帧同步 | minimum-slice | `zero-frame-sync` 固定帧 runtime、输入幂等与迟到策略、focused tests、`examples/frame-sync` 本地示例、广播顺序和容量边界；生产就绪为 false | rollback/回放、确定性跨端验证、真实传输、生产容量与长稳 |
 | NPC tick | minimum-slice | `zero-npc` Actor-owned zone 生命周期、bounded tick budget、行为失败隔离、focused tests、local example 与容量边界；生产就绪为 false | 完整行为树/寻路/战斗 AI、持久化、跨服、生产容量与长稳 |
 | 排行榜/赛季 | minimum-slice | `zero-ranking` Actor-lane-owned 本地榜单、显式 `SET/MAX/ADD` 合并、稳定排序、有界 Top、赛季状态机、快照与幂等结算；生产就绪为 false | Redis sorted set、跨服榜、奖励资产发放、持久化归档、补偿、生产容量与长稳 |
-| 开放世界分片 | minimum-slice | `zero-world` 本地 world/shard、实体归属、迁移状态机、不可变快照和幂等测试 | 跨进程所有权、可靠交接、恢复、再平衡和容量 |
+| 开放世界分片 | minimum-slice | `zero-world` 本地 world/shard、实体归属、迁移状态机、不可变快照和幂等测试；可选 `zero-ownership` 提供通用 resource/generation/epoch fencing、迁移记录与容量预算绑定 | 真实跨进程 Adapter、可靠交接、数据库/消息故障转移、再平衡和生产容量 |
 
 ## 数据与缓存
 

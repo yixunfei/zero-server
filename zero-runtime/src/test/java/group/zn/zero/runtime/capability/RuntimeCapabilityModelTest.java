@@ -125,7 +125,7 @@ class RuntimeCapabilityModelTest {
                 .profiles()
                 .contains(StandardRuntimeCapabilityModel.PROFILE_PRODUCTION));
         assertEquals(
-                List.of(StandardRuntimeCapabilityModel.LOG_APPENDER),
+                List.of(StandardRuntimeCapabilityModel.EXECUTORS, StandardRuntimeCapabilityModel.LOG_APPENDER),
                 model.provider(StandardRuntimeCapabilityModel.PRODUCTION_KAFKA_RPC)
                         .orElseThrow()
                         .requires());
@@ -134,6 +134,9 @@ class RuntimeCapabilityModelTest {
                 model.provider(StandardRuntimeCapabilityModel.PRODUCTION_REDIS_DATA)
                         .orElseThrow()
                         .requires());
+        assertEquals(
+                List.of(StandardRuntimeCapabilityModel.REDIS_RESOURCE, StandardRuntimeCapabilityModel.EXECUTORS),
+                model.provider(StandardRuntimeCapabilityModel.PRODUCTION_REDIS_CACHE).orElseThrow().requires());
         assertEquals(
                 MavenCoordinate.zero("zero-actor"),
                 model.artifactsFor(List.of(StandardRuntimeCapabilityModel.ACTOR_SCHEDULER)).getFirst());

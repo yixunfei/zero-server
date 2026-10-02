@@ -118,6 +118,7 @@ class ProductionRuntimeCapabilitiesTest {
                         MavenCoordinate.zero("zero-cache"),
                         MavenCoordinate.zero("zero-data"),
                         MavenCoordinate.zero("zero-data-redis"),
+                        MavenCoordinate.zero("zero-runtime-bootstrap"),
                         MavenCoordinate.zero("zero-runtime-redis")),
                 StandardRuntimeCapabilityModel.instance().artifactsForProviders(List.of(
                         StandardRuntimeCapabilityModel.PRODUCTION_REDIS_CACHE,

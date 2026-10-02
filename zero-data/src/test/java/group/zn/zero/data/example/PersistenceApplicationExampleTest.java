@@ -96,6 +96,7 @@ class PersistenceApplicationExampleTest {
         application.submitOrder("order-77", "player-1001", 9900);
         PersistenceFlushResult failed = application.flushDirtyObjects(10);
         application.failOrderRepository(false);
+        application.persistenceManager.retryFailed("order", "order-77");
         PersistenceFlushResult retried = application.flushDirtyObjects(10);
         OrderArchive saved = application.orderArchive("order-77").orElseThrow();
 

@@ -18,10 +18,20 @@ import java.util.Objects;
 /** 基于受控模板文件映射生成本地游戏项目。 */
 public final class ProjectScaffoldGenerator {
 
-    private final RuntimeCapabilityModel capabilityModel;
+    /** 已冻结、完成引用校验的显式组件目录。 */
+    private final ScaffoldComponents components;
 
     public ProjectScaffoldGenerator(final RuntimeCapabilityModel capabilityModel) {
-        this.capabilityModel = Objects.requireNonNull(capabilityModel, "capabilityModel");
+        this(new ScaffoldComponents(capabilityModel));
+    }
+
+    /**
+     * 使用应用自己的组件目录生成项目；不扫描 classpath，不修改目录。
+     * @param components 已校验的不可变组件目录；不可为空。
+     * @throws NullPointerException 目录为空时抛出。
+     */
+    public ProjectScaffoldGenerator(final ScaffoldComponents components) {
+        this.components = Objects.requireNonNull(components, "components");
     }
 
     /**
@@ -48,12 +58,15 @@ public final class ProjectScaffoldGenerator {
         String serverClass = applicationClass + "Server";
         String clientClass = applicationClass + "TcpClient";
         String packagePath = current.packageName().replace('.', '/');
-        var selection = new ScaffoldComponents(capabilityModel).resolve(current.template().capabilityIds(), current.components());
+        var selection = components.resolve(current.template().capabilityIds(), current.components());
         Map<String, String> values = placeholders(current, applicationClass, testClass, serverClass, clientClass, packagePath, selection);
         List<FileMapping> mappings = mappings(current.template(), applicationClass, testClass, serverClass, clientClass,
                 packagePath, sourceRoot, selection);
         Files.createDirectories(target);
         for (FileMapping mapping : mappings) {
+            if (mapping.output().equals("zero-scaffold.json")) {
+                continue;
+            }
             render(sourceRoot, target, mapping, values);
         }
         var assembly = new ScaffoldAssemblyRenderer();
@@ -112,9 +125,9 @@ public final class ProjectScaffoldGenerator {
         values.put("__EXTERNAL_COMPONENTS__", Boolean.toString(selection.external()));
         values.put("__DEFAULT_START__", Boolean.toString(!selection.external()));
         values.put("__CONFIG_DEFAULTS__", ScaffoldConfiguration.defaults(selection));
-        values.put("__DIAGNOSIS_STATUS__", selection.external()
-                ? "report.missingConfigKeys().isEmpty() ? \"ok\" : \"incomplete\"" : "\"ok\"");
-        values.put("__DIAGNOSIS_KEYS__", selection.external() ? "report.missingConfigKeys()" : "java.util.List.of()");
+        values.put("__DIAGNOSIS_STATUS__", "report.missingConfigKeys().isEmpty() ? \"ok\" : \"incomplete\"");
+        values.put("__DIAGNOSIS_KEYS__", "report.missingConfigKeys()");
+        values.put("__CATALOG_ID_JSON__", jsonString(components.catalogId()));
         return values;
     }
 
@@ -219,10 +232,21 @@ public final class ProjectScaffoldGenerator {
         write(targetRoot, mapping.output(), content);
     }
 
-    private void write(final Path targetRoot, final String relativePath, final String content) throws IOException {
+    private void write(
+            final Path targetRoot,
+            final String relativePath,
+            final String content) throws IOException {
         Path output = targetRoot.resolve(relativePath).normalize();
         if (!output.startsWith(targetRoot)) {
             throw new IllegalStateException("scaffold output escapes its root");
+        }
+        if (Files.isRegularFile(output)) {
+            String existing = Files.readString(output, StandardCharsets.UTF_8);
+            if (!existing.equals(content)) {
+                throw new IllegalStateException(
+                        "scaffold output conflict; refusing to overwrite modified file: " + relativePath);
+            }
+            return;
         }
         Files.createDirectories(Objects.requireNonNull(output.getParent(), "output.parent"));
         Files.writeString(output, content, StandardCharsets.UTF_8);

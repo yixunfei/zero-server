@@ -56,6 +56,8 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
 
     /** 未命中玩家资料时的显式策略。 */
     private final MissingPlayerPolicy missingPlayerPolicy;
+    /** 外部注入的 IO 执行域；仅纯内存构造允许直接执行，不由本服务关闭。 */
+    private final java.util.concurrent.Executor remoteIoExecutor;
 
     /**
      * 账号到玩家 ID 的本地会话表。
@@ -107,7 +109,7 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
      * 创建本地玩家基础服务。
      *
      * <p>传入的 repository / cache 在本地原型中应使用内存实现。若接入真实远程后端，
-     * 调用方必须确保远程 IO 不在 Actor 热路径中阻塞执行。
+     * 必须使用带 remoteIoExecutor 的构造器；本构造只接受框架内存实现。
      *
      * @param actorScheduler Actor 调度器；不可为空。
      * @param uidResolver UID 解析器；不可为空。
@@ -138,6 +140,26 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
             final CrudRepository<Long, PlayerProfile> playerRepository,
             final CacheService<Long, PlayerProfile> playerCache,
             final MissingPlayerPolicy missingPlayerPolicy) {
+        this(actorScheduler, uidResolver, playerRepository, playerCache, missingPlayerPolicy,
+                localExecutor(playerRepository, playerCache));
+    }
+
+    /** 外部后端必须显式提供受管非内联 IO 执行器；线程安全，不负责执行器关闭。
+     * @param actorScheduler Actor 调度器。 @param uidResolver UID 解析器。
+     * @param playerRepository 数据仓库。 @param playerCache 缓存。 @param remoteIoExecutor 非内联 IO 域。 */
+    public LocalPlayerService(final ActorScheduler actorScheduler, final PlayerUidResolver uidResolver,
+            final CrudRepository<Long, PlayerProfile> playerRepository, final CacheService<Long, PlayerProfile> playerCache,
+            final java.util.concurrent.Executor remoteIoExecutor) {
+        this(actorScheduler, uidResolver, playerRepository, playerCache, MissingPlayerPolicy.REJECT, remoteIoExecutor);
+    }
+
+    /** 创建带显式 IO 边界的本地玩家服务；跨进程所有权仍由业务负责。
+     * @param actorScheduler Actor 调度器。 @param uidResolver UID 解析器。 @param playerRepository 数据仓库。
+     * @param playerCache 缓存。 @param missingPlayerPolicy 缺失策略。 @param remoteIoExecutor 受管 IO 域。 */
+    public LocalPlayerService(final ActorScheduler actorScheduler, final PlayerUidResolver uidResolver,
+            final CrudRepository<Long, PlayerProfile> playerRepository, final CacheService<Long, PlayerProfile> playerCache,
+            final MissingPlayerPolicy missingPlayerPolicy, final java.util.concurrent.Executor remoteIoExecutor) {
+        this.remoteIoExecutor = Objects.requireNonNull(remoteIoExecutor, "remoteIoExecutor");
         ActorScheduler scheduler = Objects.requireNonNull(actorScheduler, "actorScheduler");
         this.actorGateway = new GameActorGateway(scheduler);
         this.uidResolver = Objects.requireNonNull(uidResolver, "uidResolver");
@@ -227,8 +249,8 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
         Objects.requireNonNull(request, "request");
         CompletableFuture<PlayerLoginResult> result = new CompletableFuture<>();
         try {
-            long uid = uidResolver.resolve(request);
-            loadRepositoryProfile(uid).whenComplete((ignored, failure) -> {
+            CompletableFuture.supplyAsync(() -> uidResolver.resolve(request), remoteIoExecutor)
+                    .thenComposeAsync(uid -> loadRepositoryProfile(uid).thenApply(profile -> uid), remoteIoExecutor).whenComplete((uid, failure) -> {
                 if (failure != null) {
                     result.completeExceptionally(failure);
                     return;
@@ -259,7 +281,8 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
         Objects.requireNonNull(request, "request");
         CompletableFuture<PlayerProfile> result = new CompletableFuture<>();
         try {
-            loadFromCacheOrRepository(request).whenComplete((profile, ex) -> {
+            CompletableFuture.supplyAsync(() -> loadFromCacheOrRepository(request), remoteIoExecutor)
+                    .thenComposeAsync(stage -> stage, remoteIoExecutor).whenComplete((profile, ex) -> {
                 if (ex != null) {
                     result.completeExceptionally(ex);
                     return;
@@ -326,6 +349,13 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
         subscriptions.forEach(ActorSubscription::close);
     }
 
+    private static java.util.concurrent.Executor localExecutor(final Object repository, final Object cache) {
+        if (!(repository instanceof InMemoryCrudRepository<?, ?>) || !(cache instanceof InMemoryCacheService<?, ?>)) {
+            throw new IllegalArgumentException("custom player backends require an explicit managed IO executor");
+        }
+        return Runnable::run;
+    }
+
     private static String requireText(final String value, final String name) {
         String current = Objects.requireNonNull(value, name);
         if (current.isBlank()) {
@@ -345,20 +375,20 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
     }
 
     private CompletionStage<PlayerProfile> loadFromCacheOrRepository(final PlayerLoadRequest request) {
-        return playerCache.get(request.uid()).thenCompose(cached -> {
+        return playerCache.get(request.uid()).thenComposeAsync(cached -> {
             if (cached.isPresent()) {
                 return CompletableFuture.completedFuture(checkedProfile(request.uid(), cached.orElseThrow()));
             }
-            return loadRepositoryProfile(request.uid()).thenCompose(profile ->
-                    playerCache.put(request.uid(), profile).thenApply(ignored -> profile));
-        });
+            return loadRepositoryProfile(request.uid()).thenComposeAsync(profile ->
+                    playerCache.put(request.uid(), profile).thenApply(ignored -> profile), remoteIoExecutor);
+        }, remoteIoExecutor);
     }
 
     private CompletionStage<PlayerProfile> loadRepositoryProfile(final long uid) {
-        return playerRepository.findById(uid).thenCompose(stored -> stored
+        return playerRepository.findById(uid).thenComposeAsync(stored -> stored
                 .map(profile -> CompletableFuture.completedFuture(checkedProfile(uid, profile)))
                 .orElseGet(() -> (missingPlayerPolicy == MissingPlayerPolicy.CREATE_DEFAULT
-                        ? createAndStoreDefaultProfile(uid) : failedPlayerNotFound(uid)).toCompletableFuture()));
+                        ? createAndStoreDefaultProfile(uid) : failedPlayerNotFound(uid)).toCompletableFuture()), remoteIoExecutor);
     }
 
     private PlayerProfile checkedProfile(final long uid, final PlayerProfile profile) {
@@ -383,7 +413,7 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
                     }
                     return ignored;
                 })
-                .thenCompose(ignored -> playerRepository.findById(uid))
+                .thenComposeAsync(ignored -> playerRepository.findById(uid), remoteIoExecutor)
                 .thenApply(saved -> checkedProfile(uid, saved.orElseThrow(() ->
                         ZeroException.of(PlayerErrorCode.PLAYER_NOT_FOUND))));
     }

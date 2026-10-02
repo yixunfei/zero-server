@@ -43,6 +43,9 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class KafkaRpcAdapterExternalIT {
+    /** 测试拥有计时器，Adapter 仅拥有任务。 */
+    @org.junit.jupiter.api.extension.RegisterExtension
+    private final KafkaTestTimer timer = new KafkaTestTimer();
 
     /**
      * external-tests profile 标记。
@@ -84,13 +87,13 @@ class KafkaRpcAdapterExternalIT {
                     "provider-" + suffix,
                     "provider-group-" + suffix,
                     "zero.rpc.external." + suffix,
-                    "reply-provider-" + suffix));
+                    "reply-provider-" + suffix), timer.executor());
             caller = new KafkaRpcAdapter(settings(
                     bootstrapServers,
                     "caller-" + suffix,
                     "caller-group-" + suffix,
                     "zero.rpc.external." + suffix,
-                    "reply-caller-" + suffix));
+                    "reply-caller-" + suffix), timer.executor());
             byte[] secret = "external-test-secret".getBytes(StandardCharsets.UTF_8);
             SecurityMetadataAssertion assertion = SecurityMetadataAssertion.digest(secret);
             provider.securityMetadataVerifier(SecurityMetadataAssertion.verifier(assertion));

@@ -60,16 +60,16 @@ public final class ZeroConfigLoader {
     /**
      * 从标准外部配置位置加载配置，并合并默认值。
      *
-     * <p>默认值优先级低于外部配置文件。返回集合不可变、无承诺顺序、线程安全。
+     * <p>对文件与 defaults 中声明的键按文件、系统属性、环境变量、defaults 解析并冻结来源；
+     * 不扫描其余进程配置。环境键使用大写并将点/连字符转为下划线。返回集合不可变、无承诺顺序、线程安全。
      *
      * @param defaults 默认配置；不可为空。
      * @return 配置对象；不可为空；无序；线程安全。
      * @throws ZeroException 当外部配置文件路径不可读或加载失败时抛出。
      */
     public static ZeroConfig loadStandard(final Map<String, String> defaults) {
-        Map<String, String> merged = new LinkedHashMap<>(Objects.requireNonNull(defaults, "defaults"));
-        merged.putAll(loadStandard().asMap());
-        return new MapZeroConfig(merged);
+        return ConfigLookup.snapshot(SourcedZeroConfig.withDefaults(loadStandard(),
+                Objects.requireNonNull(defaults, "defaults")), System::getProperty, System::getenv);
     }
 
     /**
@@ -84,7 +84,10 @@ public final class ZeroConfigLoader {
         try (Reader reader = Files.newBufferedReader(checkedPath, StandardCharsets.UTF_8)) {
             Properties properties = new Properties();
             properties.load(reader);
-            return fromProperties(properties);
+            ZeroConfig config = fromProperties(properties);
+            Map<String, ConfigOrigin> origins = new LinkedHashMap<>();
+            config.asMap().keySet().forEach(key -> origins.put(key, ConfigOrigin.FILE));
+            return new SourcedZeroConfig(config.asMap(), origins);
         } catch (IOException ex) {
             throw ZeroException.of(
                     SystemErrorCode.INVALID_ARGUMENT,

@@ -8,12 +8,12 @@ import java.util.Set;
 /** Canonical option parsing shared by generation and catalog commands. */
 final class ScaffoldArguments {
     private static final Set<String> FLAGS = Set.of("--help", "--force", "--listtemplates", "--plan", "--diff",
-            "--apply", "--abort", "--rollback", "--migrate");
+            "--apply", "--abort", "--rollback", "--migrate", "--listcomponents");
     private static final Set<String> OPERATIONS = Set.of(
             "--plan", "--diff", "--apply", "--abort", "--rollback", "--migrate");
     private static final Set<String> VALUES = Set.of("--projectname", "--packagename", "--outputdir",
             "--zeroversion", "--template", "--components", "--fromkeywords", "--templateroot",
-            "--recommend", "--describetemplate");
+            "--recommend", "--describetemplate", "--catalog");
     private static final Map<String, String> ALIASES = Map.of(
             "-h", "--help", "--list-templates", "--listtemplates",
             "--from-keywords", "--fromkeywords", "--recommendtemplate", "--recommend",
@@ -41,7 +41,7 @@ final class ScaffoldArguments {
             }
             values.put(key, value);
         }
-        long commands = Set.of("--help", "--listtemplates", "--recommend", "--describetemplate").stream()
+        long commands = Set.of("--help", "--listtemplates", "--recommend", "--describetemplate", "--listcomponents").stream()
                 .filter(values::containsKey).count();
         if (commands > 1) {
             throw new IllegalArgumentException("select only one catalog command");

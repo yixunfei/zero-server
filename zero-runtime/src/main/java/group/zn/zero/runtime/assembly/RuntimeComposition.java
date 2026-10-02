@@ -6,6 +6,7 @@ import group.zn.zero.runtime.api.ComponentKey;
 import group.zn.zero.runtime.api.ComponentSetKey;
 import group.zn.zero.runtime.api.GameRuntime;
 import group.zn.zero.runtime.config.ConfigSource;
+import group.zn.zero.runtime.config.RuntimeConfigDiagnostics;
 import group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan;
 import group.zn.zero.runtime.spi.ComponentKind;
 import group.zn.zero.runtime.spi.RuntimeComponentProvider;
@@ -109,6 +110,17 @@ public final class RuntimeComposition {
     public RuntimeAssemblyPlan diagnose() {
         mutable();
         return assembler().diagnose();
+    }
+
+    /**
+     * 解析安全配置诊断；只读规划，不创建 provider 或资源，不消耗组合器。
+     * @return 不可变、有序、可为空且线程安全的快照；组合器自身非线程安全。
+     * @throws IllegalStateException 组合器已经被 build 消耗时抛出。
+     * @throws group.zn.zero.runtime.diagnostics.RuntimeAssemblyException 组件规划或配置校验失败时抛出。
+     */
+    public RuntimeConfigDiagnostics diagnoseConfiguration() {
+        mutable();
+        return assembler().diagnoseConfiguration();
     }
 
     public GameRuntime build() {

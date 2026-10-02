@@ -2,6 +2,7 @@ package group.zn.zero.event.bus;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import group.zn.zero.core.error.SystemErrorCode;
 import group.zn.zero.core.error.ZeroException;
@@ -47,7 +48,7 @@ class InMemoryEventBusTest {
      * 验证拦截器可以短路发布。
      */
     @Test
-    void interceptorShouldStopPublishWhenReturnFalse() {
+    void interceptorRejectionShouldFailAndRecordDeadLetter() {
         InMemoryDeadLetterSink deadLetterSink = new InMemoryDeadLetterSink();
         EventBus eventBus = new InMemoryEventBus(deadLetterSink);
         List<String> calls = new ArrayList<>();
@@ -55,10 +56,13 @@ class InMemoryEventBusTest {
         eventBus.addInterceptor(event -> false);
         eventBus.register(EventType.INTERNAL, EventHandler.sync(event -> calls.add(event.eventId())));
 
-        eventBus.publish(event()).toCompletableFuture().join();
+        CompletionException failure = assertThrows(
+                CompletionException.class,
+                () -> eventBus.publish(event()).toCompletableFuture().join());
 
         assertTrue(calls.isEmpty());
-        assertTrue(deadLetterSink.deadLetters().isEmpty());
+        assertEquals("ZERO-SYSTEM-ERROR", ((group.zn.zero.core.error.ZeroException) failure.getCause()).errorCode().code());
+        assertEquals(1, deadLetterSink.deadLetters().size());
     }
 
     /**

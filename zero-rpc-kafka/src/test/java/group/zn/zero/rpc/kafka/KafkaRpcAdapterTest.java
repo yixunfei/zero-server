@@ -53,9 +53,12 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class KafkaRpcAdapterTest {
+    /** 测试拥有计时器，Adapter 仅拥有任务。 */
+    @org.junit.jupiter.api.extension.RegisterExtension
+    private final KafkaTestTimer timer = new KafkaTestTimer();
     /** 编码在登记后同步失败必须释放唯一 pending 容量。 */
     @Test void synchronousEncodingFailureReleasesPending() {
-        try (var caller = new KafkaRpcAdapter(settings("caller", "reply", 1), new HoldingKafkaRpcMessageGateway())) {
+        try (var caller = new KafkaRpcAdapter(settings("caller", "reply", 1), new HoldingKafkaRpcMessageGateway(), timer.executor())) {
             RpcRequest oversized = new RpcRequest("large", "reply", "svc", "method", "trace",
                     Instant.now().plusSeconds(30), RpcMode.REQUEST_RESPONSE, new byte[17 * 1024 * 1024]);
             var failed = caller.request(oversized).toCompletableFuture();
@@ -71,7 +74,7 @@ class KafkaRpcAdapterTest {
     /** 异步认证期间关闭 adapter 后不能再调用业务处理器。 */
     @Test void closedAdapterDoesNotDispatchLateAuthentication() {
         var gateway = new InMemoryKafkaRpcMessageGateway();
-        var provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway);
+        var provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway, timer.executor());
         var verified = new CompletableFuture<SecurityContext>();
         var calls = new AtomicInteger();
         provider.securityMetadataVerifier((metadata, now) -> verified);
@@ -93,8 +96,8 @@ class KafkaRpcAdapterTest {
     @Test
     void tamperedAndReplayedMetadataAreRejected() {
         InMemoryKafkaRpcMessageGateway gateway = new InMemoryKafkaRpcMessageGateway();
-        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway);
-        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway);
+        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway, timer.executor());
+        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway, timer.executor());
         SecurityMetadataAssertion assertion = SecurityMetadataAssertion.digest("test-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         java.util.Set<String> consumed = java.util.concurrent.ConcurrentHashMap.newKeySet();
         provider.securityMetadataVerifier((snapshot, receivedAt) -> {
@@ -141,8 +144,8 @@ class KafkaRpcAdapterTest {
     @Test
     void securityMetadataIsRevalidatedBeforeHandler() {
         InMemoryKafkaRpcMessageGateway gateway = new InMemoryKafkaRpcMessageGateway();
-        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway);
-        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway);
+        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway, timer.executor());
+        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway, timer.executor());
         AtomicInteger verified = new AtomicInteger();
         provider.securityMetadataVerifier(SecurityMetadataVerifier.synchronous(snapshot -> {
             verified.incrementAndGet();
@@ -175,8 +178,8 @@ class KafkaRpcAdapterTest {
     void commonInterfaceShouldInvokeThroughKafkaAdapter() {
         InMemoryKafkaRpcMessageGateway gateway = new InMemoryKafkaRpcMessageGateway();
         RpcCodecRegistry codecRegistry = codecRegistry();
-        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway);
-        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway);
+        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway, timer.executor());
+        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway, timer.executor());
         new RpcServiceBinder(provider, codecRegistry).bind(PlayerRemoteRpc.class, new PlayerRemoteRpcImpl());
         provider.securityMetadataVerifier(SecurityMetadataAssertion.verifier(ASSERTION));
         PlayerRemoteRpc client = new RpcClientFactory(
@@ -206,8 +209,8 @@ class KafkaRpcAdapterTest {
     void commonInterfaceShouldSupportKafkaOneway() {
         InMemoryKafkaRpcMessageGateway gateway = new InMemoryKafkaRpcMessageGateway();
         RpcCodecRegistry codecRegistry = codecRegistry();
-        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway);
-        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway);
+        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway, timer.executor());
+        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway, timer.executor());
         AtomicInteger touched = new AtomicInteger();
         new RpcServiceBinder(provider, codecRegistry).bind(PlayerRemoteRpc.class, new PlayerRemoteRpcOnewayImpl(touched));
         provider.securityMetadataVerifier(SecurityMetadataAssertion.verifier(ASSERTION));
@@ -234,8 +237,8 @@ class KafkaRpcAdapterTest {
         InMemoryKafkaRpcMessageGateway gateway = new InMemoryKafkaRpcMessageGateway();
         RecordingRpcObserver observer = new RecordingRpcObserver();
         RpcCodecRegistry codecRegistry = codecRegistry();
-        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway, observer);
-        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway, observer);
+        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway, observer, timer.executor());
+        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway, observer, timer.executor());
         provider.securityMetadataVerifier(SecurityMetadataAssertion.verifier(ASSERTION));
         new RpcServiceBinder(provider, codecRegistry).bind(PlayerRemoteRpc.class, new PlayerRemoteRpcImpl());
         PlayerRemoteRpc client = new RpcClientFactory(
@@ -276,7 +279,7 @@ class KafkaRpcAdapterTest {
         RecordingRpcObserver observer = new RecordingRpcObserver();
         RpcCodecRegistry codecRegistry = codecRegistry();
         KafkaRpcSettings settings = settings("provider", "reply-provider");
-        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings, gateway, observer);
+        KafkaRpcAdapter provider = new KafkaRpcAdapter(settings, gateway, observer, timer.executor());
         AtomicInteger invoked = new AtomicInteger();
         new RpcServiceBinder(provider, codecRegistry).bind(PlayerRemoteRpc.class, new PlayerRemoteRpcOnewayImpl(invoked));
         KafkaRpcEnvelopeCodec envelopeCodec = new KafkaRpcEnvelopeCodec();
@@ -324,7 +327,7 @@ class KafkaRpcAdapterTest {
     @Test
     void kafkaGatewayUnavailableShouldFailRequestFast() {
         KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"),
-                new FailingKafkaRpcMessageGateway());
+                new FailingKafkaRpcMessageGateway(), timer.executor());
         RpcRequest request = new RpcRequest(
                 "corr-fail",
                 "reply-caller",
@@ -349,7 +352,7 @@ class KafkaRpcAdapterTest {
     @Test
     void pendingRequestsShouldRespectCapacityStrictly() {
         HoldingKafkaRpcMessageGateway gateway = new HoldingKafkaRpcMessageGateway();
-        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller", 1), gateway);
+        KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller", 1), gateway, timer.executor());
         RpcRequest first = new RpcRequest(
                 "corr-one",
                 "reply-caller",

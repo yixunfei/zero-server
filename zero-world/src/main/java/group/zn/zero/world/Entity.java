@@ -2,6 +2,7 @@ package group.zn.zero.world;
 
 import java.util.Objects;
 
+/** 不可变世界实体；修改返回新实例，允许跨线程读取。 @author zn */
 public record Entity(String entityId, String worldId, String ownerShardId, double x, double y, long stateVersion,
                      long routeEpoch, EntityStatus status, String migrationId) {
     public Entity { require(entityId,"entityId"); require(worldId,"worldId"); require(ownerShardId,"ownerShardId"); Objects.requireNonNull(status,"status"); if(stateVersion<0||routeEpoch<0) throw new IllegalArgumentException("version"); }

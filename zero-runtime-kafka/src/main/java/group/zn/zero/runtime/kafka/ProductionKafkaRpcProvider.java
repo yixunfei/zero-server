@@ -89,6 +89,7 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
             .provide(RpcRuntime.RPC_TRANSPORT)
             .provide(RpcRuntime.RPC_HANDLER_REGISTRY)
             .require(LogRuntime.LOG_APPENDER)
+            .require(group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS)
             .configSchema(CONFIG_SCHEMA)
             .kind(ComponentKind.EXTERNAL)
             .health(HealthPhase.STARTUP)
@@ -179,7 +180,8 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
             KafkaRpcSettings settings = settings(checked.config());
             RpcTransportObserver observer = new KafkaProductionTelemetryObserver(logAppender);
             KafkaRpcLifecycleAdapter adapter = new KafkaRpcLifecycleAdapter(
-                    settings, observer, KafkaRpcAdapterResourceFactory.production(verifier));
+                    settings, observer, KafkaRpcAdapterResourceFactory.production(verifier,
+                            checked.require(group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS).scheduledExecutor("kafka-rpc")));
             ProductionStartupHealthProbe healthProbe = new ProductionStartupHealthProbe(
                     diagnostic,
                     new KafkaClusterHealthCheck(settings),

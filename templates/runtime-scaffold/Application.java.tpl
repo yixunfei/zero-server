@@ -33,6 +33,7 @@ public final class __APP_CLASS__ {
 
     private static String diagnosticSummary() {
         var report = RuntimeAssembly.diagnose(configuration());
+        report.plan().ifPresent(plan -> System.out.println("runtime-plan=" + plan));
         String status = __DIAGNOSIS_STATUS__;
         return "runtime-diagnosis=" + status + "|components=__SELECTED_COMPONENTS__|missingConfigKeys="
                 + __DIAGNOSIS_KEYS__;
@@ -40,8 +41,8 @@ public final class __APP_CLASS__ {
 
     /** 读取标准外部配置并合并默认开关；返回不可变配置，读取失败抛配置异常。 */
     public static group.zn.zero.core.config.ZeroConfig configuration() {
-        return ZeroConfigLoader.loadStandard(Map.of(
-                "zero.name", "__PROJECT_NAME__",
+        return ZeroConfigLoader.loadStandard(Map.ofEntries(
+                Map.entry("zero.name", "__PROJECT_NAME__"),
                 __CONFIG_DEFAULTS__));
     }
 }

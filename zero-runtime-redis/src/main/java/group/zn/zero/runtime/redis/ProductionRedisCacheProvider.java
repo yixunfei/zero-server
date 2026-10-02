@@ -56,6 +56,7 @@ final class ProductionRedisCacheProvider implements RuntimeComponentProvider {
     private final ComponentDescriptor descriptor = ComponentDescriptor.builder(ID)
             .provide(CacheRuntime.CACHE_SERVICE)
             .require(ProductionRedisRuntimeCapabilities.RESOURCE)
+            .require(group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS)
             .startAfter(ProductionRedisDataProvider.ID)
             .configSchema(CONFIG_SCHEMA)
             .kind(ComponentKind.EXTERNAL)
@@ -87,13 +88,20 @@ final class ProductionRedisCacheProvider implements RuntimeComponentProvider {
         ComponentCreationContext checked = Objects.requireNonNull(context, "context");
         try {
             ProductionRedisResource resource = checked.require(ProductionRedisRuntimeCapabilities.RESOURCE);
-            CacheService<Object, Object> cacheService = cacheService(
+            group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors executors =
+                    checked.require(group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS);
+            RedisDistributedCacheService<Object, Object> cacheService = cacheService(
                     resource.acquire(checked.resources()),
-                    checked.config());
+                    checked.config(),
+                    executors.remoteIoExecutor());
             diagnostic.mark(ZeroProductionAdapterState.CREATED);
             return ComponentContribution.builder()
                     .bind(CacheRuntime.CACHE_SERVICE, cacheService)
-                    .lifecycle(ProductionAdapterLifecycle.marker(diagnostic, startupBudget))
+                    .lifecycle(new ProductionAdapterLifecycle(diagnostic, startupBudget,
+                            new group.zn.zero.runtime.bootstrap.PeriodicAsyncTask(
+                                    checked.require(group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS),
+                                    "redis-cache-writeback", java.time.Duration.ofSeconds(1),
+                                    () -> cacheService.retryWriteBacks(128))))
                     .healthProbe(HealthPhase.STARTUP, new ProductionStartupHealthProbe(
                             diagnostic,
                             timeout -> RedisStartupProbes.cache(resource.settings(), timeout),
@@ -115,9 +123,10 @@ final class ProductionRedisCacheProvider implements RuntimeComponentProvider {
         return configSources;
     }
 
-    private CacheService<Object, Object> cacheService(
+    private RedisDistributedCacheService<Object, Object> cacheService(
             final redis.clients.jedis.RedisClient client,
-            final ComponentConfig config) {
+            final ComponentConfig config,
+            final java.util.concurrent.Executor ioExecutor) {
         return new RedisDistributedCacheService<>(
                 "redis",
                 CachePolicy.defaults(),
@@ -129,7 +138,8 @@ final class ProductionRedisCacheProvider implements RuntimeComponentProvider {
                         new DefaultRedisCacheKeyStrategy(),
                         CacheKeyCodecs.defaults(),
                         valueCodec,
-                        new RedisCacheEnvelopeCodec()));
+                        new RedisCacheEnvelopeCodec(),
+                        ioExecutor));
     }
 
     private static ConfigKey<String> sensitiveString(final String logicalName) {

@@ -26,6 +26,11 @@ interface KafkaRpcMessageGateway extends AutoCloseable {
      */
     void subscribe(String topic, KafkaRpcMessageListener listener);
 
+    /** 订阅 reply topic；具体网关应为每个进程使用独占 consumer group。 */
+    default void subscribeReply(final String topic, final KafkaRpcMessageListener listener) {
+        subscribe(topic, listener);
+    }
+
     /**
      * 按指定 consumer group 订阅 topic 消息。
      *
@@ -46,6 +51,11 @@ interface KafkaRpcMessageGateway extends AutoCloseable {
      * @throws RuntimeException 当取消订阅失败时抛出，必须绑定或转入统一错误处理。
      */
     void unsubscribe(String topic, KafkaRpcMessageListener listener);
+
+    /** 取消 reply topic 订阅。 */
+    default void unsubscribeReply(final String topic, final KafkaRpcMessageListener listener) {
+        unsubscribe(topic, listener);
+    }
 
     /**
      * 按指定 consumer group 取消订阅 topic 消息。

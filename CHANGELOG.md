@@ -6,6 +6,36 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 可靠性审查修复与显式耐久提交
+
+- 修复 Kafka RPC oneway 处理失败和损坏 envelope 触发 consumer 高速重建；reply topic 改用每个进程独占 consumer group。Redis driver journal 保留最近 1024 条记录，PostgreSQL ownership 断言在单事务内完成。
+- EventBus 拦截器否决现在写入死信并返回失败；脚手架 `--force` 遇到已修改文件会拒绝覆盖，升级计划会提交新增模板文件；LocalWorldService 事件历史最多保留 4096 条。
+- World 修改入口统一异步，事件/指标回调移到状态锁外；Room 通过不可变视图发布跨线程查询状态。
+- 普通标脏新增有界退避、失败隔离和显式恢复；新增独立耐久提交服务及运行时装配，刷盘后确认、CAS 重放、未知结果核验、操作 ID 去重和冲突隔离。普通 markDirty 仍不耐久。
+- 统一 Redis/MongoDB/PostgreSQL 与内存模拟的 save 快照版本契约；Redis 避免 Lua 大整数精度问题，分桶批量查询及 pipeline 计数有扫描预算。
+- 缓存写回按键合并、溢出可观测、保留原代际防止旧值复活，生产 Redis 生命周期周期重试；未版本化 put 观察后端版本以处理进程重启。
+- Kafka 超时计时器改为运行时注入和统一关闭；Player 自定义远程后端要求显式 IO Executor，维持单进程能力边界。
+- 补充 CI `zero/**` 分支触发、版本/模块依赖说明和回归测试。破坏性 API、耐久确认与容量边界见 [迁移说明](docs/migrations/20261001-audit-reliability.zh-CN.md)。
+- 全仓复核补充修复缓存 `Error` 泄漏、告警 `holdFor`/重复触发、Redis envelope 长度防御、Redis cache 远程 IO 执行域、ownership 错误码与锁边界，以及模块/示例 Maven parent 版本漂移；行为变化见 [全仓审计迁移说明](docs/migrations/20261002-full-audit.zh-CN.md)。
+
+### 后续完善开发文档
+
+- 新增《后续完善实施方案》，把业务状态所有权、受管远程 IO、场景化容量验证和运营闭环拆成可验收的 P0/P1/P2 工作流。
+- 新增 Room 跨进程纵切片开发计划，明确 owner、epoch fencing、checkpoint、重连、结算幂等、双 JVM 故障矩阵和完成标准；该文档是 planned 方案，不代表当前 Room 已具备跨进程生产能力。
+- 新增受管远程 IO 执行契约，明确阻塞分类、执行域、队列预算、deadline、取消、重试、未知写结果和关闭顺序。
+- 新增游戏服务器开发与验收标准，按本地契约、外部 Adapter、双 JVM、容量长稳和发布恢复区分验证证据，继续保留 `productionReady=false` 边界。
+
+### 灵活性与可扩展性
+
+- 统一标准配置候选消费并保留文件/默认值来源；应用默认值可被系统属性和环境覆盖，Adapter 开关和预算使用相同规则。
+- 装配计划携带同次解析的脱敏配置，生成项目统一诊断模型并提供无资源诊断入口。
+- 显式版本化 JSON catalog 贯通 CLI、生成与升级，补充单值 Provider/profile 冲突检查及可运行 greeting 示例。0.x 行为/API 迁移见 `docs/migrations/20260930-flexibility-foundation.zh-CN.md`。
+
+- 新增 typed runtime 配置安全诊断，可查看有效值来源、解析状态和 reloadability；敏感值固定脱敏。
+- 脚手架组件改为统一元数据定义，Provider、Maven 坐标、装配表达式和配置样例保持一致，并支持应用显式注册自定义组件。
+- `0.x` 迁移细节见 `docs/migrations/20260930-config-scaffold-flexibility.zh-CN.md`。
+- 新增可选 `zero-ownership` 中立模块：以 resource generation、process incarnation、lease epoch、state version 和 requestId 提供跨进程 ownership fencing、CAS/幂等提交、可恢复迁移状态机及有界容量预算；新增独立可选 `zero-ownership-postgresql` 持久化 Adapter。真实 PostgreSQL 单实例外部测试已通过；不自动绑定 World、Room、Kafka、Nacos 或监控，数据库复制集切换、跨机房灾备、生产容量和长稳尚未验证。0.x 接入和迁移细节见 `docs/migrations/20260930-distributed-ownership-recovery.zh-CN.md`。
+
 ## 0.1.1 - 2026-09-29
 
 ### 修复与发布校正
@@ -177,6 +207,8 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 - 新增相邻路径回归验证。0.x 行为/API 调整和验证证据见 [迁移说明](docs/migrations/20260917-bug-report-verification.md) 与 [逐项核实报告](docs/reports/bug-analysis-verification-20260917.zh-CN.md)。
 
 ### Added
+
+- ownership 增量补齐可选 owner 路由端口与 PostgreSQL 路由 Adapter、迁移 checkpoint 的 schema/codec/历史完整性元数据、`FailoverCoordinator.recover(...)` 恢复入口，以及 `CapacitySnapshot`/`CapacityBoundStateStore` 有界准入装饰器。所有能力仍通过显式模块和 Provider 接入；Java 21 focused、质量门禁和隔离 PostgreSQL 双 JVM 外部测试通过，复制集切换、跨机房、生产容量与长稳仍未验证。
 
 - local TCP scaffold 的业务流程模板现在只接收 `LogAppender`，并通过组合根传入已验证的日志适配端口；不再让生成的业务侧代码直接持有 terminal `LogSink`。架构守卫与 7 个本地模板的生成、测试和运行验证均通过。
 

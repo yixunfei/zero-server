@@ -65,4 +65,19 @@ class CacheLoadCoordinatorTest {
         assertEquals(Optional.of("ok"), second.join());
         assertEquals(0, coordinator.pendingCount());
     }
+
+    /** loader 同步抛出 Error 后也必须清理 singleflight 和许可。 */
+    @Test
+    void synchronousErrorReleasesPermit() {
+        var coordinator = new CacheLoadCoordinator<String, String>(1);
+        var failed = coordinator.getOrLoad("error", () -> {
+            throw new AssertionError("loader error");
+        }).toCompletableFuture();
+
+        assertThrows(java.util.concurrent.CompletionException.class, failed::join);
+        assertEquals(0, coordinator.pendingCount());
+        assertEquals(Optional.of("ok"), coordinator.getOrLoad(
+                "next", () -> CompletableFuture.completedFuture(Optional.of("ok")))
+                .toCompletableFuture().join());
+    }
 }

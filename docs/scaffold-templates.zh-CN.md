@@ -1,5 +1,7 @@
 # zeroServer 脚手架模板目录
 
+当前 checkout 支持 `--catalog <file>` 与 `--listComponents`，以及所有生成模板的 `RuntimeAssembly.main` 只读诊断入口；使用方法及升级要求见[配置与目录指南](guides/configuration-and-catalog.zh-CN.md)。
+
 本文用于回答一个更接近业务开发的问题：
 
 ```text

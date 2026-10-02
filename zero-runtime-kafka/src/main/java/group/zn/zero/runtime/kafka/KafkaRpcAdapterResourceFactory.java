@@ -38,14 +38,14 @@ interface KafkaRpcAdapterResourceFactory {
      *
      * @return 生产资源工厂；不可为空，无状态且线程安全。
      */
-    static KafkaRpcAdapterResourceFactory production() {
-        return production(SecurityMetadataVerifier.failClosed());
+    static KafkaRpcAdapterResourceFactory production(final java.util.concurrent.ScheduledExecutorService timer) {
+        return production(SecurityMetadataVerifier.failClosed(), timer);
     }
 
     /** 在 handler 注册前安装验证器，返回尚未发布的真实资源。 */
-    static KafkaRpcAdapterResourceFactory production(final SecurityMetadataVerifier verifier) {
+    static KafkaRpcAdapterResourceFactory production(final SecurityMetadataVerifier verifier, final java.util.concurrent.ScheduledExecutorService timer) {
         Objects.requireNonNull(verifier, "verifier");
-        return (settings, observer) -> new DefaultKafkaRpcAdapterResource(settings, observer, verifier);
+        return (settings, observer) -> new DefaultKafkaRpcAdapterResource(settings, observer, verifier, timer);
     }
 }
 
@@ -141,10 +141,10 @@ final class DefaultKafkaRpcAdapterResource implements KafkaRpcAdapterResource {
     DefaultKafkaRpcAdapterResource(
             final KafkaRpcSettings settings,
             final RpcTransportObserver observer,
-            final SecurityMetadataVerifier verifier) {
+            final SecurityMetadataVerifier verifier, final java.util.concurrent.ScheduledExecutorService timer) {
         this.adapter = new KafkaRpcAdapter(
                 Objects.requireNonNull(settings, "settings"),
-                Objects.requireNonNull(observer, "observer"));
+                Objects.requireNonNull(observer, "observer"), timer);
         this.adapter.securityMetadataVerifier(verifier);
     }
 

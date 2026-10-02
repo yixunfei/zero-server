@@ -14,12 +14,15 @@ public final class ResolvedRuntimeConfig {
 
     private final Map<ComponentId, ComponentConfig> components;
     private final List<ResolvedConfigMetadata> metadata;
+    private final RuntimeConfigDiagnostics diagnostics;
 
     ResolvedRuntimeConfig(
             final Map<ComponentId, ComponentConfig> components,
-            final List<ResolvedConfigMetadata> metadata) {
+            final List<ResolvedConfigMetadata> metadata,
+            final RuntimeConfigDiagnostics diagnostics) {
         this.components = Map.copyOf(Objects.requireNonNull(components, "components"));
         this.metadata = List.copyOf(Objects.requireNonNull(metadata, "metadata"));
+        this.diagnostics = Objects.requireNonNull(diagnostics, "diagnostics");
     }
 
     public ComponentConfig component(final ComponentId componentId) {
@@ -32,8 +35,14 @@ public final class ResolvedRuntimeConfig {
         return metadata;
     }
 
+    /** 返回解析来源与脱敏有效值；只读、不可变、按 schema 顺序稳定排序。 */
+    public RuntimeConfigDiagnostics diagnostics() {
+        return diagnostics;
+    }
+
     @Override
     public String toString() {
-        return "ResolvedRuntimeConfig{components=" + components.keySet() + ", metadata=" + metadata + '}';
+        return "ResolvedRuntimeConfig{components=" + components.keySet() + ", metadata=" + metadata
+                + ", diagnostics=" + diagnostics + '}';
     }
 }

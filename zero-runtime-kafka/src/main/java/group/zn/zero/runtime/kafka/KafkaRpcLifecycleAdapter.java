@@ -66,12 +66,6 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
      * @param settings Kafka RPC 配置；不可为空。
      * @param observer RPC 传输观测器；不可为空。
      */
-    KafkaRpcLifecycleAdapter(
-            final KafkaRpcSettings settings,
-            final RpcTransportObserver observer) {
-        this(settings, observer, KafkaRpcAdapterResourceFactory.production());
-    }
-
     /**
      * 创建允许注入发布前资源工厂的 Kafka RPC lifecycle adapter。
      *

@@ -109,6 +109,10 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
     private final Duration shutdownTimeout;
     /** 脏对象数量上限。 */
     private final int maxDirtyEntries;
+    /** 每个脏键的失败状态；失败项不从脏表丢弃。 */
+    private final ConcurrentMap<DirtyKey, PersistenceFailure> failures = new ConcurrentHashMap<>();
+    /** 重试预算与退避。 */
+    private final PersistenceRetryPolicy retryPolicy;
 
     /**
      * 创建默认统一持久化管理服务。
@@ -159,6 +163,16 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
     /** 创建带脏对象预算的持久化管理器。 */
     public DefaultPersistenceManager(final String serviceName, final PersistenceBindingExecutor bindingExecutor,
             final Clock clock, final Duration shutdownTimeout, final int maxDirtyEntries) {
+        this(serviceName, bindingExecutor, clock, shutdownTimeout, maxDirtyEntries, PersistenceRetryPolicy.defaults());
+    }
+
+    /** 创建显式失败预算的管理器；线程安全，markDirty 仅内存登记，不是耐久提交。
+     * @param serviceName 服务名。 @param bindingExecutor 绑定快照执行器。 @param clock 时钟。
+     * @param shutdownTimeout 停机预算。 @param maxDirtyEntries 脏键上限。 @param retryPolicy 重试策略。 */
+    public DefaultPersistenceManager(final String serviceName, final PersistenceBindingExecutor bindingExecutor,
+            final Clock clock, final Duration shutdownTimeout, final int maxDirtyEntries,
+            final PersistenceRetryPolicy retryPolicy) {
+        this.retryPolicy = Objects.requireNonNull(retryPolicy, "retryPolicy");
         this.shutdownTimeout = Objects.requireNonNull(shutdownTimeout, "shutdownTimeout");
         if (shutdownTimeout.isNegative() || shutdownTimeout.isZero()) {
             throw new IllegalArgumentException("shutdownTimeout must be positive");
@@ -261,14 +275,14 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             throw new IllegalArgumentException("maxBatchSize must be positive");
         }
         CompletableFuture<PersistenceFlushResult> future = new CompletableFuture<>();
+        boolean start;
         synchronized (flushLock) {
-            if (activeFlush.get() == null) {
-                activeFlush.set(future);
-                startFlush(new FlushRequest(future, maxBatchSize));
-            } else {
-                queuedFlushes.addLast(new FlushRequest(future, maxBatchSize));
-            }
+            start = activeFlush.get() == null;
+            if (start) activeFlush.set(future);
+            else if (queuedFlushes.size() < 128) queuedFlushes.addLast(new FlushRequest(future, maxBatchSize));
+            else return failedFuture(DataErrorCode.PERSISTENCE_FLUSH_FAILED, "flush request queue is full", null);
         }
+        if (start) startFlush(new FlushRequest(future, maxBatchSize));
         return future;
     }
 
@@ -330,7 +344,7 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
                 if (remaining <= 0) throw new java.util.concurrent.TimeoutException("persistence stop timed out");
                 PersistenceFlushResult result = flushNow(Integer.MAX_VALUE).toCompletableFuture()
                         .get(remaining, TimeUnit.NANOSECONDS);
-                if (result.failureCount() > 0) {
+                if (result.failureCount() > 0 || result.selectedCount() == 0 && !dirtyEntries.isEmpty()) {
                     throw ZeroException.of(DataErrorCode.PERSISTENCE_FLUSH_FAILED,
                             "stop flush failed; retained dirty objects=" + dirtyEntries.size(), null);
                 }
@@ -354,6 +368,7 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
                         if (throwable == null) {
                             current.success();
                         } else {
+                            recordFailure(entry, throwable);
                             current.failure();
                         }
                         return current;
@@ -366,6 +381,8 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
         try {
             long startedAt = clock.millis();
             List<DirtyEntry<?, ?>> batch = dirtyEntries.values().stream()
+                    .filter(this::readyToRetry)
+                    .sorted(java.util.Comparator.comparingLong(DirtyEntry::generation))
                     .limit(request.maxBatchSize()).toList();
             flushAttemptCount.addAndGet(batch.size());
             FlushAccumulator accumulator = new FlushAccumulator(startedAt, batch.size());
@@ -410,7 +427,12 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
         PersistenceTarget<ID, T> target = target(entry.targetName());
         return bindingExecutor.capture(entry.binding(), entry.snapshotSupplier())
                 .thenCompose(entity -> saveSnapshot(entry, target, entity))
-                .thenRun(() -> dirtyEntries.remove(entry.key(), entry));
+                .thenRun(() -> {
+                    synchronized (admissionLock) {
+                        dirtyEntries.remove(entry.key(), entry);
+                        failures.remove(entry.key());
+                    }
+                });
     }
 
     private <ID, T extends VersionedEntity<ID>> CompletionStage<Void> saveSnapshot(
@@ -436,6 +458,42 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
                 accumulator.successCount(),
                 accumulator.failureCount(),
                 dirtyEntries.size());
+    }
+
+    /** @return 当前失败项的不可变、可能为空诊断列表；线程安全，不移除脏数据。 */
+    public List<PersistenceFailure> failures() { return List.copyOf(failures.values()); }
+
+    /** 人工修正后重置指定键的失败预算；线程安全，不改变快照供应器。
+     * @param targetName 目标名。 @param id 实体 ID。 @return 是否有失败状态被恢复。 */
+    public boolean retryFailed(final String targetName, final Object id) {
+        synchronized (admissionLock) {
+            return failures.remove(new DirtyKey(requireText(targetName, "targetName"),
+                    Objects.requireNonNull(id, "id"))) != null;
+        }
+    }
+
+    private boolean readyToRetry(final DirtyEntry<?, ?> entry) {
+        PersistenceFailure state = failures.get(entry.key());
+        synchronized (admissionLock) {
+            return state == null || !state.quarantined() && (stopping || clock.millis() >= state.nextAttemptAt());
+        }
+    }
+
+    private void recordFailure(final DirtyEntry<?, ?> entry, final Throwable failure) {
+        Throwable cause = failure;
+        while (cause instanceof java.util.concurrent.CompletionException && cause.getCause() != null) cause = cause.getCause();
+        var code = cause instanceof ZeroException zero ? zero.errorCode() : DataErrorCode.PERSISTENCE_FLUSH_FAILED;
+        synchronized (admissionLock) {
+            PersistenceFailure previous = failures.get(entry.key());
+            int attempts = previous == null ? 1 : previous.attempts() + 1;
+            boolean isolated = attempts >= retryPolicy.maxAttempts() || code == DataErrorCode.VERSION_CONFLICT
+                    || code == DataErrorCode.INVALID_ENTITY || code == DataErrorCode.MAPPING_INVALID
+                    || code == DataErrorCode.ATOMIC_WRITE_UNSUPPORTED;
+            long delay = retryPolicy.delayMillis(attempts);
+            long now = clock.millis();
+            failures.put(entry.key(), new PersistenceFailure(entry.targetName(), entry.id(), attempts,
+                    now > Long.MAX_VALUE - delay ? Long.MAX_VALUE : now + delay, isolated, code.code()));
+        }
     }
 
     @SuppressWarnings("unchecked")

@@ -66,6 +66,10 @@ public final class ZeroRuntimeExecutors implements AutoCloseable {
      * 后台执行器是否可能在调用线程内联执行。
      */
     private final boolean backgroundMayInline;
+    /** 按职责隔离的受管计时执行器，冷启动按需创建，统一关闭。 */
+    private final java.util.Map<String, java.util.concurrent.ScheduledExecutorService> timers = new java.util.HashMap<>();
+    /** 关闭后禁止再创建计时资源。 */
+    private boolean closed;
 
     private ZeroRuntimeExecutors(
             final Executor logicExecutor,
@@ -210,6 +214,20 @@ public final class ZeroRuntimeExecutors implements AutoCloseable {
         return remoteIoExecutor;
     }
 
+    /** 获取职责独立的受管计时器；仅组合根使用，不允许外部 shutdown。
+     * @param role 稳定职责名，禁止业务动态 ID。 @return 同职责复用的计时器；线程安全。 */
+    public synchronized java.util.concurrent.ScheduledExecutorService scheduledExecutor(final String role) {
+        String name = requireText(role, "role");
+        if (closed) throw new IllegalStateException("runtime executors closed");
+        return timers.computeIfAbsent(name, key -> {
+            var timer = new java.util.concurrent.ScheduledThreadPoolExecutor(1, namedThreadFactory("zero-" + key + "-timer-"));
+            timer.setRemoveOnCancelPolicy(true);
+            timer.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+            timer.setContinueExistingPeriodicTasksAfterShutdownPolicy(false);
+            return timer;
+        });
+    }
+
     /**
      * 返回远程 IO 执行器是否可能在调用线程内联执行。
      *
@@ -251,11 +269,18 @@ public final class ZeroRuntimeExecutors implements AutoCloseable {
      */
     @Override
     public void close() {
-        for (ExecutorService service : ownedServices) {
+        List<ExecutorService> services;
+        synchronized (this) {
+            if (closed) return;
+            closed = true;
+            services = new java.util.ArrayList<>(timers.values());
+            services.addAll(ownedServices);
+        }
+        for (ExecutorService service : services) {
             service.shutdown();
         }
         ZeroException interruptionFailure = null;
-        for (ExecutorService service : ownedServices) {
+        for (ExecutorService service : services) {
             if (interruptionFailure != null) {
                 shutdownNowAfterInterruption(service, interruptionFailure);
                 continue;

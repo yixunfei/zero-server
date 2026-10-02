@@ -34,16 +34,17 @@ public final class RuntimeConfigResolver {
         List<ConfigSource> checkedSources = validateSources(sources);
         Map<ComponentId, ComponentConfig> components = new LinkedHashMap<>();
         List<ResolvedConfigMetadata> metadata = new ArrayList<>();
+        List<RuntimeConfigDiagnosticEntry> diagnostics = new ArrayList<>();
         List<ConfigIssue> issues = new ArrayList<>();
         for (ConfigSchema schema : orderedSchemas) {
             Map<ConfigKey<?>, Object> values = new LinkedHashMap<>();
             for (ConfigKey<?> key : schema.keys()) {
-                resolveKey(key, checkedSources, values, metadata, issues);
+                resolveKey(key, checkedSources, values, metadata, diagnostics, issues);
             }
             components.put(schema.owner(), new ComponentConfig(schema.owner(), values));
         }
         throwIfInvalid(issues);
-        return new ResolvedRuntimeConfig(components, metadata);
+        return new ResolvedRuntimeConfig(components, metadata, new RuntimeConfigDiagnostics(diagnostics));
     }
 
     private static List<ConfigSource> validateSources(final List<ConfigSource> sources) {
@@ -72,6 +73,7 @@ public final class RuntimeConfigResolver {
             final List<ConfigSource> sources,
             final Map<ConfigKey<?>, Object> values,
             final List<ResolvedConfigMetadata> metadata,
+            final List<RuntimeConfigDiagnosticEntry> diagnostics,
             final List<ConfigIssue> issues) {
         for (ConfigSource source : sources) {
             String alias = key.aliasFor(source.kind());
@@ -79,20 +81,20 @@ public final class RuntimeConfigResolver {
             try {
                 raw = source.value(alias);
             } catch (Throwable failure) {
-                issues.add(ConfigIssue.invalid(key));
+                issues.add(ConfigIssue.invalid(key, source, alias));
                 return;
             }
             if (raw.isEmpty()) {
                 continue;
             }
             if (!key.acceptedSources().contains(source.kind())) {
-                issues.add(ConfigIssue.invalid(key));
+                issues.add(ConfigIssue.invalid(key, source, alias));
                 return;
             }
-            decodeValue(key, raw.orElseThrow(), source, alias, values, metadata, issues);
+            decodeValue(key, raw.orElseThrow(), source, alias, values, metadata, diagnostics, issues);
             return;
         }
-        resolveDefaultOrMissing(key, values, metadata, issues);
+        resolveDefaultOrMissing(key, sources, values, metadata, diagnostics, issues);
     }
 
     private static <T> void decodeValue(
@@ -102,47 +104,86 @@ public final class RuntimeConfigResolver {
             final String alias,
             final Map<ConfigKey<?>, Object> values,
             final List<ResolvedConfigMetadata> metadata,
+            final List<RuntimeConfigDiagnosticEntry> diagnostics,
             final List<ConfigIssue> issues) {
         try {
             T decoded = key.decode(raw);
             if (!key.valid(decoded)) {
-                issues.add(ConfigIssue.invalid(key));
+                issues.add(ConfigIssue.invalid(key, source, alias));
                 return;
             }
             values.put(key, decoded);
-            metadata.add(metadata(key, source.kind(), source.id(), alias, ConfigValidationStatus.RESOLVED));
+            ConfigSourceOrigin origin = source.origin(alias);
+            ConfigValidationStatus status = origin.kind() == ConfigSourceKind.DEFAULT
+                    ? ConfigValidationStatus.DEFAULTED : ConfigValidationStatus.RESOLVED;
+            metadata.add(metadata(key, origin.kind(), origin.id(), origin.alias(), status));
+            diagnostics.add(diagnostic(key, origin.kind(), origin.id(), origin.alias(), status, decoded));
         } catch (Throwable failure) {
-            issues.add(ConfigIssue.invalid(key));
+            issues.add(ConfigIssue.invalid(key, source, alias));
         }
     }
 
     private static <T> void resolveDefaultOrMissing(
             final ConfigKey<T> key,
+            final List<ConfigSource> sources,
             final Map<ConfigKey<?>, Object> values,
             final List<ResolvedConfigMetadata> metadata,
+            final List<RuntimeConfigDiagnosticEntry> diagnostics,
             final List<ConfigIssue> issues) {
         Optional<T> defaultValue = key.defaultValue();
         if (defaultValue.isPresent()) {
             T value = defaultValue.orElseThrow();
             try {
                 if (!key.valid(value)) {
-                    issues.add(ConfigIssue.invalid(key));
+                    issues.add(ConfigIssue.invalid(key, null, key.logicalName()));
                     return;
                 }
             } catch (Throwable failure) {
-                issues.add(ConfigIssue.invalid(key));
+                issues.add(ConfigIssue.invalid(key, null, key.logicalName()));
                 return;
             }
             values.put(key, value);
             metadata.add(metadata(
                     key, ConfigSourceKind.DEFAULT, "schema-default", key.logicalName(),
                     ConfigValidationStatus.DEFAULTED));
+            diagnostics.add(diagnostic(key, ConfigSourceKind.DEFAULT, "schema-default", key.logicalName(),
+                    ConfigValidationStatus.DEFAULTED, value));
         } else if (key.required()) {
-            issues.add(ConfigIssue.missing(key));
+            issues.add(ConfigIssue.missing(key, sources));
         } else {
             metadata.add(metadata(
                     key, ConfigSourceKind.DEFAULT, "none", key.logicalName(), ConfigValidationStatus.ABSENT));
+            diagnostics.add(diagnostic(key, ConfigSourceKind.DEFAULT, "none", key.logicalName(),
+                    ConfigValidationStatus.ABSENT, null));
         }
+    }
+
+    private static RuntimeConfigDiagnosticEntry diagnostic(
+            final ConfigKey<?> key,
+            final ConfigSourceKind sourceKind,
+            final String sourceId,
+            final String alias,
+            final ConfigValidationStatus status,
+            final Object value) {
+        Optional<String> displayed = Optional.ofNullable(value).map(ignored -> key.sensitive()
+                ? "***" : displayValue(key, ignored));
+        return new RuntimeConfigDiagnosticEntry(
+                key.owner(), key.logicalName(), key.type().getName(), sourceKind, sourceId,
+                alias, status, key.reloadability(), key.sensitive(), displayed);
+    }
+
+    private static String displayValue(final ConfigKey<?> key, final Object value) {
+        Class<?> type = value.getClass();
+        if (value instanceof Enum<?> enumValue) {
+            return enumValue.name();
+        }
+        if (type == String.class || type == Integer.class || type == Long.class || type == Short.class
+                || type == Byte.class || type == Double.class || type == Float.class || type == Boolean.class
+                || type == java.math.BigInteger.class || type == java.math.BigDecimal.class
+                || type == java.time.Duration.class) {
+            return String.valueOf(value);
+        }
+        return "<" + key.type().getSimpleName() + ">";
     }
 
     private static ResolvedConfigMetadata metadata(
@@ -164,7 +205,7 @@ public final class RuntimeConfigResolver {
                 ? RuntimeErrorCode.RUNTIME_CONFIG_INVALID
                 : RuntimeErrorCode.RUNTIME_CONFIG_MISSING;
         String keys = issues.stream()
-                .map(issue -> issue.logicalKey + ':' + (issue.invalid ? "invalid" : "missing"))
+                .map(ConfigIssue::safeDescription)
                 .sorted()
                 .distinct()
                 .reduce((left, right) -> left + ',' + right)
@@ -173,14 +214,31 @@ public final class RuntimeConfigResolver {
                 errorCode, RuntimeFailurePhase.CONFIGURATION, null, "keys=" + keys);
     }
 
-    private record ConfigIssue(String logicalKey, boolean invalid) {
+    private record ConfigIssue(String logicalKey, boolean invalid, String source) {
 
-        private static ConfigIssue invalid(final ConfigKey<?> key) {
-            return new ConfigIssue(key.logicalName(), true);
+        private static ConfigIssue invalid(
+                final ConfigKey<?> key,
+                final ConfigSource source,
+                final String alias) {
+            if (source == null) {
+                return new ConfigIssue(key.logicalName(), true, "default#" + alias);
+            }
+            try {
+                ConfigSourceOrigin origin = source.origin(alias);
+                return new ConfigIssue(key.logicalName(), true, origin.kind() + "/" + origin.id() + "#" + origin.alias());
+            } catch (Throwable failure) {
+                return new ConfigIssue(key.logicalName(), true, "invalid-source-origin");
+            }
         }
 
-        private static ConfigIssue missing(final ConfigKey<?> key) {
-            return new ConfigIssue(key.logicalName(), false);
+        private static ConfigIssue missing(final ConfigKey<?> key, final List<ConfigSource> sources) {
+            String candidates = sources.stream().map(source -> source.kind() + "/" + source.id())
+                    .distinct().sorted().reduce((left, right) -> left + "," + right).orElse("none");
+            return new ConfigIssue(key.logicalName(), false, "checked=" + candidates);
+        }
+
+        private String safeDescription() {
+            return logicalKey + ':' + (invalid ? "invalid" : "missing") + '@' + source;
         }
     }
 
@@ -213,6 +271,11 @@ public final class RuntimeConfigResolver {
         @Override
         public Optional<String> value(final String alias) {
             return delegate.value(alias);
+        }
+
+        @Override
+        public ConfigSourceOrigin origin(final String alias) {
+            return delegate.origin(alias);
         }
 
         @Override

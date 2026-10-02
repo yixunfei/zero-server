@@ -136,6 +136,10 @@ public class RedisDataEnvelopeStore implements ZeroDataEnvelopeStore {
     @Override
     public synchronized void save(final ZeroDataEnvelope envelope) {
         ZeroDataEnvelope current = validateEnvelope(envelope);
+        RedisDataSnapshot previous = snapshots.get(current.id());
+        if (previous != null && previous.version() > current.version()) {
+            throw ZeroException.of(DataErrorCode.VERSION_CONFLICT, "redis snapshot version would regress", null);
+        }
         RedisDataSnapshot snapshot = RedisDataSnapshot.fromEnvelope(current, keyStrategy, envelopeCodec);
         snapshots.put(snapshot.id(), snapshot);
         indexIds.computeIfAbsent(snapshot.indexKey(), key -> new LinkedHashSet<>()).add(snapshot.id());

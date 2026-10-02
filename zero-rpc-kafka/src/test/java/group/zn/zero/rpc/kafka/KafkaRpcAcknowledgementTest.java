@@ -21,6 +21,9 @@ import org.junit.jupiter.api.Test;
 
 /** RPC 确认必须等待业务和响应发送，默认接收策略不可绕过验证。 @author zn */
 class KafkaRpcAcknowledgementTest {
+    /** 测试拥有计时器，Adapter 仅拥有任务。 */
+    @org.junit.jupiter.api.extension.RegisterExtension
+    private final KafkaTestTimer timer = new KafkaTestTimer();
     /** 本地签名测试材料。 */
     private final SecurityMetadataAssertion assertion = SecurityMetadataAssertion.digest(new byte[] {1, 5});
 
@@ -28,7 +31,7 @@ class KafkaRpcAcknowledgementTest {
     @Test
     void defaultReceiverFailsClosed() {
         HoldingGateway gateway = new HoldingGateway();
-        try (KafkaRpcAdapter adapter = new KafkaRpcAdapter(KafkaRpcSettings.defaults("localhost:9092"), gateway)) {
+        try (KafkaRpcAdapter adapter = new KafkaRpcAdapter(KafkaRpcSettings.defaults("localhost:9092"), gateway, timer.executor())) {
             AtomicInteger calls = new AtomicInteger();
             adapter.register("svc", "method", request -> {
                 calls.incrementAndGet();
@@ -48,7 +51,7 @@ class KafkaRpcAcknowledgementTest {
     @Test
     void processingCompletesOnlyAfterResponseAcknowledgement() {
         HoldingGateway gateway = new HoldingGateway();
-        try (KafkaRpcAdapter adapter = new KafkaRpcAdapter(KafkaRpcSettings.defaults("localhost:9092"), gateway)) {
+        try (KafkaRpcAdapter adapter = new KafkaRpcAdapter(KafkaRpcSettings.defaults("localhost:9092"), gateway, timer.executor())) {
             adapter.securityMetadataVerifier(SecurityMetadataAssertion.verifier(assertion));
             CompletableFuture<RpcResponse> handler = new CompletableFuture<>();
             adapter.register("svc", "method", request -> handler);

@@ -56,11 +56,15 @@ public final class LocalRoomService {
         Objects.requireNonNull(id, "id");
         if (capacity < 1 || reconnectWindowMillis < 0) throw new IllegalArgumentException("invalid room configuration");
         MutableRoom room = new MutableRoom(id, capacity, reconnectWindowMillis, eventHistoryCapacity);
+        RoomEvent created = room.events.getFirst();
         if (rooms.putIfAbsent(id, room) != null) throw failure("room already exists");
-        room.emit(RoomEvent.Type.CREATED, null); return room.snapshot();
+        room.deliver(created);
+        return room.view.snapshot();
     }
-    public RoomSnapshot snapshot(RoomId id) { return room(id).snapshot(); }
-    public RoomStats stats(RoomId id) { return room(id).stats; }
+    /** 读取最近一次完整提交的不可变快照；线程安全，不会观察到部分成员变更。 */
+    public RoomSnapshot snapshot(RoomId id) { return room(id).view.snapshot(); }
+    /** 读取最近提交的不可变统计；线程安全；与单独的 snapshot 调用不组成事务。 */
+    public RoomStats stats(RoomId id) { return room(id).view.stats(); }
     public List<RoomEvent> events(RoomId id) {
         MutableRoom current = room(id);
         synchronized (current.events) { return List.copyOf(current.events); }
@@ -166,7 +170,13 @@ public final class LocalRoomService {
     }
     private final class MutableRoom {
         final RoomId id; final int capacity; final long window; final int historyCapacity; final ConcurrentMap<String,RoomMember> members=new ConcurrentHashMap<>(); final ArrayDeque<RoomEvent> events=new ArrayDeque<>(); long droppedEvents; RoomState state=RoomState.WAITING; long seq; String settlementId, settlementResult; RoomStats stats=new RoomStats(0,0,0,0,0,0);
-        MutableRoom(RoomId i,int c,long w,int h){id=i;capacity=c;window=w;historyCapacity=h;}
+        /** 一次 volatile 发布覆盖全部查询状态；外部线程禁止读取 lane 内的可变字段。 */
+        volatile RoomView view;
+        MutableRoom(RoomId i,int c,long w,int h) {
+            id=i;capacity=c;window=w;historyCapacity=h;
+            events.add(new RoomEvent(id, 0, RoomEvent.Type.CREATED, null, System.currentTimeMillis()));
+            publish();
+        }
         void join(String p){ if(state==RoomState.CLOSED) throw failure("room closed"); if(members.containsKey(p)&&members.get(p).slot()!=PlayerSlot.LEFT) return; if(state!=RoomState.WAITING) throw failure("room not accepting joins"); if(members.values().stream().filter(m->m.slot()!=PlayerSlot.LEFT).count()>=capacity) throw failure("room full"); members.put(p,new RoomMember(p,PlayerSlot.JOINED,0)); stats=new RoomStats(stats.joins()+1,stats.leaves(),stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements()); emit(RoomEvent.Type.JOINED,p); }
         void leave(String p){ if(members.remove(p)==null)return; stats=new RoomStats(stats.joins(),stats.leaves()+1,stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements());emit(RoomEvent.Type.LEFT,p); }
         void disconnect(String p,long now){ RoomMember m=member(p); if(m.slot()==PlayerSlot.LEFT)return; members.put(p,new RoomMember(p,PlayerSlot.DISCONNECTED,now)); emit(RoomEvent.Type.DISCONNECTED,p); }
@@ -182,7 +192,11 @@ public final class LocalRoomService {
             synchronized (events) {
                 if (events.size() == historyCapacity) { events.removeFirst(); droppedEvents++; }
                 events.addLast(event);
+                publish();
             }
+            deliver(event);
+        }
+        void deliver(RoomEvent event) {
             try {
                 eventConsumer.accept(event);
             } catch (RuntimeException failure) {
@@ -201,16 +215,24 @@ public final class LocalRoomService {
             synchronized (events) {
                 events.clear();
                 events.addAll(checkpoint.events());
+                droppedEvents = checkpoint.droppedEvents();
             }
             state = checkpoint.state();
-            droppedEvents = checkpoint.droppedEvents();
             seq = checkpoint.seq();
             settlementId = checkpoint.settlementId();
             settlementResult = checkpoint.settlementResult();
             stats = checkpoint.stats();
+            publish();
         }
-        RoomSnapshot snapshot(){return new RoomSnapshot(id,state,capacity,members.values().stream().sorted(Comparator.comparing(RoomMember::playerId)).toList(),seq,settlementId,settlementResult);}
+        void publish() {
+            view = new RoomView(new RoomSnapshot(id, state, capacity,
+                    members.values().stream().sorted(Comparator.comparing(RoomMember::playerId)).toList(),
+                    seq, settlementId, settlementResult), stats);
+        }
     }
+    /** 同一次状态提交的查询结果；记录及组成值均不可变。 */
+    private record RoomView(RoomSnapshot snapshot, RoomStats stats) { }
+
     private record RoomCheckpoint(
             RoomState state,
             Map<String, RoomMember> members,

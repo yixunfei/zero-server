@@ -36,7 +36,8 @@ public final class CenterMain {
         AtomicInteger active = new AtomicInteger();
         AtomicInteger requests = new AtomicInteger();
         try (var runtime = RuntimeBasics.builder().install(RpcRuntime.module()).build();
-             KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings)) {
+             KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings,
+                     runtime.require(RuntimeBasics.EXECUTORS).scheduledExecutor("kafka-rpc"))) {
             CenterService service = new CenterService(draining, active, requests);
             RpcBoundService binding = new RpcServiceBinder(adapter, codecs).bind(CenterContract.class, service);
             runtime.start();

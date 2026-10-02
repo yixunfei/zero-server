@@ -95,10 +95,11 @@ public final class PlayerRpcProviderBootstrap {
      *
      * @param bootstrapServers Kafka broker 地址；不可为 null。
      */
-    public PlayerRpcProviderBootstrap(final String bootstrapServers) {
+    public PlayerRpcProviderBootstrap(final String bootstrapServers,
+            final java.util.concurrent.ScheduledExecutorService timer) {
         KafkaRpcSettings settings = KafkaRpcSettings.defaults(bootstrapServers);
         RpcCodecRegistry codecRegistry = PlayerRpcCodecs.createRegistry();
-        this.adapter = new KafkaRpcAdapter(settings);
+        this.adapter = new KafkaRpcAdapter(settings, timer);
         this.boundService = new RpcServiceBinder(adapter, codecRegistry)
                 .bind(PlayerRemoteRpc.class, new PlayerRemoteRpcImpl());
     }
@@ -117,7 +118,7 @@ public final class PlayerRpcProviderBootstrap {
 
 - `@RpcService.topic` 非空时会覆盖默认 request topic。
 - `@RpcService.group` 非空时会覆盖 provider 默认 consumer group。
-- 关闭顺序建议先解绑服务，再关闭 adapter。
+- 关闭顺序为解绑服务、关闭 adapter、最后关闭受管执行器。timer 由组合根通过 `ZeroRuntimeExecutors.scheduledExecutor("kafka-rpc")` 注入；adapter 不拥有外部 timer。示例组合根须依赖 `zero-runtime-bootstrap`，框架业务代码不自建线程池。
 - 当前 adapter 内部会启动 Kafka consumer worker，必须调用 `close()` 释放资源。
 
 ## 四、Caller 调用方示例
@@ -156,11 +157,12 @@ public final class PlayerRpcCallerExample {
      * @param playerId 玩家 ID。
      * @return 玩家名称；不为 null。
      */
-    public static String queryPlayerName(final String bootstrapServers, final long playerId) {
+    public static String queryPlayerName(final String bootstrapServers, final long playerId,
+            final java.util.concurrent.ScheduledExecutorService timer) {
         KafkaRpcSettings settings = KafkaRpcSettings.defaults(bootstrapServers);
         RpcCodecRegistry codecRegistry = PlayerRpcCodecs.createRegistry();
 
-        try (KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings)) {
+        try (KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings, timer)) {
             PlayerRemoteRpc client = new RpcClientFactory(
                     adapter,
                     codecRegistry,
@@ -350,8 +352,9 @@ final class PlayerRpcKafkaExternalIT {
         KafkaRpcSettings providerSettings = KafkaRpcSettings.defaults(brokers);
         KafkaRpcSettings callerSettings = KafkaRpcSettings.defaults(brokers);
 
-        try (KafkaRpcAdapter provider = new KafkaRpcAdapter(providerSettings);
-             KafkaRpcAdapter caller = new KafkaRpcAdapter(callerSettings)) {
+        try (var executors = group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors.localPrototype("rpc-test", 1);
+             KafkaRpcAdapter provider = new KafkaRpcAdapter(providerSettings, executors.scheduledExecutor("provider"));
+             KafkaRpcAdapter caller = new KafkaRpcAdapter(callerSettings, executors.scheduledExecutor("caller"))) {
             RpcBoundService bound = new RpcServiceBinder(provider, codecs)
                     .bind(PlayerRemoteRpc.class, new PlayerRemoteRpcImpl());
             PlayerRemoteRpc client = new RpcClientFactory(

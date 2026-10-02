@@ -1,5 +1,9 @@
 # zeroServer 模块图
 
+2026-09-30 易用性基础：`zero-core/config/ConfigLookup` 与 `SourcedZeroConfig` 统一候选读取及来源；runtime 的 `RuntimeAssemblyPlan.configuration` 保存同次解析的安全快照，`RuntimeAssemblyDiagnosis` 统一生成入口。`zero-codegen/scaffold/ScaffoldCatalogFile` 显式读取版本化 JSON，并贯通 CLI、生成、升级。依赖方向不变（codegen → runtime → core），核心不引入 JSON/驱动；常改位置为上述类型、ScaffoldAssemblyRenderer 和 templates。来源优先级与公共 API 风险见[迁移说明](migrations/20260930-flexibility-foundation.zh-CN.md)。
+
+2026-09-30 通用 ownership 基础设施：`zero-ownership` 定义资源 generation、进程 incarnation、lease/epoch、fenced state CAS、requestId 幂等、owner 路由、带 checkpoint 元数据的迁移恢复及有界容量契约，并提供仅用于单进程原型/测试的内存实现。`zero-ownership-postgresql` 独立实现 ownership/state/migration/route 存储，复用应用提供的 DataSource 和 payload codec；JDBC 驱动仅由该 Adapter 引入。依赖方向为可选业务/组合根 → ownership API，PostgreSQL Adapter → ownership API；核心、Room、World 不反向绑定具体存储或彼此依赖。常见修改位置是 `zero-ownership`、`zero-ownership-postgresql` 与迁移说明。单实例外部测试已通过；schema migration 生命周期、数据库复制集切换、消息 transport、跨机房及生产容量仍需应用选择并验证，生产就绪为 false。
+
 2026-09-28 高级 KCP：`zero-net-kcp` 在 ZKCP v1 数据面提供可插拔 HMAC/ChaCha20-Poly1305/AES-GCM、XOR/Reed-Solomon FEC、挑战响应路径验证和有界租约；`KcpSessionStore`/`KcpSessionCoordinator` 提供冻结、迁移、代际 fencing，`zero-net-kcp-redis` 为可选 Redis Lua 适配。`zero-runtime-kcp` 可注入会话 SPI。密钥仍只经已认证控制面传递，跨节点目标重建必须由应用安全传递新票据。
 `KcpProfile/KcpTuning/KcpLimits/KcpTimeouts` 提供场景和分组设置；`KcpConnectInfo` 是可信控制面描述；`KcpClient/KcpRecovery` 完成受管 Java 接入和显式恢复/回退。
 `KcpScheduler` 管理有界截止索引，`KcpRetainedFrame` 在整帧实际释放时回收预算；双端复用 `KcpDispatch` 和段校验。常改位置为两个模块、examples/kcp-tcp-login 和[场景指南](guides/kcp-scenarios.zh-CN.md)。
@@ -31,6 +35,10 @@ Java dispatcher 模板生成 `dispatchFrame`。`LocalRankingService` 维护最�
 模块依赖、业务执行域不变；主要风险为阶段交接、借用内容稳定性与回调重入，详见[增量迁移](migrations/20260923-performance-incremental.md)。
 
 本文给出 zeroServer 当前公开模块的职责、依赖方向、核心入口、常见修改位置、禁止依赖与风险边界。模块、包结构、核心入口或依赖方向发生变化时，应同步更新本文和对应测试。
+
+2026-09-30 灵活性增量：`zero-runtime/config` 新增 `RuntimeConfigDiagnostics` 安全有效配置视图；`zero-codegen/scaffold` 以 `ScaffoldComponentDefinition` 统一 Provider、坐标、安装表达式和配置样例，并支持应用显式目录。依赖方向不变；配置诊断不创建资源，脚手架目录不扫描 classpath。
+
+2026-09-30 ownership / 迁移恢复增量：新增中立 `zero-ownership`，提供资源 generation、进程 incarnation、lease epoch fencing、可选 owner 路由、状态版本 CAS、requestId 幂等、带 schema/codec 元数据的可恢复迁移状态机、显式 `FailoverCoordinator` 和无后台线程的有界容量预算/状态装饰器。该模块只依赖 JDK，不绑定 World、Room、PostgreSQL、Kafka、Nacos 或监控；业务绑定和生产持久化必须由应用显式装配的 Adapter 完成。当前内存实现只用于本地原型和契约测试，productionReady=false。
 
 2026-09-22 常见修改入口：`zero-rpc-kafka/KafkaRpcConsumerBatch` 在 consumer 线程管理批次异步确认与重平衡；
 `zero-runtime-kafka/KafkaRuntime.module(properties, verifier)` 注入应用安全验证器；
@@ -89,11 +97,12 @@ flowchart TB
 | 模块 | 职责 | 核心入口 | 常见修改位置 | 禁止依赖与主要风险 |
 | --- | --- | --- | --- | --- |
 | `zero-security` | 传输中立的认证、重放、TLS 材料与安全上下文契约 | `AuthenticationProvider`、`SecurityContext`、`ReplayProtection`、`TlsMaterialProvider`、`SecurityChain` | `zero-security/src/main/java/group/zn/zero/security` | 仅依赖 `zero-core`；不内置账号/JWT/证书供应商；安全 provider 必须显式注入，敏感字段禁止进入上下文 |
-| `zero-runtime` | 显式组件选择、typed config、依赖图、事务式生命周期、健康、安全诊断与共享能力模型 | `RuntimeAssembler`、`GameRuntime`、`ComponentCatalog`、`RuntimeProfile`、`RuntimeCapabilityModel` | `zero-runtime/src/main/java/group/zn/zero/runtime` | 只依赖 `zero-core`；禁止 classpath 自动装配和具体端口/Adapter 依赖；公共契约已用于 1C Local 装配 |
+| `zero-runtime` | 显式组件选择、typed config、有效配置诊断、依赖图、事务式生命周期、健康、安全诊断与共享能力模型 | `RuntimeAssembler`、`RuntimeComposition`、`RuntimeConfigDiagnostics`、`GameRuntime`、`ComponentCatalog`、`RuntimeProfile`、`RuntimeCapabilityModel` | `zero-runtime/src/main/java/group/zn/zero/runtime` | 只依赖 `zero-core`；禁止 classpath 自动装配和具体端口/Adapter 依赖；配置诊断不创建 provider 或资源 |
 | `zero-event` | 事件总线、优先级、拦截、重试与死信抽象 | `EventBus`、`InMemoryEventBus`、`EventHandler`、`EventInterceptor` | `zero-event/src/main/java/group/zn/zero/event` | 不绑定网络或消息队列；派发顺序、重试和异常语义属于高风险行为 |
 | `zero-protocol` | 协议模型、注册表、frame 与 codec SPI | `ProtocolCodec`、`ProtocolFrameCodec`、`ProtocolRegistry`、`ProtocolDefinition` | `zero-protocol/src/main/java/group/zn/zero/protocol` | 协议 ID、wire format、兼容策略与编解码变化会影响客户端和跨服通信 |
-| `zero-codegen` | 协议 DSL 解析与 Java / C# / TypeScript / GDScript 代码生成 | `ProtocolCodegenCli`、`ProtocolCodegenGui`、`ProtocolCodegenRunner`、`DefaultProtocolDslParser`、`DefaultCodeGenerator`、`GeneratedOutputPlan`、`GeneratedSourceWriter`、`ProjectScaffoldCli`、`ScaffoldUpgradeService` | `zero-codegen/src/main/java/group/zn/zero/codegen`、`generator/GeneratedOutputPlan.java`、`generator/GeneratedSourceWriter.java`、`src/main/resources/codegen`、`zero-codegen/scripts/smoke-interop.ps1`、`zero-codegen/src/test` | 依赖 runtime/protocol，不依赖 net/logic；四端生成先整体预检再写盘，写入期 IO 故障无整体回滚；BOImp 只创建一次，其他协议产物按生成标记更新且同内容不写；协议生成与 scaffold ownership 独立；生成 dispatcher 应放业务/装配模块 |
+| `zero-codegen` | 协议 DSL 解析与 Java / C# / TypeScript / GDScript 代码生成，以及按统一元数据目录生成项目脚手架 | `ProtocolCodegenCli`、`DefaultCodeGenerator`、`ProjectScaffoldCli`、`ScaffoldComponents`、`ScaffoldComponentDefinition`、`ScaffoldUpgradeService` | `zero-codegen/src/main/java/group/zn/zero/codegen`、`scaffold/ScaffoldComponents.java`、`scaffold/ScaffoldComponentDefinition.java`、`src/main/resources/codegen`、`zero-codegen/src/test` | 依赖 runtime/protocol，不依赖 net/logic；组件 ID、Provider、坐标、安装表达式和配置样例必须来自同一定义；未知或冲突目录项在写盘前失败；协议生成与 scaffold ownership 独立 |
 | `zero-actor` | Actor 地址、lane key、调度、路由与跨 Actor 消息抽象 | `ActorScheduler`、`ExecutorActorScheduler`、`LocalActorScheduler`、`ActorRouteResolver` | `zero-actor/src/main/java/group/zn/zero/actor` | 禁止直接绑定 RPC、Netty 或中间件；调度、队列、线程归属和背压是关键性能路径 |
+| `zero-ownership` | 跨进程 ownership、epoch fencing、可选 owner 路由、状态 CAS/幂等、迁移恢复、故障转移编排和有界容量治理中立契约 | `OwnershipStore`、`OwnershipRouter`、`FencedStateStore`、`MigrationStore`、`FailoverCoordinator`、`CapacityBudget`、`CapacityBoundStateStore` | `zero-ownership/src/main/java/group/zn/zero/ownership` | 仅依赖 JDK；禁止绑定 World/Room 或具体数据库、消息队列、监控；内存实现不代表生产分布式一致性 |
 | `zero-world` | Actor-owned 本地 world/shard、实体归属、迁移状态机、不可变查询快照与低基数观测最小切片 | `LocalWorldService`、`World`、`Shard`、`Entity`、`Migration` | `zero-world/src/main/java/group/zn/zero/world` | 仅依赖 `zero-actor`；禁止 RPC、数据库、缓存、网络、执行器和高基数指标；不包含跨进程迁移 |
 
 ## 4. 游戏业务抽象
@@ -241,3 +250,17 @@ mvn -B -ntp -Pquality verify
 `zero-runtime-actor/ActorRuntime.module(config)` 装配显式 Actor 预算，并在 runtime 资源账本登记调度器，使排队消息在执行器关闭前收到失败。
 
 Scheduler 的单次 timer 登记由 `zero-server-starter/.../scheduler/SchedulerTimerRegistration` 管理；`LocalManagedScheduler` 在提交前发布登记，回调按身份移除，避免迟到 future 覆盖后续任务。它仅拥有 timer future，不创建业务线程，也不改变核心 scheduler SPI。
+
+
+## 2026-10-01 可靠性与维护任务入口
+
+| 入口 | 职责与依赖 | 风险边界 |
+| --- | --- | --- |
+| `zero-data/persistence/durable` | `DurablePersistenceService`、`LocalDurableJournal`、`DurableRecord`；依赖中立 Envelope Store、绑定执行器及外部 IO Executor | 本地耐久意图/CAS 恢复；不依赖具体驱动，不承诺多进程 fencing |
+| `zero-runtime-data/DurablePersistenceRuntime` | 按需装配 `zero.data.durable`，新增 `zero-runtime-data -> zero-runtime-bootstrap` 依赖 | 运行时拥有日志/服务，应用拥有目标 Store，关闭顺序必须正确 |
+| `zero-runtime-bootstrap/PeriodicAsyncTask` | 单次在途的周期 IO 维护，依赖 `ZeroRuntimeExecutors` 的受管计时资源 | timer 不运行远程 IO，stop 等待在途任务 |
+| `zero-runtime-redis/ProductionRedisCacheProvider` | 新增 EXECUTORS 依赖，按生命周期重试缓存写回 | 队列有界但非耐久，不能作为主数据提交确认 |
+| `zero-runtime-kafka/ProductionKafkaRpcProvider` | 新增 EXECUTORS 依赖，组合根向 Kafka 时间轮注入 timer | `zero-rpc-kafka` 不反向依赖 bootstrap，Adapter 不关闭外部 timer |
+| `zero-log -> zero-monitor` | 已有同层单向依赖，用于日志指标观测 | monitor 不得反向依赖 log，不将具体中间件带入核心 |
+
+修改入口还包括 World 异步方法、Room 发布视图和 Player 远程 IO 构造器。核心禁止依赖驱动的方向不变；标准能力模型与 Provider 依赖同步。迁移见 [可靠性说明](migrations/20261001-audit-reliability.zh-CN.md)。

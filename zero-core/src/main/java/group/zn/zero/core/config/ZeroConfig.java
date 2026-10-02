@@ -11,6 +11,17 @@ import java.util.Optional;
 public interface ZeroConfig {
 
     /**
+     * 查询已有键的来源；仅与同一快照的值一起使用，不读取环境。
+     * @param key 配置键，不可为空。
+     * @return 来源类别；普通实现和缺失键默认为程序化输入，线程安全性由实现声明。
+     * @throws NullPointerException key 为空时抛出。
+     */
+    default ConfigOrigin origin(final String key) {
+        java.util.Objects.requireNonNull(key, "key");
+        return ConfigOrigin.PROGRAMMATIC;
+    }
+
+    /**
      * 判断配置键是否存在。
      *
      * @param key 配置键；不可为空。

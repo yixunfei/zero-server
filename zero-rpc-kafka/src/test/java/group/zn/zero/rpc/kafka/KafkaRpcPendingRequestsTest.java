@@ -28,9 +28,12 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class KafkaRpcPendingRequestsTest {
+    /** 测试拥有计时器，Adapter 仅拥有任务。 */
+    @org.junit.jupiter.api.extension.RegisterExtension
+    private final KafkaTestTimer timer = new KafkaTestTimer();
     /** 取消立即释放容量，迟到发送失败不能删除复用 ID 的新登记。 */
     @Test void cancellationAndSendFailureAreRegistrationScoped() {
-        try (KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, Duration.ofMillis(5), 8)) {
+        try (KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, Duration.ofMillis(5), 8, timer.executor())) {
             var old = pending.register(request("same", 30_000));
             old.cancel(false);
             assertEquals(0, pending.size());
@@ -48,7 +51,7 @@ class KafkaRpcPendingRequestsTest {
      */
     @Test
     void timeWheelShouldTimeoutPendingRequestAndReleaseCapacity() {
-        try (KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, Duration.ofMillis(5), 8)) {
+        try (KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, Duration.ofMillis(5), 8, timer.executor())) {
             CompletableFuture<RpcResponse> first = pending.register(request("corr-timeout", 30));
 
             waitUntil(first::isDone);
@@ -76,7 +79,7 @@ class KafkaRpcPendingRequestsTest {
                 Duration.ofMillis(5),
                 8,
                 events::add,
-                "kafka")) {
+                "kafka", timer.executor())) {
             CompletableFuture<RpcResponse> first = pending.register(request("corr-observed-timeout", 30));
 
             waitUntil(first::isDone);
@@ -101,7 +104,7 @@ class KafkaRpcPendingRequestsTest {
      */
     @Test
     void completionBeforeTimeoutShouldIgnoreStaleWheelTask() {
-        try (KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, Duration.ofMillis(5), 8)) {
+        try (KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, Duration.ofMillis(5), 8, timer.executor())) {
             CompletableFuture<RpcResponse> first = pending.register(request("corr-complete", 40));
 
             assertTrue(pending.complete(response("corr-complete")));
@@ -123,7 +126,7 @@ class KafkaRpcPendingRequestsTest {
      */
     @Test
     void staleWheelTaskShouldNotTimeoutReusedCorrelationId() {
-        try (KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, Duration.ofMillis(5), 8)) {
+        try (KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, Duration.ofMillis(5), 8, timer.executor())) {
             CompletableFuture<RpcResponse> first = pending.register(request("corr-reuse", 35));
 
             assertTrue(pending.complete(response("corr-reuse")));
@@ -143,7 +146,7 @@ class KafkaRpcPendingRequestsTest {
      */
     @Test
     void closeShouldFailPendingAndRejectNewRegistration() {
-        KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, Duration.ofMillis(5), 8);
+        KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, Duration.ofMillis(5), 8, timer.executor());
         CompletableFuture<RpcResponse> first = pending.register(request("corr-close", 500));
 
         pending.close();

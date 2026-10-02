@@ -42,7 +42,8 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
     private final DataSource dataSource;
 
     /**
-     * 创建 PostgreSQL JDBC-backed 信封存储。
+     * 创建无连接池的 PostgreSQL JDBC-backed 信封存储，适用于测试与低频工具。
+     * 每次操作借用新连接；业务运行应注入受管 DataSource，生产装配已使用 Hikari 池。
      *
      * @param namespace 数据命名空间；不可为空。
      * @param collection 数据集合名称；不可为空。

@@ -33,3 +33,22 @@ Read [BUSINESS_GUIDE.md](BUSINESS_GUIDE.md) and the generated `RuntimeAssembly.j
 Add a service that receives typed capabilities in its constructor. Select or replace providers
 in `RuntimeAssembly`. [COMPONENTS.md](COMPONENTS.md), [NEXT_STEPS.md](NEXT_STEPS.md) and
 `zero-scaffold.json` describe this project's selected dependencies.
+
+## Assembly diagnosis and customization
+
+Run `mvn -q -Dexec.mainClass=__PACKAGE__.RuntimeAssembly exec:java` for a read-only diagnosis.
+This entry point is available for every template and does not start business services or external clients.
+It reports the profile, missing keys, selected providers and schema-declared configuration sources/values.
+Sensitive values are masked; complex values are represented by their type. `productionReady=false`.
+
+`RuntimeAssembly.plan(...)` is strict; `RuntimeAssembly.diagnose(...)` returns a shared diagnosis
+with an optional plan and a sorted missing-key list. Typed diagnostics cover declared schema keys only.
+Use the runtime instance's plan to inspect the configuration actually consumed by that build.
+
+Configuration priority: explicit programmatic/file values > system properties > environment > application defaults
+> schema defaults. Standard environment aliases replace dots/hyphens with underscores and use uppercase.
+`ZeroConfigLoader.loadStandard(defaults)` only queries keys declared in defaults or the file;
+external adapters query their explicitly declared aliases. Invalid higher-priority values fail immediately.
+
+An explicit extension catalog is identified in `zero-scaffold.json` by `catalogId` and `catalogSchemaVersion`.
+Use the same trusted `--catalog` file and selected components for subsequent scaffold `--plan`/`--apply` operations.

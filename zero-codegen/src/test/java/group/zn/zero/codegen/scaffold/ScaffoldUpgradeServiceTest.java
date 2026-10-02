@@ -54,6 +54,27 @@ class ScaffoldUpgradeServiceTest {
     }
 
     @Test
+    void newlyRenderedFileIsAddedAndDoesNotBecomePermanentConflict() throws Exception {
+        Path project = generate("new-rendered-file");
+        ScaffoldCatalog catalog = ScaffoldCatalog.standard();
+        ProjectScaffoldRequest expanded = new ProjectScaffoldRequest(
+                "sample-game", "group.zn.sample.game", project, "0.1.0-SNAPSHOT", catalog.require("local"),
+                Path.of("../templates"), "", List.of("net"), false);
+        ScaffoldUpgradeService service = new ScaffoldUpgradeService();
+
+        ScaffoldUpgradeService.ScaffoldChangePlan plan = service.plan(expanded);
+
+        assertFalse(plan.hasConflicts(), plan.summary());
+        assertTrue(plan.changes().stream().anyMatch(change ->
+                change.status().equals("generator-added")
+                        && change.path().endsWith("SampleGameApplicationServer.java")));
+        service.apply(expanded);
+        assertTrue(Files.isRegularFile(project.resolve(
+                "src/main/java/group/zn/sample/game/SampleGameApplicationServer.java")));
+        assertTrue(service.plan(expanded).changes().isEmpty());
+    }
+
+    @Test
     void explicitMigrationUpgradesLegacyManifestWithoutChangingGeneratedFiles() throws Exception {
         Path project = generate("migration");
         Path manifest = project.resolve("zero-scaffold.json");

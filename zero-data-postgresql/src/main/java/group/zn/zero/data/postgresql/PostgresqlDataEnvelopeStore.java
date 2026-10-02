@@ -59,6 +59,11 @@ public final class PostgresqlDataEnvelopeStore implements ZeroDataEnvelopeStore 
     @Override
     public synchronized void save(final ZeroDataEnvelope envelope) {
         PostgresqlDataRow row = PostgresqlDataRow.fromEnvelope(envelope);
+        PostgresqlDataRow previous = rows.get(row.id());
+        if (previous != null && previous.version() > row.version()) {
+            throw group.zn.zero.core.error.ZeroException.of(
+                    group.zn.zero.data.error.DataErrorCode.VERSION_CONFLICT, "snapshot version regressed", null);
+        }
         rows.put(row.id(), row);
     }
 

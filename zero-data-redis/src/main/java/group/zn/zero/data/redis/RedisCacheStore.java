@@ -14,6 +14,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executor;
 import java.util.function.Function;
 import redis.clients.jedis.RedisClient;
 
@@ -104,6 +105,9 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
      */
     private final RedisCacheEnvelopeCodec envelopeCodec;
 
+    /** Redis 同步驱动的受管执行域。 */
+    private final Executor ioExecutor;
+
     /**
      * 创建 Redis 二级缓存存储。
      *
@@ -125,7 +129,8 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
                 new DefaultRedisCacheKeyStrategy(),
                 CacheKeyCodecs.defaults(),
                 valueCodec,
-                new RedisCacheEnvelopeCodec());
+                new RedisCacheEnvelopeCodec(),
+                Runnable::run);
     }
 
     /**
@@ -151,7 +156,8 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
                 new DefaultRedisCacheKeyStrategy(),
                 keyCodec,
                 valueCodec,
-                new RedisCacheEnvelopeCodec());
+                new RedisCacheEnvelopeCodec(),
+                Runnable::run);
     }
 
     /**
@@ -183,7 +189,31 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
                 keyStrategy,
                 Objects.requireNonNull(keyCodec, "keyCodec")::encode,
                 valueCodec,
-                envelopeCodec);
+                envelopeCodec,
+                Runnable::run);
+    }
+
+    /** 使用指定受管执行域创建 Redis cache store。 */
+    public RedisCacheStore(
+            final RedisClient client,
+            final String namespace,
+            final String cacheName,
+            final int schemaVersion,
+            final RedisCacheKeyStrategy keyStrategy,
+            final CacheKeyCodec<K> keyCodec,
+            final CacheValueCodec<V> valueCodec,
+            final RedisCacheEnvelopeCodec envelopeCodec,
+            final Executor ioExecutor) {
+        this(
+                client,
+                namespace,
+                cacheName,
+                schemaVersion,
+                keyStrategy,
+                Objects.requireNonNull(keyCodec, "keyCodec")::encode,
+                valueCodec,
+                envelopeCodec,
+                ioExecutor);
     }
 
     /**
@@ -207,6 +237,29 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
             final Function<K, String> keyEncoder,
             final CacheValueCodec<V> valueCodec,
             final RedisCacheEnvelopeCodec envelopeCodec) {
+        this(
+                client,
+                namespace,
+                cacheName,
+                schemaVersion,
+                keyStrategy,
+                keyEncoder,
+                valueCodec,
+                envelopeCodec,
+                Runnable::run);
+    }
+
+    /** 使用指定受管执行域创建 Redis cache store。 */
+    public RedisCacheStore(
+            final RedisClient client,
+            final String namespace,
+            final String cacheName,
+            final int schemaVersion,
+            final RedisCacheKeyStrategy keyStrategy,
+            final Function<K, String> keyEncoder,
+            final CacheValueCodec<V> valueCodec,
+            final RedisCacheEnvelopeCodec envelopeCodec,
+            final Executor ioExecutor) {
         this.client = Objects.requireNonNull(client, "client");
         this.namespace = requireText(namespace, "namespace");
         this.cacheName = requireText(cacheName, "cacheName");
@@ -218,6 +271,7 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
         this.keyEncoder = Objects.requireNonNull(keyEncoder, "keyEncoder");
         this.valueCodec = Objects.requireNonNull(valueCodec, "valueCodec");
         this.envelopeCodec = Objects.requireNonNull(envelopeCodec, "envelopeCodec");
+        this.ioExecutor = Objects.requireNonNull(ioExecutor, "ioExecutor");
     }
 
     /**
@@ -228,16 +282,15 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
      */
     @Override
     public CompletionStage<Optional<CacheStoreEntry<V>>> get(final K key) {
-        try {
-            byte[] bytes = client.get(bytes(valueKey(key)));
-            if (bytes == null) {
-                return CompletableFuture.completedFuture(Optional.empty());
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                byte[] bytes = client.get(bytes(valueKey(key)));
+                if (bytes == null) return Optional.empty();
+                return Optional.of(toEntry(envelopeCodec.decode(bytes)));
+            } catch (RuntimeException ex) {
+                throw wrap(CacheErrorCode.READ_FAILED, "redis cache read failed", ex);
             }
-            RedisCacheEnvelope envelope = envelopeCodec.decode(bytes);
-            return CompletableFuture.completedFuture(Optional.of(toEntry(envelope)));
-        } catch (RuntimeException ex) {
-            return CompletableFuture.failedFuture(wrap(CacheErrorCode.READ_FAILED, "redis cache read failed", ex));
-        }
+        }, ioExecutor);
     }
 
     /**
@@ -249,13 +302,14 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
      */
     @Override
     public CompletionStage<Void> put(final K key, final CacheStoreEntry<V> entry) {
-        try {
-            RedisCacheEnvelope envelope = toEnvelope(entry);
-            executeWriteScript(PUT_SCRIPT, key, entry, envelope);
-            return CompletableFuture.completedFuture(null);
-        } catch (RuntimeException ex) {
-            return CompletableFuture.failedFuture(wrap(CacheErrorCode.WRITE_FAILED, "redis cache write failed", ex));
-        }
+        return CompletableFuture.runAsync(() -> {
+            try {
+                RedisCacheEnvelope envelope = toEnvelope(entry);
+                executeWriteScript(PUT_SCRIPT, key, entry, envelope);
+            } catch (RuntimeException ex) {
+                throw wrap(CacheErrorCode.WRITE_FAILED, "redis cache write failed", ex);
+            }
+        }, ioExecutor);
     }
 
     /**
@@ -267,13 +321,15 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
      */
     @Override
     public CompletionStage<Boolean> putIfVersion(final K key, final CacheStoreEntry<V> entry) {
-        try {
-            RedisCacheEnvelope envelope = toEnvelope(entry);
-            Object result = executeWriteScript(PUT_IF_VERSION_SCRIPT, key, entry, envelope);
-            return CompletableFuture.completedFuture(result instanceof Number number && number.longValue() == 1L);
-        } catch (RuntimeException ex) {
-            return CompletableFuture.failedFuture(wrap(CacheErrorCode.WRITE_FAILED, "redis cache conditional write failed", ex));
-        }
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                RedisCacheEnvelope envelope = toEnvelope(entry);
+                Object result = executeWriteScript(PUT_IF_VERSION_SCRIPT, key, entry, envelope);
+                return result instanceof Number number && number.longValue() == 1L;
+            } catch (RuntimeException ex) {
+                throw wrap(CacheErrorCode.WRITE_FAILED, "redis cache conditional write failed", ex);
+            }
+        }, ioExecutor);
     }
 
     /**
@@ -284,12 +340,13 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
      */
     @Override
     public CompletionStage<Void> invalidate(final K key) {
-        try {
-            client.del(bytes(valueKey(key)), bytes(versionKey(key)));
-            return CompletableFuture.completedFuture(null);
-        } catch (RuntimeException ex) {
-            return CompletableFuture.failedFuture(wrap(CacheErrorCode.INVALIDATE_FAILED, "redis cache invalidate failed", ex));
-        }
+        return CompletableFuture.runAsync(() -> {
+            try {
+                client.del(bytes(valueKey(key)), bytes(versionKey(key)));
+            } catch (RuntimeException ex) {
+                throw wrap(CacheErrorCode.INVALIDATE_FAILED, "redis cache invalidate failed", ex);
+            }
+        }, ioExecutor);
     }
 
     /**
@@ -304,15 +361,17 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
         if (entityVersion < 0L) {
             throw new IllegalArgumentException("entityVersion must be non-negative");
         }
-        try {
-            Object result = client.eval(
-                    INVALIDATE_IF_VERSION_SCRIPT,
-                    List.of(bytes(valueKey(key)), bytes(versionKey(key))),
-                    List.of(bytes(String.valueOf(entityVersion))));
-            return CompletableFuture.completedFuture(result instanceof Number number && number.longValue() == 1L);
-        } catch (RuntimeException ex) {
-            return CompletableFuture.failedFuture(wrap(CacheErrorCode.INVALIDATE_FAILED, "redis cache conditional invalidate failed", ex));
-        }
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                Object result = client.eval(
+                        INVALIDATE_IF_VERSION_SCRIPT,
+                        List.of(bytes(valueKey(key)), bytes(versionKey(key))),
+                        List.of(bytes(String.valueOf(entityVersion))));
+                return result instanceof Number number && number.longValue() == 1L;
+            } catch (RuntimeException ex) {
+                throw wrap(CacheErrorCode.INVALIDATE_FAILED, "redis cache conditional invalidate failed", ex);
+            }
+        }, ioExecutor);
     }
 
     /**

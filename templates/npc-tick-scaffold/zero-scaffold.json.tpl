@@ -1,5 +1,7 @@
 {
   "schemaVersion": 1,
+  "catalogSchemaVersion": 1,
+  "catalogId": __CATALOG_ID_JSON__,
   "ownershipSchemaVersion": 1,
   "files": [
 __OWNERSHIP_FILES__

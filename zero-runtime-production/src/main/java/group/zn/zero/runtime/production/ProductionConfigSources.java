@@ -4,6 +4,7 @@ import group.zn.zero.runtime.api.ComponentId;
 import group.zn.zero.runtime.config.ConfigSource;
 import group.zn.zero.runtime.config.ConfigSourceKind;
 import group.zn.zero.runtime.config.MapConfigSource;
+import group.zn.zero.runtime.config.ConfigSourceOrigin;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -17,7 +18,7 @@ public final class ProductionConfigSources {
     private static final List<ConfigSourceKind> SOURCE_ORDER = List.of(
             ConfigSourceKind.PROGRAMMATIC,
             ConfigSourceKind.SYSTEM_PROPERTY,
-            ConfigSourceKind.ENVIRONMENT);
+            ConfigSourceKind.ENVIRONMENT, ConfigSourceKind.FILE, ConfigSourceKind.DEFAULT);
 
     private ProductionConfigSources() {
     }
@@ -34,10 +35,11 @@ public final class ProductionConfigSources {
         for (ConfigSourceKind kind : SOURCE_ORDER) {
             Map<String, String> values = valuesByKind.get(kind);
             if (values != null && !values.isEmpty()) {
-                sources.add(new MapConfigSource(
-                        kind,
-                        checkedOwner.value() + '.' + sourceId(kind),
-                        values));
+                ConfigSource source = new MapConfigSource(
+                        kind == ConfigSourceKind.FILE || kind == ConfigSourceKind.DEFAULT
+                                ? ConfigSourceKind.PROGRAMMATIC : kind,
+                        checkedOwner.value() + '.' + sourceId(kind), values);
+                sources.add(new LocatedSource(source, kind));
             }
         }
         return List.copyOf(sources);
@@ -63,6 +65,8 @@ public final class ProductionConfigSources {
             case "ZeroConfig" -> ConfigSourceKind.PROGRAMMATIC;
             case "systemProperty" -> ConfigSourceKind.SYSTEM_PROPERTY;
             case "environment" -> ConfigSourceKind.ENVIRONMENT;
+            case "file" -> ConfigSourceKind.FILE;
+            case "default" -> ConfigSourceKind.DEFAULT;
             default -> throw new IllegalArgumentException("unsupported production config source type");
         };
     }
@@ -72,7 +76,32 @@ public final class ProductionConfigSources {
             case PROGRAMMATIC -> "programmatic";
             case SYSTEM_PROPERTY -> "system-property";
             case ENVIRONMENT -> "environment";
+            case FILE -> "file";
+            case DEFAULT -> "application-default";
             default -> throw new IllegalArgumentException("unsupported production config source kind");
         };
+    }
+
+    /** 保留经 ZeroConfig 桥接的文件/默认值归因；只读且线程安全。 */
+    private record LocatedSource(ConfigSource delegate, ConfigSourceKind original) implements ConfigSource {
+        @Override
+        public ConfigSourceKind kind() {
+            return delegate.kind();
+        }
+
+        @Override
+        public String id() {
+            return delegate.id();
+        }
+
+        @Override
+        public java.util.Optional<String> value(final String alias) {
+            return delegate.value(alias);
+        }
+
+        @Override
+        public ConfigSourceOrigin origin(final String alias) {
+            return new ConfigSourceOrigin(original, id(), alias);
+        }
     }
 }

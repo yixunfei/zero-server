@@ -6,6 +6,7 @@ import group.zn.zero.runtime.api.ComponentKey;
 import group.zn.zero.runtime.api.ComponentSetKey;
 import group.zn.zero.runtime.api.GameRuntime;
 import group.zn.zero.runtime.config.ConfigSource;
+import group.zn.zero.runtime.config.RuntimeConfigDiagnostics;
 import group.zn.zero.runtime.diagnostics.RuntimeAssemblyException;
 import group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan;
 import group.zn.zero.runtime.diagnostics.RuntimeErrorCode;
@@ -144,6 +145,17 @@ public final class RuntimeAssembler {
          */
         public RuntimeAssemblyPlan diagnose() {
             return planned().plan();
+        }
+
+        /**
+         * 解析并返回有效配置的安全视图；不创建 provider 或资源。
+         *
+         * <p>不消耗 Builder；Builder 非线程安全，配置源必须只读且可重复解析。</p>
+         * @return 来源、状态和脱敏有效值组成的不可变、有序、可为空且线程安全的快照。
+         * @throws RuntimeAssemblyException 组件规划或配置校验失败时抛出安全异常。
+         */
+        public RuntimeConfigDiagnostics diagnoseConfiguration() {
+            return planned().config().diagnostics();
         }
 
         public GameRuntime build() {

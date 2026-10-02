@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import group.zn.zero.cache.CacheErrorCode;
 import group.zn.zero.core.error.ZeroException;
 import org.junit.jupiter.api.Test;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 
 /**
  * Redis 缓存信封 codec 测试。
@@ -70,6 +72,27 @@ class RedisCacheEnvelopeCodecTest {
         RedisCacheEnvelopeCodec codec = new RedisCacheEnvelopeCodec();
 
         ZeroException exception = assertThrows(ZeroException.class, () -> codec.decode(new byte[] {1, 2, 3}));
+
+        assertEquals(CacheErrorCode.DESERIALIZE_FAILED, exception.errorCode());
+    }
+
+    /** 声明超大 payload 时必须在分配前拒绝。 */
+    @Test
+    void envelopeCodecShouldRejectOversizedPayloadLength() throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        DataOutputStream output = new DataOutputStream(bytes);
+        output.writeLong(1L);
+        output.writeLong(1L);
+        output.writeInt(1);
+        output.writeUTF("string");
+        output.writeLong(1L);
+        output.writeLong(2L);
+        output.writeBoolean(false);
+        output.writeInt(16 * 1024 * 1024 + 1);
+        output.flush();
+
+        ZeroException exception = assertThrows(ZeroException.class,
+                () -> new RedisCacheEnvelopeCodec().decode(bytes.toByteArray()));
 
         assertEquals(CacheErrorCode.DESERIALIZE_FAILED, exception.errorCode());
     }

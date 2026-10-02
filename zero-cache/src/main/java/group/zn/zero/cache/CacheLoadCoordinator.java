@@ -163,7 +163,7 @@ public final class CacheLoadCoordinator<K, V> {
                     boundedLoad.complete(value);
                 }
             });
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             boundedLoad.completeExceptionally(ex);
         }
         return created;

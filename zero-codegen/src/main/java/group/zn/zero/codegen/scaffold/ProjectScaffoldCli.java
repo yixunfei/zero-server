@@ -33,11 +33,19 @@ public final class ProjectScaffoldCli {
         try {
             ScaffoldCatalog catalog = ScaffoldCatalog.standard();
             ScaffoldSelector selector = new ScaffoldSelector(catalog);
+            ScaffoldComponents components = arguments.containsKey("--catalog")
+                    ? ScaffoldCatalogFile.read(Path.of(arguments.get("--catalog")))
+                    : new ScaffoldComponents(catalog.capabilityModel());
+            if (arguments.containsKey("--listcomponents")) {
+                System.out.println("catalog=" + components.catalogId() + "|schemaVersion=" + ScaffoldCatalogFile.SCHEMA_VERSION);
+                components.componentIds().forEach(System.out::println);
+                return;
+            }
             if (isCatalogCommand(arguments)) {
                 runCatalog(arguments, catalog, selector);
                 return;
             }
-            runGeneration(arguments, catalog, selector);
+            runGeneration(arguments, catalog, selector, components);
         } catch (ScaffoldUpgradeService.ScaffoldUpgradeException exception) {
             fail(exception.code(), exception.getMessage(), 3);
         } catch (IllegalArgumentException | IllegalStateException exception) {
@@ -64,14 +72,14 @@ public final class ProjectScaffoldCli {
     }
 
     private static void runGeneration(final Map<String, String> arguments,
-            final ScaffoldCatalog catalog, final ScaffoldSelector selector) throws IOException {
+            final ScaffoldCatalog catalog, final ScaffoldSelector selector, final ScaffoldComponents components) throws IOException {
         Options options = Options.parse(arguments);
         ScaffoldTemplate template = options.fromKeywords().isBlank()
                 ? catalog.require(options.template()) : selector.select(options.fromKeywords());
         ProjectScaffoldRequest request = new ProjectScaffoldRequest(options.projectName(), options.packageName(),
                 options.outputDirectory(), options.zeroVersion(), template, options.templateRoot(),
                 options.fromKeywords(), options.components(), options.force());
-        ScaffoldUpgradeService upgrade = new ScaffoldUpgradeService();
+        ScaffoldUpgradeService upgrade = new ScaffoldUpgradeService(components);
         if (options.operation().equals("plan") || options.operation().equals("diff")) {
             ScaffoldUpgradeService.ScaffoldChangePlan plan = upgrade.plan(request);
             printPlan(plan, options.operation().equals("diff"));
@@ -102,8 +110,8 @@ public final class ProjectScaffoldCli {
             System.out.println("zero-scaffold-abort=ok|transaction=" + id);
             return;
         }
-        ProjectScaffoldResult result = new ProjectScaffoldGenerator(catalog.capabilityModel()).generate(request);
-        printResult(request, result);
+        ProjectScaffoldResult result = new ProjectScaffoldGenerator(components).generate(request);
+        printResult(request, result, components);
     }
 
     private static void printPlan(final ScaffoldUpgradeService.ScaffoldChangePlan plan, final boolean diff) {
@@ -128,7 +136,7 @@ public final class ProjectScaffoldCli {
 
     private static void printResult(
             final ProjectScaffoldRequest request,
-            final ProjectScaffoldResult result) {
+            final ProjectScaffoldResult result, final ScaffoldComponents components) {
         Path target = result.outputDirectory();
         System.out.println("Created zeroServer local game scaffold:");
         System.out.println("  path: " + target);
@@ -138,14 +146,15 @@ public final class ProjectScaffoldCli {
         }
         System.out.println("  project: " + result.projectName());
         System.out.println("  package: " + request.packageName());
-        var selection = new ScaffoldComponents(ScaffoldCatalog.standard().capabilityModel())
-                .resolve(request.template().capabilityIds(), request.components());
+        var selection = components.resolve(request.template().capabilityIds(), request.components());
         System.out.println("  runtimeProfile: " + (selection.external() ? "external-test" : "local"));
         System.out.println("  components: " + String.join(", ", selection.components()));
         System.out.println("  runtimeCapabilities: " + selection.capabilities().size());
         System.out.println("Next:");
         System.out.println("  mvn -q -f \"" + target.resolve("pom.xml") + "\" clean test");
         System.out.println("  mvn -q -f \"" + target.resolve("pom.xml") + "\" exec:java");
+        System.out.println("  mvn -q -f \"" + target.resolve("pom.xml") + "\" -Dexec.mainClass="
+                + request.packageName() + ".RuntimeAssembly exec:java  # diagnose without starting services");
         System.out.println("  read \"" + target.resolve("BUSINESS_GUIDE.md") + "\" for business editing points");
         System.out.println("  read \"" + target.resolve("COMPONENTS.md") + "\" for component boundaries");
         System.out.println("  read \"" + target.resolve("NEXT_STEPS.md") + "\" for production promotion gaps");
@@ -225,6 +234,8 @@ public final class ProjectScaffoldCli {
         System.out.println("  --template <template>     Scaffold template. Default: local");
         System.out.println("  --components <ids>       Additional components, comma-separated: "
                 + String.join(",", ScaffoldComponents.supported()));
+        System.out.println("  --catalog <file>          Explicit trusted catalog JSON (schemaVersion=1); no classpath scanning");
+        System.out.println("  --listComponents          List IDs from the selected catalog");
         System.out.println("  --fromKeywords <words>    Select scaffold template from business keywords");
         System.out.println("  --force                   兼容参数；用户修改冲突时仍拒绝覆盖");
         System.out.println("  --plan                    只计算升级计划，不写文件（默认安全操作）");

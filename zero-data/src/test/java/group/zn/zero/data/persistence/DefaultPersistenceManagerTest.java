@@ -74,6 +74,7 @@ class DefaultPersistenceManagerTest {
         assertEquals(1, manager.statistics().dirtyCount());
 
         repository.fail(false);
+        manager.retryFailed("player", "player-2");
         manager.markDirty("player", "player-2", DataThreadBinding.player("player-2"),
                 () -> new PlayerArchive("player-2", 0L, "retried"));
         PersistenceFlushResult retried = manager.flushNow().toCompletableFuture().join();

@@ -83,6 +83,13 @@ public final class RedisDistributedCacheService<K, V> implements CacheService<K,
                 cacheLoadedValueOnBackendFailure);
     }
 
+    /** 重试待回填缓存；须在受管 IO 执行域调用。
+     * @param maxAttempts 单批预算。 @return 成功数；线程安全，不创建线程。 */
+    public CompletionStage<Integer> retryWriteBacks(final int maxAttempts) { return delegate.retryWriteBacks(maxAttempts); }
+
+    /** @return 超预算拒绝次数；线程安全。 */
+    public long writeBackRejectedCount() { return delegate.writeBackRejectedCount(); }
+
     /**
      * 返回后端名称。
      *

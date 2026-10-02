@@ -35,8 +35,12 @@ class LayeredReportAuditTest {
         private final CompletableFuture<Optional<CacheStoreEntry<String>>> read = new CompletableFuture<>();
         /** 最后一次写入。 */
         private CacheStoreEntry<String> written;
+        /** 只有首个读取模拟迟到响应；写入的版本观察使用独立查询。 */
+        private final java.util.concurrent.atomic.AtomicInteger reads = new java.util.concurrent.atomic.AtomicInteger();
         /** @return 可控读取结果。 */
-        @Override public CompletionStage<Optional<CacheStoreEntry<String>>> get(String key) { return read; }
+        @Override public CompletionStage<Optional<CacheStoreEntry<String>>> get(String key) {
+            return reads.getAndIncrement() == 0 ? read : CompletableFuture.completedFuture(Optional.empty());
+        }
         /** @return 写入完成信号。 */
         @Override public CompletionStage<Void> put(String key, CacheStoreEntry<String> entry) { written = entry; return CompletableFuture.completedFuture(null); }
         /** @return 条件写入完成信号。 */

@@ -93,9 +93,9 @@ public final class __APP_CLASS__ {
     public static DemoResult runDemo() {
         InMemoryLogSink terminalLogSink = new InMemoryLogSink();
         GameRuntime runtime = RuntimeAssembly.create(
-                ZeroConfigLoader.loadStandard(Map.of(
+                ZeroConfigLoader.loadStandard(Map.ofEntries(
                         __CONFIG_DEFAULTS__,
-                        ZeroRuntimeConfigKeys.ZERO_NAME, APP_NAME)),
+                        Map.entry(ZeroRuntimeConfigKeys.ZERO_NAME, APP_NAME))),
                 terminalLogSink);
         MonitorRuntime monitorRuntime = runtime.require(MonitorRuntimeComponent.MONITOR_RUNTIME);
 

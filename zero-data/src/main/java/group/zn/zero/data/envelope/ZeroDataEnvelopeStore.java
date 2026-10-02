@@ -31,7 +31,8 @@ public interface ZeroDataEnvelopeStore {
     List<ZeroDataEnvelope> findAll();
 
     /**
-     * 保存信封。
+     * 原子保存快照；允许对象不存在、同版重放或更高版本，拒绝覆盖更高版本。
+     * 同版内容可替换；业务乐观锁必须使用 saveIfVersion，不能以本方法代替 CAS。
      *
      * @param envelope 信封；不可为空。
      * @throws group.zn.zero.core.error.ZeroException 保存失败时抛出，必须绑定 ErrorCode。

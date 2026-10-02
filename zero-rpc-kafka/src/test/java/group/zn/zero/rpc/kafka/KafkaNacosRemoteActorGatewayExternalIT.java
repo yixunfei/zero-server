@@ -53,6 +53,9 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 public class KafkaNacosRemoteActorGatewayExternalIT {
+    /** 测试拥有计时器，Adapter 仅拥有任务。 */
+    @org.junit.jupiter.api.extension.RegisterExtension
+    private final KafkaTestTimer timer = new KafkaTestTimer();
 
     /**
      * external-tests profile 标记。
@@ -155,7 +158,7 @@ public class KafkaNacosRemoteActorGatewayExternalIT {
                     "actor-caller-" + suffix,
                     "actor-caller-group-" + suffix,
                     topicPrefix(suffix),
-                    replyTopic));
+                    replyTopic), timer.executor());
             discovery = nacos(nacosServerAddr);
             discovery.start();
             ServiceDiscoveryRpcServiceResolver serviceResolver = new ServiceDiscoveryRpcServiceResolver(discovery);
@@ -204,6 +207,7 @@ public class KafkaNacosRemoteActorGatewayExternalIT {
         Files.createDirectories(workDir);
         String serviceName = serviceName(suffix);
         String instanceId = "actor-provider-" + suffix;
+        var providerTimer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
         String consumerGroup = "actor-provider-group-" + suffix;
         String requestTopic = new KafkaRpcTopicResolver(topicPrefix(suffix)).requestTopic(serviceName);
         KafkaRpcAdapter provider = null;
@@ -222,7 +226,7 @@ public class KafkaNacosRemoteActorGatewayExternalIT {
                     "actor-provider-" + suffix,
                     consumerGroup,
                     topicPrefix(suffix),
-                    "reply-provider-" + suffix));
+                    "reply-provider-" + suffix), providerTimer);
             provider.securityMetadataVerifier(SecurityMetadataAssertion.verifier(securityAssertion()));
             registration = new RpcRemoteActorReceiver(provider, scheduler, messageCodec)
                     .register(serviceName, RpcRemoteActorGateway.DEFAULT_METHOD_NAME, requestTopic, consumerGroup);
@@ -263,6 +267,7 @@ public class KafkaNacosRemoteActorGatewayExternalIT {
             if (provider != null) {
                 provider.close();
             }
+            providerTimer.shutdownNow();
         }
     }
 

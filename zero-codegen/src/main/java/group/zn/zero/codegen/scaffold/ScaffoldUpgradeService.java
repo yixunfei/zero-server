@@ -16,6 +16,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -55,6 +57,8 @@ public final class ScaffoldUpgradeService {
     private static final String STATUS_CONFLICT = "conflict";
     /** 受控文件在新模板中缺失。 */
     private static final String STATUS_MISSING = "missing";
+    /** 新模板新增的受控文件。 */
+    private static final String STATUS_ADDED = "generator-added";
 
     /** 文件替换实现；默认原子移动，测试可注入失败以验证恢复。 */
     @FunctionalInterface
@@ -69,7 +73,10 @@ public final class ScaffoldUpgradeService {
         void replace(Path source, Path destination) throws IOException;
     }
 
+    /** 文件提交策略。 */
     private final FileReplacer replacer;
+    /** 与首次生成相同的显式组件目录。 */
+    private final ScaffoldComponents components;
 
     /** 使用默认原子替换实现创建服务。 */
     public ScaffoldUpgradeService() {
@@ -82,6 +89,21 @@ public final class ScaffoldUpgradeService {
      * @param replacer 文件替换实现。
      */
     ScaffoldUpgradeService(final FileReplacer replacer) {
+        this(new ScaffoldComponents(ScaffoldCatalog.standard().capabilityModel()), replacer);
+    }
+
+
+    /**
+     * 使用显式目录执行生成计划及升级；不创建资源，实例可并行读取。
+     * @param components 与初次生成相同的目录，不可为空。
+     * @throws NullPointerException 目录为空时抛出。
+     */
+    public ScaffoldUpgradeService(final ScaffoldComponents components) {
+        this(components, ScaffoldUpgradeService::atomicReplace);
+    }
+
+    private ScaffoldUpgradeService(final ScaffoldComponents components, final FileReplacer replacer) {
+        this.components = Objects.requireNonNull(components, "components");
         this.replacer = Objects.requireNonNull(replacer, "replacer");
     }
 
@@ -104,10 +126,16 @@ public final class ScaffoldUpgradeService {
             return ScaffoldChangePlan.migrationRequired(
                     manifest.migrationReason().orElse("ownership manifest 不可用"));
         }
+        var metadata = com.google.gson.JsonParser.parseString(Files.readString(
+                target.resolve(ScaffoldOwnershipManifest.PATH), StandardCharsets.UTF_8)).getAsJsonObject();
+        if (metadata.has("catalogId") && !components.catalogId().equals(metadata.get("catalogId").getAsString())) {
+            throw new ScaffoldUpgradeException("SCAFFOLD-CATALOG-MISMATCH",
+                    "升级必须显式传入初次生成的组件目录；请检查 --catalog");
+        }
         Path scratch = Files.createTempDirectory("zero-scaffold-plan-");
         try {
             Path rendered = scratch.resolve("rendered");
-            new ProjectScaffoldGenerator(ScaffoldCatalog.standard().capabilityModel())
+            new ProjectScaffoldGenerator(components)
                     .generate(copyTo(request, rendered));
             return compare(target, rendered, manifest);
         } finally {
@@ -277,6 +305,7 @@ public final class ScaffoldUpgradeService {
         Map<String, String> contents = new LinkedHashMap<>();
         List<ScaffoldChangePlan.Change> changes = new ArrayList<>();
         List<String> conflicts = new ArrayList<>();
+        Set<String> manifestPaths = new HashSet<>(manifest.files().keySet());
         for (ScaffoldOwnershipManifest.OwnedFile entry : manifest.files().values()) {
             String relative = entry.path();
             if (relative.equals(ScaffoldOwnershipManifest.PATH)) {
@@ -304,6 +333,26 @@ public final class ScaffoldUpgradeService {
             } else {
                 conflicts.add(relative);
                 changes.add(new ScaffoldChangePlan.Change(relative, STATUS_CONFLICT, entry.sha256(), targetHash));
+            }
+        }
+        try (var stream = Files.walk(rendered)) {
+            for (Path file : stream.filter(Files::isRegularFile).toList()) {
+                String relative = rendered.relativize(file).toString().replace('\\', '/');
+                if (relative.equals(ScaffoldOwnershipManifest.PATH) || manifestPaths.contains(relative)) {
+                    continue;
+                }
+                String content = Files.readString(file, StandardCharsets.UTF_8);
+                String targetHash = ScaffoldOwnershipManifest.hashContent(content);
+                Path current = target.resolve(relative);
+                if (!Files.isRegularFile(current)) {
+                    contents.put(relative, content);
+                    changes.add(new ScaffoldChangePlan.Change(relative, STATUS_ADDED, "", targetHash));
+                } else if (ScaffoldOwnershipManifest.hashFile(current).equals(targetHash)) {
+                    changes.add(new ScaffoldChangePlan.Change(relative, STATUS_UNCHANGED, "", targetHash));
+                } else {
+                    conflicts.add(relative);
+                    changes.add(new ScaffoldChangePlan.Change(relative, STATUS_CONFLICT, "", targetHash));
+                }
             }
         }
         Path generatedManifest = rendered.resolve(ScaffoldOwnershipManifest.PATH);
@@ -505,7 +554,7 @@ public final class ScaffoldUpgradeService {
         public List<String> writePaths() {
             List<String> paths = new ArrayList<>();
             for (Change change : changes) {
-            if (change.status().equals(STATUS_CHANGED)) {
+                if (change.status().equals(STATUS_CHANGED) || change.status().equals(STATUS_ADDED)) {
                     paths.add(change.path());
                 }
             }
@@ -517,7 +566,8 @@ public final class ScaffoldUpgradeService {
 
         /** @return 一行式摘要，供 CLI 与证据记录使用。 */
         public String summary() {
-            long changed = changes.stream().filter(change -> change.status().equals(STATUS_CHANGED)).count();
+            long changed = changes.stream().filter(change -> change.status().equals(STATUS_CHANGED)
+                    || change.status().equals(STATUS_ADDED)).count();
             long conflicts = changes.stream().filter(change -> change.status().equals(STATUS_CONFLICT)).count();
             return "changes=" + changed + "|conflicts=" + conflicts;
         }

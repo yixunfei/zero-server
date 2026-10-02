@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "example.greeting.v1",
+  "capabilities": [
+    {
+      "id": "sample.greeting",
+      "cardinality": "SINGLE",
+      "profiles": ["local", "external-test"],
+      "artifacts": [{"groupId": "group.zn.zero", "artifactId": "zero-runtime"}]
+    }
+  ],
+  "providers": [
+    {
+      "id": "application.greeting",
+      "provides": ["sample.greeting"],
+      "profiles": ["local", "external-test"]
+    }
+  ],
+  "components": [
+    {
+      "id": "greeting",
+      "providers": ["application.greeting"],
+      "installExpression": "group.zn.zero.runtime.assembly.RuntimeModule.of(\"application.greeting\", java.util.List.of(group.zn.zero.runtime.spi.RuntimeProviders.value(group.zn.zero.runtime.api.ComponentId.of(\"application.greeting\"), group.zn.zero.runtime.api.ComponentKey.single(\"sample.greeting\", String.class), \"hello\", group.zn.zero.runtime.spi.ComponentKind.BUSINESS)), group.zn.zero.runtime.api.ComponentKey.single(\"sample.greeting\", String.class))"
+    }
+  ]
+}

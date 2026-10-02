@@ -46,6 +46,9 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class KafkaRpcResourceSafetyTest {
+    /** 测试拥有计时器，Adapter 仅拥有任务。 */
+    @org.junit.jupiter.api.extension.RegisterExtension
+    private final KafkaTestTimer timer = new KafkaTestTimer();
 
     /** 测试中的敏感 broker 标记。 */
     private static final String BOOTSTRAP_SECRET = "broker-secret.example:19092";
@@ -108,7 +111,7 @@ class KafkaRpcResourceSafetyTest {
         ConstructionFailingGateway gateway = new ConstructionFailingGateway();
 
         KafkaRpcResourceException failure = assertThrows(KafkaRpcResourceException.class,
-                () -> new KafkaRpcAdapter(settings(Duration.ofMillis(100), Map.of(), Map.of()), gateway));
+                () -> new KafkaRpcAdapter(settings(Duration.ofMillis(100), Map.of(), Map.of()), gateway, timer.executor()));
 
         assertEquals("subscribe kafka rpc reply topic failed", failure.getMessage());
         assertEquals(1, gateway.unsubscribeCount());
@@ -128,7 +131,7 @@ class KafkaRpcResourceSafetyTest {
         ConstructionFailingGateway gateway = new ConstructionFailingGateway(true);
 
         KafkaRpcResourceException failure = assertThrows(KafkaRpcResourceException.class,
-                () -> new KafkaRpcAdapter(settings(Duration.ofMillis(100), Map.of(), Map.of()), gateway));
+                () -> new KafkaRpcAdapter(settings(Duration.ofMillis(100), Map.of(), Map.of()), gateway, timer.executor()));
 
         assertEquals("subscribe kafka rpc reply topic failed", failure.getMessage());
         assertEquals(1, gateway.unsubscribeCount());
@@ -147,7 +150,7 @@ class KafkaRpcResourceSafetyTest {
         CloseFailingGateway gateway = new CloseFailingGateway();
         KafkaRpcAdapter adapter = new KafkaRpcAdapter(
                 settings(Duration.ofMillis(100), Map.of(), Map.of()),
-                gateway);
+                gateway, timer.executor());
         adapter.register("service-one", "method", "topic-one", "group-one",
                 request -> CompletableFuture.completedFuture(null));
         adapter.register("service-two", "method", "topic-two", "group-two",
@@ -173,7 +176,7 @@ class KafkaRpcResourceSafetyTest {
         CloseFailingGateway gateway = new CloseFailingGateway(true);
         KafkaRpcAdapter adapter = new KafkaRpcAdapter(
                 settings(Duration.ofMillis(100), Map.of(), Map.of()),
-                gateway);
+                gateway, timer.executor());
         adapter.register("service-one", "method", "topic-one", "group-one",
                 request -> CompletableFuture.completedFuture(null));
         adapter.register("service-two", "method", "topic-two", "group-two",
@@ -202,7 +205,7 @@ class KafkaRpcResourceSafetyTest {
         ReplayFailingGateway gateway = new ReplayFailingGateway(1, 1);
         KafkaRpcAdapter adapter = new KafkaRpcAdapter(
                 settings(Duration.ofMillis(100), Map.of(), Map.of()),
-                gateway);
+                gateway, timer.executor());
 
         KafkaRpcResourceException failure = assertThrows(KafkaRpcResourceException.class, () ->
                 adapter.register("retry-service", "retry-method", "retry-topic", "retry-group",
@@ -247,7 +250,7 @@ class KafkaRpcResourceSafetyTest {
         ReplayFailingGateway gateway = new ReplayFailingGateway(2, 1);
         KafkaRpcAdapter adapter = new KafkaRpcAdapter(
                 settings(Duration.ofMillis(100), Map.of(), Map.of()),
-                gateway);
+                gateway, timer.executor());
         adapter.register("first-service", "method", "first-topic", "first-group",
                 request -> CompletableFuture.completedFuture(null));
 
@@ -295,7 +298,7 @@ class KafkaRpcResourceSafetyTest {
                 throw new AssertionError(FAILURE_SECRET + "-pending-observer");
             }
         };
-        KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, observer, "kafka-test");
+        KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, observer, "kafka-test", timer.executor());
         CompletableFuture<RpcResponse> response = pending.register(request("pending-error"));
         responseReference.set(response);
 
@@ -328,7 +331,7 @@ class KafkaRpcResourceSafetyTest {
                 throw new AssertionError(FAILURE_SECRET + "-terminal-observer");
             }
         };
-        KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(4, observer, "kafka-test");
+        KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(4, observer, "kafka-test", timer.executor());
         CompletableFuture<RpcResponse> completed = pending.register(request("complete-error"));
         CompletableFuture<RpcResponse> failed = pending.register(request("fail-error"));
         CompletableFuture<RpcResponse> closed = pending.register(request("close-error"));
@@ -384,7 +387,7 @@ class KafkaRpcResourceSafetyTest {
                 Duration.ofMillis(5),
                 8,
                 observer,
-                "kafka-test");
+                "kafka-test", timer.executor());
         CompletableFuture<RpcResponse> first = pending.register(request("timeout-one", 150L));
         CompletableFuture<RpcResponse> second = pending.register(request("timeout-two", 200L));
         futures.put("timeout-one", first);
@@ -416,7 +419,7 @@ class KafkaRpcResourceSafetyTest {
                 (correlationId, token) -> {
                     callbacks.incrementAndGet();
                     throw new AssertionError(FAILURE_SECRET + "-timeout-handler");
-                });
+                }, timer.executor());
         wheel.schedule("timeout-handler-one", Instant.now().plusMillis(100L), 1L);
         wheel.schedule("timeout-handler-two", Instant.now().plusMillis(150L), 2L);
 

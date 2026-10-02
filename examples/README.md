@@ -1,5 +1,7 @@
 # 可运行示例
 
+新增[显式脚手架 catalog 最小示例](scaffold-catalog/README.md)：无需第三方依赖即可生成、装配并测试自定义 Provider。
+
 先在仓库根目录用 JDK 21、Maven 3.9+ 执行 `mvn -B -ntp -DskipTests install`。以下命令中的 POM 均相对于仓库根目录；本地 smoke 运行后退出，Kafka 双 JVM 示例按各自生命周期显式停止。
 
 | 场景 | 说明 | 命令 |

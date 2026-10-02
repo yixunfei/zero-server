@@ -29,6 +29,13 @@ final class CacheKeyOperations<K> {
         if (--token.state.references == 0) states.remove(token.key, token.state);
     }
 
+    /** 为待写回项保留原读取代际；已被显式更新覆盖的读取不能重新进入重试队列。 */
+    synchronized boolean retain(final Token<K> token) {
+        if (token.generation != token.state.generation) return false;
+        token.state.references++;
+        return true;
+    }
+
     /**
      * 放弃迟到读取的代际；若期间已有显式变更，则保留更新后的代际。
      *

@@ -156,7 +156,7 @@ public final class StandardRuntimeCapabilityModel {
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_KAFKA_RPC,
                 List.of(RPC_HANDLER_REGISTRY, RPC_TRANSPORT),
-                List.of(LOG_APPENDER),
+                List.of(LOG_APPENDER, EXECUTORS),
                 EXTERNAL_PROFILES,
                 List.of(MavenCoordinate.zero("zero-runtime-kafka"))));
         model.provider(new RuntimeProviderCapability(
@@ -204,7 +204,7 @@ public final class StandardRuntimeCapabilityModel {
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_REDIS_CACHE,
                 List.of(CACHE_SERVICE),
-                List.of(REDIS_RESOURCE),
+                List.of(REDIS_RESOURCE, EXECUTORS),
                 EXTERNAL_PROFILES,
                 List.of(MavenCoordinate.zero("zero-runtime-redis"))));
     }

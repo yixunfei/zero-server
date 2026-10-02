@@ -74,7 +74,7 @@ class RedisDataAdapterExternalIT {
             assertEquals(0L, repository.count().toCompletableFuture().join());
             String encodedId = new DefaultZeroDataKeyCodec().encode("redis-player-1");
             assertEquals(3L, client.llen(keyStrategy.journalKey("game", "player_external", encodedId)));
-            assertEquals(0, localJournal.readAll("game", "player_external").size());
+            assertEquals(3, localJournal.readAll("game", "player_external").size());
         }
     }
 

@@ -20,6 +20,9 @@ import org.junit.jupiter.api.Test;
 
 /** Kafka envelope、时间轮和关闭交错回归。 @author zn */
 class KafkaReportAuditTest {
+    /** 测试拥有计时器，Adapter 仅拥有任务。 */
+    @org.junit.jupiter.api.extension.RegisterExtension
+    private final KafkaTestTimer timer = new KafkaTestTimer();
     /** 完整 envelope 后的垃圾必须被拒绝。 */
     @Test void trailingBytesAreRejected() {
         KafkaRpcEnvelopeCodec codec = new KafkaRpcEnvelopeCodec();
@@ -30,7 +33,7 @@ class KafkaReportAuditTest {
     }
     /** 用桶锁和逻辑 tick 前进确定性重现选桶之后被扫描的交错。 */
     @Test void schedulingRechecksTickAfterAcquiringBucket() throws Exception {
-        try (KafkaRpcTimeoutWheel wheel = new KafkaRpcTimeoutWheel(Duration.ofHours(1), 8, (id, token) -> { })) {
+        try (KafkaRpcTimeoutWheel wheel = new KafkaRpcTimeoutWheel(Duration.ofHours(1), 8, (id, token) -> { }, timer.executor())) {
             ArrayDeque<?>[] buckets = (ArrayDeque<?>[]) field(wheel, "buckets");
             AtomicLong tick = (AtomicLong) field(wheel, "currentTick");
             Thread scheduler = new Thread(() -> wheel.schedule("c", Instant.now().plusMillis(10), 1));
@@ -50,7 +53,7 @@ class KafkaReportAuditTest {
     /** 关闭与登记并发完成后不得遗留 future 或容量。 */
     @Test void registrationRacingCloseAlwaysCompletes() throws Exception {
         for (int i = 0; i < 50; i++) {
-            try (KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1)) {
+            try (KafkaRpcPendingRequests pending = new KafkaRpcPendingRequests(1, timer.executor())) {
                 CountDownLatch start = new CountDownLatch(1);
                 CompletableFuture<CompletableFuture<RpcResponse>> registered = new CompletableFuture<>();
                 Thread thread = new Thread(() -> {

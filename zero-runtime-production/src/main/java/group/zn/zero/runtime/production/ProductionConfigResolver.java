@@ -1,6 +1,7 @@
 package group.zn.zero.runtime.production;
 
 import group.zn.zero.core.config.ZeroConfig;
+import group.zn.zero.core.config.ConfigLookup;
 import java.util.function.Function;
 import java.util.List;
 import java.util.Objects;
@@ -9,7 +10,7 @@ import java.util.Optional;
 /**
  * production starter 配置解析器。
  *
- * <p>解析优先级为 {@link ZeroConfig}、JVM system property、环境变量。Adapter 专用严格入口不会修剪值，
+ * <p>解析优先级为显式 {@link ZeroConfig}/文件、JVM system property、环境变量、应用默认值。Adapter 专用严格入口不会修剪值，
  * 也不会把非法的高优先级值静默降级为低优先级来源；对外失败只公开稳定 Adapter 名称和逻辑配置键。
  *
  * @author zn
@@ -19,14 +20,8 @@ public final class ProductionConfigResolver {
     /** 未指定具体 Adapter 时使用的稳定归因名称。 */
     private static final String PRODUCTION_RUNTIME_ADAPTER = "production-runtime";
 
-    /** 统一配置对象。 */
-    private final ZeroConfig config;
-
-    /** JVM system property 读取函数。 */
-    private final Function<String, String> systemPropertyLookup;
-
-    /** 进程环境变量读取函数。 */
-    private final Function<String, String> environmentLookup;
+    /** 同次解析共享值和来源的读取会话。 */
+    private final ConfigLookup lookup;
 
     /**
      * 创建使用当前进程属性和环境变量的配置解析器。
@@ -41,7 +36,7 @@ public final class ProductionConfigResolver {
     /**
      * 创建允许隔离进程来源的配置解析器。
      *
-     * <p>该构造器仅作为包内测试 seam，生产装配应使用单参数构造器。
+     * <p>用于应用显式隔离来源和测试注入；同次解析缓存读取结果，实例非线程安全。
      *
      * @param config 统一配置对象；不可为空。
      * @param systemPropertyLookup JVM system property 读取函数；不可为空，可返回空。
@@ -52,9 +47,7 @@ public final class ProductionConfigResolver {
             final ZeroConfig config,
             final Function<String, String> systemPropertyLookup,
             final Function<String, String> environmentLookup) {
-        this.config = Objects.requireNonNull(config, "config");
-        this.systemPropertyLookup = Objects.requireNonNull(systemPropertyLookup, "systemPropertyLookup");
-        this.environmentLookup = Objects.requireNonNull(environmentLookup, "environmentLookup");
+        this.lookup = new ConfigLookup(config, systemPropertyLookup, environmentLookup);
     }
 
     /**
@@ -161,40 +154,23 @@ public final class ProductionConfigResolver {
             final boolean blankMeansMissing) {
         String currentAdapterName = requireText(adapterName, "adapterName");
         String currentLogicalKey = requireText(logicalKey, "logicalKey");
-        ResolvedProductionSetting configured = firstCandidate(
-                currentAdapterName,
-                currentLogicalKey,
-                sensitive,
-                checkedKeys(configKeys, "configKeys"),
-                key -> config.get(key).orElse(null),
-                "ZeroConfig",
-                blankMeansMissing);
-        if (configured != null) {
-            return configured;
+        Optional<ConfigLookup.Value> found = lookup.find(checkedKeys(configKeys, "configKeys"),
+                checkedKeys(systemProperties, "systemProperties"), checkedKeys(environmentVariables, "environmentVariables"));
+        if (found.isEmpty() || blankMeansMissing && found.orElseThrow().text().isBlank()) {
+            return new ResolvedProductionSetting(currentLogicalKey, Optional.empty(), Optional.empty());
         }
-        ResolvedProductionSetting system = firstCandidate(
-                currentAdapterName,
-                currentLogicalKey,
-                sensitive,
-                checkedKeys(systemProperties, "systemProperties"),
-                systemPropertyLookup,
-                "systemProperty",
-                blankMeansMissing);
-        if (system != null) {
-            return system;
+        ConfigLookup.Value value = found.orElseThrow();
+        if (value.text().isBlank()) {
+            throw invalidValue(currentAdapterName, currentLogicalKey);
         }
-        ResolvedProductionSetting environment = firstCandidate(
-                currentAdapterName,
-                currentLogicalKey,
-                sensitive,
-                checkedKeys(environmentVariables, "environmentVariables"),
-                environmentLookup,
-                "environment",
-                blankMeansMissing);
-        if (environment != null) {
-            return environment;
-        }
-        return new ResolvedProductionSetting(currentLogicalKey, Optional.empty(), Optional.empty());
+        String sourceType = switch (value.origin()) {
+            case PROGRAMMATIC -> "ZeroConfig";
+            case SYSTEM_PROPERTY -> "systemProperty";
+            case ENVIRONMENT -> "environment";
+            case FILE -> "file";
+            case DEFAULT -> "default";
+        };
+        return resolved(currentLogicalKey, value.text(), sourceType, value.alias(), sensitive);
     }
 
     /**
@@ -208,7 +184,7 @@ public final class ProductionConfigResolver {
      * @throws NullPointerException 配置键为空时抛出。
      */
     public boolean enabled(final String key) {
-        return config.get(Objects.requireNonNull(key, "key"))
+        return scalar(Objects.requireNonNull(key, "key"))
                 .map(Boolean::parseBoolean)
                 .orElse(false);
     }
@@ -228,7 +204,7 @@ public final class ProductionConfigResolver {
     public boolean strictEnabled(final String adapterName, final String key) {
         String currentAdapterName = requireText(adapterName, "adapterName");
         String currentKey = requireText(key, "key");
-        Optional<String> configured = config.get(currentKey);
+        Optional<String> configured = scalar(currentKey);
         if (configured.isEmpty()) {
             return false;
         }
@@ -269,7 +245,7 @@ public final class ProductionConfigResolver {
         if (!currentAllowedValues.contains(currentDefault)) {
             throw new IllegalArgumentException("defaultValue must be allowed");
         }
-        Optional<String> configured = config.get(currentKey);
+        Optional<String> configured = scalar(currentKey);
         if (configured.isEmpty()) {
             return currentDefault;
         }
@@ -316,7 +292,7 @@ public final class ProductionConfigResolver {
     public int strictPositiveInt(final String adapterName, final String key, final int defaultValue) {
         String currentAdapterName = requireText(adapterName, "adapterName");
         String currentKey = requireText(key, "key");
-        Optional<String> configured = config.get(currentKey);
+        Optional<String> configured = scalar(currentKey);
         if (configured.isEmpty()) {
             if (defaultValue <= 0) {
                 throw invalidValue(currentAdapterName, currentKey);
@@ -332,30 +308,6 @@ public final class ProductionConfigResolver {
         } catch (NumberFormatException ignored) {
             throw invalidValue(currentAdapterName, currentKey);
         }
-    }
-
-    private ResolvedProductionSetting firstCandidate(
-            final String adapterName,
-            final String logicalKey,
-            final boolean sensitive,
-            final List<String> keys,
-            final Function<String, String> lookup,
-            final String sourceType,
-            final boolean blankMeansMissing) {
-        for (String key : keys) {
-            String value = lookup.apply(key);
-            if (value == null) {
-                continue;
-            }
-            if (value.isBlank()) {
-                if (blankMeansMissing) {
-                    return new ResolvedProductionSetting(logicalKey, Optional.empty(), Optional.empty());
-                }
-                throw invalidValue(adapterName, logicalKey);
-            }
-            return resolved(logicalKey, value, sourceType, key, sensitive);
-        }
-        return null;
     }
 
     private ResolvedProductionSetting resolved(
@@ -404,7 +356,8 @@ public final class ProductionConfigResolver {
         return current;
     }
 
-    private static boolean hasText(final String value) {
-        return value != null && !value.isBlank();
+    private Optional<String> scalar(final String key) {
+        return lookup.find(List.of(key), List.of(key), List.of(ConfigLookup.environmentAlias(key)))
+                .map(ConfigLookup.Value::text);
     }
 }

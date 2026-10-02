@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import redis.clients.jedis.RedisClient;
 
 /**
@@ -32,7 +31,11 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
               end
             end
             local current = redis.call('GET', KEYS[2])
-            if ARGV[1] == '0' then
+            if ARGV[6] == 'snapshot' then
+              if current and (#current > #ARGV[2] or (#current == #ARGV[2] and current > ARGV[2])) then
+                return 0
+              end
+            elseif ARGV[1] == '0' then
               if current then
                 return 0
               end
@@ -45,6 +48,7 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
             redis.call('SET', KEYS[2], ARGV[2])
             redis.call('SADD', KEYS[3], ARGV[4])
             redis.call('RPUSH', KEYS[4], ARGV[5])
+            redis.call('LTRIM', KEYS[4], -1024, -1)
             return 1
             """.getBytes(StandardCharsets.UTF_8);
 
@@ -68,6 +72,7 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
             redis.call('DEL', KEYS[1], KEYS[2])
             redis.call('SREM', KEYS[3], ARGV[1])
             redis.call('RPUSH', KEYS[4], ARGV[2])
+            redis.call('LTRIM', KEYS[4], -1024, -1)
             return 1
             """.getBytes(StandardCharsets.UTF_8);
 
@@ -102,7 +107,7 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
     private final RedisDataJournalEntryCodec journalEntryCodec;
 
     /**
-     * 本地磁盘化追加日志。
+     * Redis 已确认写入的本地镜像日志；不是提交前 WAL，不覆盖跨系统双写崩溃窗口。
      */
     private final LocalDiskDataJournal localJournal;
 
@@ -148,28 +153,67 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
     }
 
     /**
-     * 查询全部信封。
+     * 分桶批量查询全部信封；跨桶弱一致，最多扫描 100000 个索引或 ID。
      *
      * @return 信封列表；不可为空；可能为空；线程安全性由 Jedis 保证。
      */
     @Override
     public List<ZeroDataEnvelope> findAll() {
         try {
-            List<ZeroDataEnvelope> results = new ArrayList<>();
-            for (String indexKey : client.smembers(collectionIndexKey())) {
-                Set<String> ids = client.smembers(indexKey);
-                for (String id : ids) {
-                    findById(id).ifPresent(results::add);
-                }
+            java.util.Map<String, ZeroDataEnvelope> results = new java.util.LinkedHashMap<>();
+            int scanned = 0;
+            for (String indexKey : boundedIndexKeys()) {
+                String cursor = "0";
+                do {
+                    var page = client.sscan(indexKey, cursor, new redis.clients.jedis.params.ScanParams().count(256));
+                    cursor = page.getCursor();
+                    List<String> ids = page.getResult();
+                    scanned += ids.size();
+                    if (scanned > MAX_READ_ENTRIES) throw readLimit();
+                    for (int offset = 0; offset < ids.size(); offset += 256) {
+                        byte[][] keys = ids.subList(offset, Math.min(offset + 256, ids.size())).stream()
+                                .map(id -> bytes(dataKey(id))).toArray(byte[][]::new);
+                        if (keys.length == 0) continue;
+                        for (byte[] value : client.mget(keys)) {
+                            if (value != null) {
+                                ZeroDataEnvelope envelope = envelopeCodec.decode(value);
+                                results.put(envelope.id(), envelope);
+                            }
+                        }
+                    }
+                } while (!"0".equals(cursor));
             }
-            return List.copyOf(results);
+            return List.copyOf(results.values());
         } catch (RuntimeException ex) {
+            if (ex instanceof ZeroException zero) throw zero;
             throw ZeroException.of(DataErrorCode.READ_FAILED, "redis read all failed", ex);
         }
     }
 
+    /** 大集合扫描的硬预算，避免无界响应和不停增长的游标遍历。 */
+    private static final int MAX_READ_ENTRIES = 100_000;
+
+    private List<String> boundedIndexKeys() {
+        java.util.Set<String> keys = new java.util.LinkedHashSet<>();
+        String cursor = "0";
+        int scanned = 0;
+        do {
+            var page = client.sscan(collectionIndexKey(), cursor,
+                    new redis.clients.jedis.params.ScanParams().count(256));
+            cursor = page.getCursor();
+            scanned += page.getResult().size();
+            if (scanned > MAX_READ_ENTRIES) throw readLimit();
+            keys.addAll(page.getResult());
+        } while (!"0".equals(cursor));
+        return List.copyOf(keys);
+    }
+
+    private ZeroException readLimit() {
+        return ZeroException.of(DataErrorCode.READ_LIMIT_EXCEEDED, "redis scan budget exceeded", null);
+    }
+
     /**
-     * 保存信封。
+     * 原子保存同版或更高版本快照；支持重放和版本跳跃，禁止版本回退。
      *
      * @param envelope 信封；不可为空。
      */
@@ -177,7 +221,7 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
     public void save(final ZeroDataEnvelope envelope) {
         try {
             ZeroDataEnvelope current = validateEnvelope(envelope);
-            boolean saved = saveIfVersion(current, Math.max(0L, current.version() - 1L));
+            boolean saved = write(current, 0L, "snapshot");
             if (!saved) {
                 throw ZeroException.of(DataErrorCode.VERSION_CONFLICT, "redis version conflict", null);
             }
@@ -201,7 +245,10 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
         if (expectedVersion < 0L) {
             throw new IllegalArgumentException("expectedVersion must be non-negative");
         }
-        ZeroDataEnvelope current = validateEnvelope(envelope);
+        return write(validateEnvelope(envelope), expectedVersion, "cas");
+    }
+
+    private boolean write(final ZeroDataEnvelope current, final long expectedVersion, final String mode) {
         RedisDataJournalEntry entry = RedisDataJournalEntry.put(current, envelopeCodec);
         try {
             RedisDataSnapshot snapshot = RedisDataSnapshot.fromEnvelope(current, keyStrategy, envelopeCodec);
@@ -220,8 +267,12 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
                             bytes(String.valueOf(current.version())),
                             snapshot.envelopeBytes(),
                             bytes(snapshot.id()),
-                            journalEntryCodec.encode(entry)));
-            boolean saved = result instanceof Number number && number.longValue() == 1L;
+                            journalEntryCodec.encode(entry), bytes(mode)));
+            if (!(result instanceof Number number) || (number.longValue() != 0L && number.longValue() != 1L)) {
+                throw ZeroException.of(DataErrorCode.WRITE_FAILED, "unexpected redis save result", null);
+            }
+            boolean saved = ((Number) result).longValue() == 1L;
+            if (saved) appendLocal(entry);
             return saved;
         } catch (RuntimeException ex) {
             throw ZeroException.of(DataErrorCode.WRITE_FAILED, "redis conditional write failed", ex);
@@ -266,6 +317,7 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
             if (!(result instanceof Number number) || number.longValue() < 0L || number.longValue() > 1L) {
                 throw ZeroException.of(DataErrorCode.DELETE_FAILED, "unexpected redis delete result", null);
             }
+            if (((Number) result).longValue() == 1L) appendLocal(entry);
         } catch (RuntimeException ex) {
             if (ex instanceof ZeroException zeroException) {
                 throw zeroException;
@@ -275,19 +327,28 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
     }
 
     /**
-     * 统计信封数量。
+     * 批量统计各桶数量；并发写期间不承诺跨桶同一时刻快照。
      *
      * @return 信封数量；线程安全性由 Jedis 保证。
      */
     @Override
     public long count() {
         try {
+            List<String> keys = boundedIndexKeys();
             long total = 0L;
-            for (String indexKey : client.smembers(collectionIndexKey())) {
-                total += client.scard(indexKey);
+            for (int offset = 0; offset < keys.size(); offset += 256) {
+                try (var pipeline = client.pipelined()) {
+                    List<redis.clients.jedis.Response<Long>> counts = new ArrayList<>();
+                    for (String key : keys.subList(offset, Math.min(keys.size(), offset + 256))) {
+                        counts.add(pipeline.scard(key));
+                    }
+                    pipeline.sync();
+                    for (var count : counts) total += count.get();
+                }
             }
             return total;
         } catch (RuntimeException ex) {
+            if (ex instanceof ZeroException zero) throw zero;
             throw ZeroException.of(DataErrorCode.READ_FAILED, "redis count failed", ex);
         }
     }

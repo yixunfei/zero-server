@@ -25,7 +25,8 @@ public final class LogicMain {
                 prefix, "reply-logic-" + suffix, 128, Duration.ofMillis(100), Duration.ofSeconds(5), Map.of(), Map.of("auto.offset.reset", "earliest"));
         RpcCodecRegistry codecs = new RpcCodecRegistry();
         CenterContractCodecs.register(codecs);
-        try (KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings)) {
+        try (var executors = group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors.localPrototype("logic", 1);
+             KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings, executors.scheduledExecutor("kafka-rpc"))) {
             CenterContract client = new RpcClientFactory(adapter, codecs,
                     RpcCallOptions.defaults().withReplyTopic(settings.replyTopic()).withTraceId("trace-logic-" + suffix)).create(CenterContract.class);
             CenterRegistration registration = new CenterRegistration("logic-" + suffix, "logic", "trace-register-" + suffix);

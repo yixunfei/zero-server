@@ -10,6 +10,7 @@ import group.zn.zero.runtime.assembly.RuntimeProfile;
 import group.zn.zero.runtime.bootstrap.RuntimeBasics;
 import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
 import group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan;
+import group.zn.zero.runtime.diagnostics.RuntimeAssemblyDiagnosis;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.function.Consumer;
@@ -98,6 +99,20 @@ public final class ProductionAssembly {
             plan(resolved);
         }
         return report;
+    }
+
+    /**
+     * 一次解析返回统一诊断；配置缺失时保留键清单，不创建客户端或执行器。
+     * @return 不可变安全诊断；本组合器非线程安全，结果可跨线程读取。
+     * @throws ProductionAdapterException 非法配置或装配图错误时抛出已脱敏异常。
+     * @throws IllegalStateException build 后调用时抛出。
+     */
+    public RuntimeAssemblyDiagnosis diagnosis() {
+        mutable();
+        Resolved resolved = resolve();
+        List<String> missing = report(resolved).missingConfigKeys();
+        return missing.isEmpty() ? RuntimeAssemblyDiagnosis.complete(plan(resolved))
+                : new RuntimeAssemblyDiagnosis(profile, java.util.Optional.empty(), missing);
     }
 
     public ZeroProductionRuntime build() {

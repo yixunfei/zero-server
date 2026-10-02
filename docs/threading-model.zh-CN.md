@@ -188,3 +188,12 @@ Java 21 虚拟线程允许用于：
 LocalWorldService 的进入、移动及迁移步骤统一使用 entity lane，同一实体交接直到源释放才解除排他。全局 stateLock 仍保护 world/shard/entity 目录；完成异步 future 时已经退出该锁，避免继续编排阶段在锁内重入。该锁和 lane 都只属于单进程，不替代分布式 ownership。
 
 LocalRankingService 的状态写入仍由服务锁保护，事件和指标回调在锁外同步执行。回调可以查询已提交状态，失败不会撤销提交；并发通知没有全局顺序保证。有序业务应明确选择 Actor lane 或其他串行调用边界，不在服务内部新增线程池。
+
+
+## 2026-10-01 异步状态入口与受管维护
+
+World 所有实体修改/迁移入口使用 CompletionStage，同实体在 lane 串行。状态锁只保护内存提交，事件及 metrics 锁外调用；回调仍不得等待同 lane 的后续消息。Room 发布不可变查询视图。Player 的自定义后端和 UID 解析通过显式受管远程 IO Executor 发起，异步后续 IO 也派发回该域。
+
+`ZeroRuntimeExecutors.scheduledExecutor(role)` 只供组合根按稳定职责获取计时器，统一关闭。Kafka 时间轮注入该资源，Adapter 只取消自己的 tick。`PeriodicAsyncTask` 仅计时、单次在途，实际工作派发到非内联 remote IO 域；stop 先取消后等待最多 30 秒。生产 Redis 写回和耐久重放使用该生命周期。
+
+耐久提交在绑定域捕获后进入串行 IO 链；Actor/Netty 不得同步等待刷盘 future。关闭在管理线程进行，必须先关闭维护任务及服务、后关闭 Store/Executor。详细边界见 [迁移说明](migrations/20261001-audit-reliability.zh-CN.md)。

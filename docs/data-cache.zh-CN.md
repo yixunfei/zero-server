@@ -177,7 +177,7 @@ CacheService / LayeredCacheService
 
 2026-09-26 的专项审查确认三类 driver 均通过统一 envelope 和版本条件写边界工作：MongoDB 使用 namespaced collection 与条件 replace，Redis 使用独立 key namespace 和原子脚本，PostgreSQL 使用参数化 SQL、受校验的表名和版本条件 update。真实验证只覆盖本机单实例 MongoDB 7.0、Redis 7.4 和 PostgreSQL 16；不等同于集群故障转移、跨版本兼容、容量或 SLA 证明。
 
-当前落库路径的容量观察项需要纳入后续 benchmark：`ZeroDataEnvelopeCrudRepository` 的同步方法会把数据库 IO 包在 repository monitor 内；`findByIds`、`saveAll` 和 Redis `findAll` 仍是逐对象/逐 key 编排；分页在 envelope repository 中先读取全量再内存切片；PostgreSQL 默认构造非池化 `PGSimpleDataSource` 连接。上述行为保持现有 API 和一致性语义，本轮未猜测性重构；生产装配应由调用方提供连接池、限流和批量策略，并用真实 workload 单独测量。
+当前落库路径的容量观察项需要纳入后续 benchmark：`ZeroDataEnvelopeCrudRepository` 的同步方法会把数据库 IO 包在 repository monitor 内；`findByIds`、`saveAll` 仍是逐对象编排；Redis `findAll` 已于 2026-10-01 改为分桶 SSCAN + MGET；分页在 envelope repository 中先读取全量再内存切片；PostgreSQL 默认构造非池化 `PGSimpleDataSource` 连接。上述行为保持现有 API 和一致性语义，本轮未猜测性重构；生产装配应由调用方提供连接池、限流和批量策略，并用真实 workload 单独测量。
 
 Redis 数据与缓存 key 的 namespace/collection/cacheName 不得包含 `{`、`}` 或 `:`，避免 hash-tag 边界和分隔符造成跨空间别名；本地 journal 路径片段拒绝控制字符、路径分隔符、点段和 Windows 特殊文件名字符。
 
@@ -191,7 +191,7 @@ Redis 数据与缓存 key 的 namespace/collection/cacheName 不得包含 `{`、
 - `zero-data-mongo`、`zero-data-redis` 和 `zero-data-postgresql` 当前均通过 `AbstractRepositoryAdapter` 暴露可切换的仓库边界，并可注册基于 zcode envelope 的最小 Repository。
 - `zero-data-mongo` 当前提供 `MongoDataDocument`、`MongoDataEnvelopeStore`、`MongoDriverEnvelopeStore`、`MongoDriverSettings` 和 `MongoDataHealthCheck`，以 document 形态保存 `_id`、版本、schema、codec、更新时间和 zcode payload；driver-backed store 使用 namespaced 物理 collection 与版本条件 replace，避免跨 namespace 覆盖和并发丢更新；连接串和数据库名称可由系统属性或 `ZERO_MONGO_URI` / `ZERO_MONGO_DATABASE` 环境变量注入。
 - `zero-cache` 当前提供 `CacheEntry`、`CacheLoader`、`CachePolicy`、`CacheStore`、`CacheStoreEntry`、`CacheKeyCodec`、`CacheKeyCodecs`、`CacheValueCodec`、`CacheHealthSnapshot`、`CacheLoadCoordinator`、`LayeredCacheService`、`CacheStatistics` 和 `InMemoryCacheService`；`LayeredCacheService` 承载 L1 + L2 + loader 的 cache-aside 编排。
-- `zero-data-redis` 当前提供 `RedisDataKeyStrategy` 和 `DefaultRedisDataKeyStrategy`，用于内部生成对象快照、bucket 索引和追加日志 key；`RedisDataEnvelopeStore` 会维护 snapshot、bucket index、PUT/DELETE journal，`RedisDriverEnvelopeStore` 可通过 Jedis 写入真实 Redis，并用 Lua 脚本一次完成版本 CAS、snapshot、index 和 Redis journal。`LocalDiskDataJournal` 使用 zcode entry 追加本地 zlog，作为 Redis 写失败时的降级入口。
+- `zero-data-redis` 当前提供 `RedisDataKeyStrategy` 和 `DefaultRedisDataKeyStrategy`，用于内部生成对象快照、bucket 索引和追加日志 key；`RedisDataEnvelopeStore` 会维护 snapshot、bucket index、PUT/DELETE journal，`RedisDriverEnvelopeStore` 可通过 Jedis 写入真实 Redis，并用 Lua 脚本一次完成版本 CAS、snapshot、index 和 Redis journal。`LocalDiskDataJournal` 使用 zcode entry 追加本地 zlog，仅在 Redis 成功写入后记录镜像，不是提交前 WAL，失败不宣称双介质原子提交。
 - `zero-data-redis` 当前还提供 `RedisCacheKeyStrategy`、`DefaultRedisCacheKeyStrategy`、`RedisCacheEnvelope`、`RedisCacheEnvelopeCodec`、`RedisCacheStore`、`RedisCacheHealthCheck` 和 `RedisDistributedCacheService`，使用独立 `zero:cache` / `zero:cachever` / `zero:cacheidx` key namespace 承载 Redis L2 缓存，避免与 snapshot / bucket index / journal key 混用，并可显式探测缓存后端健康状态。
 - `zero-data-postgresql` 当前提供 `PostgresqlDataRow`、`PostgresqlDataEnvelopeStore`、`PostgresqlDriverEnvelopeStore`、`PostgresqlDriverSettings` 和 `PostgresqlDataHealthCheck`，以通用对象表行形态保存 namespace、collection、id、版本、schema、codec、更新时间和 zcode payload；driver-backed store 使用版本条件 update 承载乐观锁，连接 URL、用户名和密码必须由系统属性或环境变量注入。
 - 当前实现已具备 MongoDB / Redis / PostgreSQL 真实驱动外部集成测试入口；默认单元测试仍不强制依赖外部服务。
@@ -212,3 +212,16 @@ PostgreSQL / MongoDB driver 直接 save 拒绝低于后端当前版本的信封�
 LayeredCacheService(policy, store, true) 与 RedisDistributedCacheService(name, policy, store, true) 显式开启 L2 写失败后的本地降级，允许暂存 loader 正值及负结果。默认关闭；当前调用仍取得 loader 结果，写回重试队列仍有界、非持久、无内建后台线程。原有未过期 L1 继续可读，不能据此宣称强一致。
 
 完整默认变化、业务选择和验证见 [迁移说明](migrations/20260928-report-audit-followup.md)。
+
+
+## 2026-10-01 重试与耐久确认
+
+普通 `markDirty` 继续是内存准入。失败默认最多 5 次、指数退避，版本冲突等立即隔离；失败项保留并占用容量，通过 `failures()` 诊断、`retryFailed()` 显式恢复。成功移除对应脏代际。停机无法排空时明确失败。
+
+需要 JVM 崩溃后恢复已确认修改时，显式使用 `DurablePersistenceService.submit`：绑定域捕获不可变信封，受管 IO 写入并 force 意图后返回 PENDING，后台 CAS 成功且结果刷盘后为 APPLIED。未知结果核验完整快照，冲突隔离。`DurablePersistenceRuntime.module` 管理周期重放及关闭；targets 由应用拥有。
+
+本地日志默认 256 MiB/100000 个操作，完成收据仍占预算；compact 不删除收据。日志满额拒绝，不丢弃未解决数据。磁盘损失、未提交内存与跨机器复制不在保证内。Redis 的成功后镜像不替代该提交协议。
+
+生产 Redis cache 每秒最多重试 128 个写回项，队列按键合并、满额拒绝并计数，原代际防止 invalidate 后旧值复活。核心 Cache 仍无自建后台线程，手动构造者须装配调度。未版本化 put 先观察 L2 版本，最多 3 次冲突重试；不能覆盖 entity-versioned 值。
+
+完整接入、0.x API 变更与报告误判说明见 [可靠性迁移](migrations/20261001-audit-reliability.zh-CN.md)。

@@ -14,11 +14,12 @@ public final class WorldShardApplication {
 
     public static Result run() {
         LocalWorldService service = new LocalWorldService();
-        service.createWorld("world-1", "shard-a");
-        service.createWorld("world-2", "shard-b");
-        EntitySnapshot entered = EntitySnapshot.of(service.enterWorld("entity-1", "world-1"));
-        service.moveEntity("entity-1", entered.ownerShardId(), 10, 20);
-        Migration migration = service.migrate("migration-1", "entity-1", "shard-b");
+        service.createWorld(new group.zn.zero.world.World("world-1", 0), java.util.List.of(
+                new group.zn.zero.world.Shard("shard-a", "world-1", 0),
+                new group.zn.zero.world.Shard("shard-b", "world-1", 0)));
+        EntitySnapshot entered = EntitySnapshot.of(service.enterWorldAsync("entity-1", "world-1").toCompletableFuture().join());
+        service.moveEntityAsync("entity-1", entered.ownerShardId(), 10, 20).toCompletableFuture().join();
+        Migration migration = service.migrateAsync("migration-1", "entity-1", "shard-b").toCompletableFuture().join();
         EntitySnapshot moved = service.snapshot("entity-1");
         Migration replay = service.migration("migration-1");
         return new Result(moved, migration.state().name(), replay.state().name(), service.events().size());

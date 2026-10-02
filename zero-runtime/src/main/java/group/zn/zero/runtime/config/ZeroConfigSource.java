@@ -35,6 +35,14 @@ public final class ZeroConfigSource implements ConfigSource {
         return config.get(RuntimeIdentifiers.requireSafeAlias(alias, "sourceAlias"));
     }
 
+    /** 保留输入快照的原始归因；不读取环境、不公开路径或值，线程安全性同输入。 */
+    @Override
+    public ConfigSourceOrigin origin(final String alias) {
+        ConfigSourceKind origin = ConfigSourceKind.valueOf(config.origin(alias).name());
+        return new ConfigSourceOrigin(origin, id, origin == ConfigSourceKind.ENVIRONMENT
+                ? group.zn.zero.core.config.ConfigLookup.environmentAlias(alias) : alias);
+    }
+
     @Override
     public String toString() {
         return "ZeroConfigSource{id=" + id + '}';

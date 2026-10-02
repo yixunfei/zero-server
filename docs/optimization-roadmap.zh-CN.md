@@ -1,6 +1,6 @@
 # zeroServer 后续优化路线图
 
-更新日期：2026-09-18。适用版本：`0.1.0-SNAPSHOT`，`productionReady=false`。本页统一维护未完成工作；当前实现以[能力矩阵](capability-matrix.zh-CN.md)为准，已发生变更见 [Changelog](../CHANGELOG.md)。
+更新日期：2026-10-01。适用版本：`0.1.2-SNAPSHOT`，`productionReady=false`。本页统一维护未完成工作；当前实现以[能力矩阵](capability-matrix.zh-CN.md)为准，已发生变更见 [Changelog](../CHANGELOG.md)。后续实施顺序和完成定义见[改进实施方案](optimization-implementation-plan.zh-CN.md)。
 
 ## 已有基础
 
@@ -13,6 +13,9 @@
 | Adapter 恢复 | 健康/恢复/预算 SPI、状态机、有界恢复编排与注入测试 | 各真实驱动的周期探测、恢复和故障证据 |
 | GM | DSL、授权门、REST 请求处理适配、审计/幂等/break-glass 端口和内存实现 | HTTP 监听与真实身份、Kafka 接线、持久审批/审计/幂等 |
 | 游戏组件 | Room、AOI/状态同步、帧同步、NPC、榜单、世界分片的本地最小实现 | 分布式所有权、持久化、真实广播和容量 |
+| 业务纵切片 | ownership / epoch / checkpoint / capacity 基础设施 | 先完成 Room 双 JVM owner、迁移、重连和结算幂等，再复用模式到 Player/World |
+| 远程 IO | runtime 执行器、Adapter 生命周期、超时和资源预算基础 | 统一 blocking 分类、受管 IO、取消、未知写结果和关闭契约 |
+| 场景化验证 | focused tests、示例、JMH 和 Stage 0 入口 | 按 RPG、Room、帧同步、NPC、Ranking 建立容量和长稳证据 |
 | 可观测性 | 结构化日志、安全门、低基数指标、Prometheus 文本和显式 HTTP Endpoint | 生产 sink、认证/TLS、完整 trace 与告警通道 |
 | API 检查 | 五个核心模块的 API 基线、签名检查和独立消费者编译 | 二进制兼容、配置 key/协议 ID/provider ID 演进检查 |
 
@@ -28,8 +31,9 @@
 | P0-3 Adapter 恢复 | 先选一种真实 Adapter 接通健康→降级→恢复，再推广 | Kafka 重启/rebalance、Nacos 订阅恢复、数据库连接重建及未知写结果按各自语义验证；重试/in-flight/积压有上限 |
 | P0-4 GM 运营 | 实装 HTTP/Kafka 入口和持久化 provider | 真实身份与授权、审批事实、审计查询/归档、幂等 claim、break-glass 全链路实测；非法请求和解析失败也可安全归因 |
 | P0-5 API 演进 | 在现有 bootstrap gate 上补二进制及非 Java 契约检查 | 破坏性 API、配置 key、协议 ID、provider ID 变更有 CI 失败证据与迁移说明；最小依赖消费者仍可编译 |
+| P0-7 Room 跨进程纵切片 | 复用 `zero-ownership`、`zero-ownership-postgresql`、Actor lane 和 RPC，先完成 Room 的 owner、epoch、checkpoint、重连和结算幂等 | 双 JVM 完成创建、接管、旧 owner fencing、恢复、重连和关闭；队列、超时、失败和审计均可观察；详细计划见[Room 纵切片开发计划](guides/distributed-room-vertical-slice.zh-CN.md) |
 
-推荐先完成 P0-1 和 P0-6，明确业务入口与进程边界；再在这一真实链路中推进 P0-2～P0-4。P0-5 随公共契约变化维护，不必等待所有治理能力完成。
+推荐先完成 P0-1、P0-6 和 P0-7，明确业务入口、进程边界和状态所有权；再在真实 Room 链路中推进 P0-2～P0-4。P0-5 随公共契约变化维护，不必等待所有治理能力完成。
 
 ## P1：可靠性与接入成本
 
@@ -42,6 +46,8 @@
 | 观测与运营 | 生产文件/Kafka sink、Endpoint 安全接入、trace、告警 | 能关联入口→RPC→数据→审计；标签和队列有界、敏感字段脱敏；最小应用可不引入运营包 |
 | 发布与恢复 | 制品签名/SBOM、迁移实例、备份/PITR、滚动升级和回滚；材料工具改为公开检出基准并报告真实缺失计数 | 在隔离环境实测恢复，记录 RPO/RTO、校验和失败边界；发布步骤可复现；缺失必需材料不能被摘要掩盖 |
 | 性能与长稳 | 按真实负载分层测量协议、Actor、网络、RPC、数据、缓存和场景 | 记录代码版本、环境、p95/p99、内存、分配、吞吐、错误/拒绝率；阈值依据重复测量建立 |
+| 远程 IO 契约 | 为 MongoDB、Redis、PostgreSQL、Kafka、Nacos 标注阻塞、执行域、deadline、取消、重试和未知结果 | Actor/Netty 线程不被外部 IO 阻塞；队列、in-flight、关闭和失败语义有测试 |
+| 场景化验收 | 按 RPG、Room、AOI、帧同步、NPC、Ranking、World 建立 L0-L6 证据层级 | 文档、示例、脚本和报告能区分本地、外部 Adapter、双 JVM、容量和发布恢复证据 |
 
 ## P2：按使用场景扩展
 
@@ -52,6 +58,8 @@
 | 更多网络传输 | 独立评审 WebSocket/KCP/UDP 的安全、可靠性与背压 |
 | 热更 | 优先配置发布；CGLIB/ClassLoader 扩展须具备签名、备份、回滚和集群同步 |
 | 部署工具 | 在 Compose 基础上补多实例部署与运维示例，验证配置、排空和恢复 |
+
+实施任务的通用边界和完成定义见[游戏服务器开发与验收标准](operations/game-server-development-verification.zh-CN.md)；远程 Adapter 的线程和失败语义见[受管远程 IO 契约](reference/remote-io-execution-contract.zh-CN.md)。
 
 ## 实施与验证方式
 

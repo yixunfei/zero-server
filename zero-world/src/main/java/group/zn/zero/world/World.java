@@ -2,6 +2,7 @@ package group.zn.zero.world;
 
 import java.util.Objects;
 
+/** 不可变世界配置；routeEpoch 为非负路由代际。 @author zn */
 public record World(String worldId, long routeEpoch) {
     public World { require(worldId, "worldId"); if (routeEpoch < 0) throw new IllegalArgumentException("routeEpoch"); }
     public World advanceRoute() { return new World(worldId, routeEpoch + 1); }

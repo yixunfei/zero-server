@@ -1,5 +1,7 @@
 # 按需装配与实现替换
 
+新增统一配置消费、实际计划配置诊断及显式 catalog 使用方法见[配置与目录指南](configuration-and-catalog.zh-CN.md)。
+
 业务工程使用 `zero-bom` 对齐版本，只声明需要的集成模块。`zero-server-starter` 和 `zero-server-starter-production` 是全量便利组合包；需要精简依赖时，从下面的独立入口开始。
 
 ## 1. 最小运行时
@@ -128,6 +130,19 @@ network 的执行器实例约束在选中的 provider 创建后校验；`replace
 
 ## 5. 生命周期和配置
 
+### 有效配置诊断
+
+在构建 runtime 前可以读取安全的有效配置快照：
+
+```java
+RuntimeConfigDiagnostics diagnostics = composition.diagnoseConfiguration();
+diagnostics.entries().forEach(entry ->
+        System.out.println(entry.logicalKey() + " <- " + entry.sourceKind()
+                + "/" + entry.sourceId() + " = " + entry.effectiveValue().orElse("<absent>")));
+```
+
+快照不会创建 provider、执行器或外部客户端。敏感 key 只显示 `***`，复杂类型显示类型占位；条目按 owner 和逻辑 key 稳定排序。配置来源优先级和 `diagnose()`/`plan()` 的生命周期语义保持不变。
+
 `ProductionAssembly.builder("standalone", config)` 可用于单进程按需装配；同一 overload 支持 `external-test` 和 `production`。档位必须与配置中 `zero.mode` 一致，不会隐式启用 Adapter。`diagnose()` 汇总缺失配置；`plan()` 要求配置完整，返回不可变 provider 图，二者均不创建客户端或执行器。生成的外部 runtime 装配从配置读取档位。
 
 typed Provider 的业务配置使用 `context.config()`。`configSource(...)` 覆盖的是 schema 声明的键；`RuntimeBasics.CONFIG` 除 `zero.mode`/`zero.name` 外仍保留原 ZeroConfig 字符串，不自动合并所有 ConfigSource。
@@ -163,6 +178,18 @@ java scripts/ZeroStage0Acceptance.java --level full
 独立消费者使用 Maven Enforcer 检查传递依赖，再通过实际 classpath 启动和类缺席断言验证隔离。单 Redis 消费者只创建与关闭 client，不连接外部 Redis；真实健康、读写与故障恢复需要外部服务验证。
 
 ## 8. Repository 与按需脚手架
+
+### 自定义脚手架组件
+
+需要让应用自己的 Provider 出现在脚手架生成路径时，构造 `ScaffoldComponentDefinition` 并传入显式目录：
+
+```java
+ScaffoldComponents components = new ScaffoldComponents(
+        capabilityModel,
+        List.of(ScaffoldComponentDefinition.runtime("bootstrap", ""), customDefinition));
+```
+
+定义同时携带安装表达式、额外 Maven 坐标和配置样例。目录必须包含 `bootstrap`；重复组件 ID、重复 Provider 或未知 Provider 会在生成前拒绝。标准 CLI 仍只使用内置目录，不会从 classpath 自动发现第三方组件。
 
 `DataRuntime.REPOSITORY_SOURCES` 提供命名源，`DataRuntime.repositories(Map.of("game", "local"))` 生成显式角色目录，业务从 `DataRuntime.REPOSITORIES` 创建中立 Repository。支持本地、MongoDB、PostgreSQL、Redis 数据实现，详见 [Repository 接入指南](repository-composition-guide.zh-CN.md)。
 

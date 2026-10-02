@@ -4,6 +4,7 @@ import group.zn.zero.runtime.api.BindingKey;
 import group.zn.zero.runtime.api.ComponentId;
 import group.zn.zero.runtime.assembly.SelectionSourceKind;
 import group.zn.zero.runtime.config.ResolvedConfigMetadata;
+import group.zn.zero.runtime.config.RuntimeConfigDiagnostics;
 import group.zn.zero.runtime.spi.ComponentKind;
 import java.util.List;
 import java.util.Objects;
@@ -18,6 +19,7 @@ import java.util.Optional;
  * @param components 拓扑顺序组件。
  * @param edges 稳定排序依赖边。
  * @param config 配置来源元数据，不包含值。
+ * @param configuration 同次规划、与 Provider 输入一致的安全配置快照。
  * @author zn
  */
 public record RuntimeAssemblyPlan(
@@ -26,7 +28,8 @@ public record RuntimeAssemblyPlan(
         List<String> rootRequirements,
         List<ComponentPlan> components,
         List<DependencyEdge> edges,
-        List<ResolvedConfigMetadata> config) {
+        List<ResolvedConfigMetadata> config,
+        RuntimeConfigDiagnostics configuration) {
 
     public RuntimeAssemblyPlan {
         profile = Objects.requireNonNull(profile, "profile");
@@ -35,6 +38,7 @@ public record RuntimeAssemblyPlan(
         components = List.copyOf(Objects.requireNonNull(components, "components"));
         edges = List.copyOf(Objects.requireNonNull(edges, "edges"));
         config = List.copyOf(Objects.requireNonNull(config, "config"));
+        configuration = Objects.requireNonNull(configuration, "configuration");
     }
 
     /** 计划中的单个组件。 */

@@ -60,6 +60,11 @@ public final class MongoDataEnvelopeStore implements ZeroDataEnvelopeStore {
     @Override
     public synchronized void save(final ZeroDataEnvelope envelope) {
         MongoDataDocument document = MongoDataDocument.fromEnvelope(envelope);
+        MongoDataDocument previous = documents.get(document.id());
+        if (previous != null && previous.version() > document.version()) {
+            throw group.zn.zero.core.error.ZeroException.of(
+                    group.zn.zero.data.error.DataErrorCode.VERSION_CONFLICT, "snapshot version regressed", null);
+        }
         documents.put(document.id(), document);
     }
 

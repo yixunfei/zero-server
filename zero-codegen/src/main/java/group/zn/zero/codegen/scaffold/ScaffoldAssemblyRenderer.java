@@ -8,9 +8,7 @@ final class ScaffoldAssemblyRenderer {
         String arguments = business ? "config, sink" : "config";
         String builderType = selection.external()
                 ? "group.zn.zero.runtime.production.ProductionAssembly" : "RuntimeComposition";
-        String reportType = selection.external()
-                ? "group.zn.zero.runtime.production.ZeroProductionAssemblyReport"
-                : "group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan";
+        String reportType = "group.zn.zero.runtime.diagnostics.RuntimeAssemblyDiagnosis";
         StringBuilder source = new StringBuilder("package " + request.packageName() + ";\n\n");
         source.append("import group.zn.zero.core.config.ZeroConfig;\n")
                 .append("import group.zn.zero.runtime.api.GameRuntime;\n")
@@ -26,7 +24,9 @@ final class ScaffoldAssemblyRenderer {
                 .append("        return composition(").append(arguments).append(").build();\n    }\n\n")
                 .append("    /** 只读诊断所给配置；不创建资源，结果为不可变快照。 */\n")
                 .append("    public static ").append(reportType).append(" diagnose(").append(parameters).append(") {\n")
-                .append("        return composition(").append(arguments).append(").diagnose();\n    }\n\n")
+                .append("        return ").append(selection.external() ? "composition(" :
+                        "group.zn.zero.runtime.diagnostics.RuntimeAssemblyDiagnosis.complete(composition(")
+                .append(arguments).append(selection.external() ? ").diagnosis();\n    }\n\n" : ").diagnose());\n    }\n\n")
                 .append("    /** 校验完整配置并返回有序、不可变组件图；缺配置时抛装配异常，无资源副作用。 */\n")
                 .append("    public static group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan plan(")
                 .append(parameters).append(") {\n        return composition(").append(arguments).append(')')
@@ -34,7 +34,7 @@ final class ScaffoldAssemblyRenderer {
                 .append("    private static ").append(builderType).append(" composition(").append(parameters).append(") {\n");
         appendBuilder(source, business, selection.external());
         for (String component : selection.components()) {
-            String expression = ScaffoldComponents.installExpression(component);
+            String expression = ScaffoldComponents.installExpression(selection, component);
             if (!expression.isEmpty()) {
                 if (component.equals("log") && business) {
                     expression = "group.zn.zero.runtime.log.LogRuntime.module(() -> sink)";
@@ -59,7 +59,24 @@ final class ScaffoldAssemblyRenderer {
         if (selection.components().contains("custom-actor")) {
             source.append(customActor());
         }
+        source.append(diagnosticEntrypoint(request, selection, business));
         return source.append("}\n").toString();
+    }
+
+    /** 每个模板共享独立诊断入口，业务 smoke 不需要为了诊断而启动。 */
+    private String diagnosticEntrypoint(final ProjectScaffoldRequest request,
+            final ScaffoldComponents.Selection selection, final boolean business) {
+        return "\n    /** 只读装配诊断入口；无参数，不启动客户端、业务或执行器。 */\n"
+                + "    public static void main(final String[] args) {\n"
+                + "        if (args.length != 0) { throw new IllegalArgumentException(\"diagnosis takes no arguments\"); }\n"
+                + "        var config = group.zn.zero.core.config.ZeroConfigLoader.loadStandard(java.util.Map.ofEntries(\n"
+                + "                java.util.Map.entry(\"zero.name\", \"" + request.projectName() + "\"),\n"
+                + ScaffoldConfiguration.defaults(selection).replace("Map.entry(", "java.util.Map.entry(") + "));\n"
+                + "        var report = diagnose(config" + (business ? ", new group.zn.zero.log.InMemoryLogSink()" : "") + ");\n"
+                + "        System.out.println(\"runtime-diagnosis=\" + (report.missingConfigKeys().isEmpty() ? \"ok\" : \"incomplete\")\n"
+                + "                + \"|profile=\" + report.profile() + \"|productionReady=false|missingConfigKeys=\" + report.missingConfigKeys());\n"
+                + "        report.plan().ifPresent(plan -> System.out.println(\"runtime-plan=\" + plan));\n"
+                + "    }\n";
     }
 
     private void appendBuilder(final StringBuilder source, final boolean business, final boolean external) {

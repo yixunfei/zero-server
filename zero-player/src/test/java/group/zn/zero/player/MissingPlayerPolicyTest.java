@@ -36,7 +36,7 @@ class MissingPlayerPolicyTest {
                     catch (InvocationTargetException failure) { throw failure.getCause(); }
                 });
         try (var service = new LocalPlayerService(new LocalActorScheduler(), request -> 7, repository,
-                new InMemoryCacheService<>(), MissingPlayerPolicy.CREATE_DEFAULT)) {
+                new InMemoryCacheService<>(), MissingPlayerPolicy.CREATE_DEFAULT, Runnable::run)) {
             var first = service.loadPlayer(new PlayerLoadRequest(7, "first"));
             var second = service.loadPlayer(new PlayerLoadRequest(7, "second"));
             firstRead.complete(Optional.empty());
@@ -50,7 +50,7 @@ class MissingPlayerPolicyTest {
     @Test void defaultsRejectWithoutCreatingProfileOrSession() {
         var repository = new InMemoryCrudRepository<Long, PlayerProfile>();
         var cache = new InMemoryCacheService<Long, PlayerProfile>();
-        try (var service = new LocalPlayerService(new LocalActorScheduler(), request -> 7, repository, cache)) {
+        try (var service = new LocalPlayerService(new LocalActorScheduler(), request -> 7, repository, cache, Runnable::run)) {
             assertMissing(() -> service.loadPlayer(new PlayerLoadRequest(7, "trace")).toCompletableFuture().join());
             cache.put(7L, new PlayerProfile(7, "stale-cache", true)).toCompletableFuture().join();
             assertMissing(() -> service.login(new PlayerLoginRequest("account", "token", "trace"))
@@ -64,7 +64,7 @@ class MissingPlayerPolicyTest {
     @Test void explicitCreationSupportsLoginAndLoad() {
         var repository = new InMemoryCrudRepository<Long, PlayerProfile>();
         try (var service = new LocalPlayerService(new LocalActorScheduler(), request -> 7, repository,
-                new InMemoryCacheService<>(), MissingPlayerPolicy.CREATE_DEFAULT)) {
+                new InMemoryCacheService<>(), MissingPlayerPolicy.CREATE_DEFAULT, Runnable::run)) {
             assertEquals(7, service.login(new PlayerLoginRequest("account", "token", "trace"))
                     .toCompletableFuture().join().uid());
             var loaded = service.loadPlayer(new PlayerLoadRequest(8, "trace")).toCompletableFuture().join();
@@ -79,7 +79,7 @@ class MissingPlayerPolicyTest {
         var repository = new InMemoryCrudRepository<Long, PlayerProfile>();
         repository.save(new PlayerProfile(7, "registered", true)).toCompletableFuture().join();
         try (var service = new LocalPlayerService(new LocalActorScheduler(), request -> 7, repository,
-                new InMemoryCacheService<>())) {
+                new InMemoryCacheService<>(), Runnable::run)) {
             assertEquals(7, service.login(new PlayerLoginRequest("account", "token", "trace"))
                     .toCompletableFuture().join().uid());
             assertEquals(1, service.loadPlayer(new PlayerLoadRequest(7, "trace")).toCompletableFuture().join().version());

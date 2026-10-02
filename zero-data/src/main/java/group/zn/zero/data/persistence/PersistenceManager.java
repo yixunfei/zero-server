@@ -27,7 +27,8 @@ public interface PersistenceManager extends DataService {
     <ID, T extends VersionedEntity<ID>> void registerTarget(PersistenceTarget<ID, T> target);
 
     /**
-     * 登记脏对象。
+     * 登记内存脏对象；不捕获或刷盘，JVM 崩溃会丢失未持久化变更。
+     * 需要耐久确认时应使用 durable.DurablePersistenceService 的显式提交。
      *
      * @param targetName 持久化目标名称；不可为空。
      * @param id 对象 ID；不可为空。

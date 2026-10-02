@@ -219,12 +219,12 @@ class SimpleBusinessFullChainExternalIT {
                 "business-provider-" + suffix,
                 providerGroup,
                 topicPrefix,
-                "provider-reply-" + suffix));
+                "provider-reply-" + suffix), resources.timer);
         resources.caller = new KafkaRpcAdapter(kafkaSettings(
                 "business-caller-" + suffix,
                 "business-caller-" + suffix,
                 topicPrefix,
-                replyTopic));
+                replyTopic), resources.timer);
         new RpcServiceBinder(resources.provider, codecRegistry()).bind(
                 BusinessPlayerRpc.class,
                 new BusinessPlayerRpcImpl(
@@ -412,6 +412,8 @@ class SimpleBusinessFullChainExternalIT {
     }
 
     private static final class ExternalResources implements AutoCloseable {
+        /** 测试资源拥有并关闭 RPC 计时器。 */
+        private final java.util.concurrent.ScheduledExecutorService timer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
 
         private final ZeroServerApplication application;
         private MongoClient mongoClient;
@@ -426,6 +428,7 @@ class SimpleBusinessFullChainExternalIT {
 
         @Override
         public void close() {
+            timer.shutdownNow();
             if (caller != null) {
                 caller.close();
             }

@@ -172,8 +172,8 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
      * @throws NullPointerException 当配置为空时抛出。
      * @throws ZeroException 当 Kafka producer 创建失败时抛出。
      */
-    public KafkaRpcAdapter(final KafkaRpcSettings settings) {
-        this(settings, RpcTransportObserver.noop());
+    public KafkaRpcAdapter(final KafkaRpcSettings settings, final java.util.concurrent.ScheduledExecutorService timer) {
+        this(settings, RpcTransportObserver.noop(), timer);
     }
 
     /**
@@ -184,8 +184,8 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
      * @throws NullPointerException 当任一参数为空时抛出。
      * @throws ZeroException 当 Kafka producer 创建失败时抛出。
      */
-    public KafkaRpcAdapter(final KafkaRpcSettings settings, final RpcTransportObserver observer) {
-        this(settings, null, observer);
+    public KafkaRpcAdapter(final KafkaRpcSettings settings, final RpcTransportObserver observer, final java.util.concurrent.ScheduledExecutorService timer) {
+        this(settings, null, observer, timer);
     }
 
     /**
@@ -195,8 +195,8 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
      * @param gateway Kafka RPC 消息网关；可为空，为空时创建 Apache Kafka gateway。
      * @throws NullPointerException 当配置为空时抛出。
      */
-    KafkaRpcAdapter(final KafkaRpcSettings settings, final KafkaRpcMessageGateway gateway) {
-        this(settings, gateway, RpcTransportObserver.noop());
+    KafkaRpcAdapter(final KafkaRpcSettings settings, final KafkaRpcMessageGateway gateway, final java.util.concurrent.ScheduledExecutorService timer) {
+        this(settings, gateway, RpcTransportObserver.noop(), timer);
     }
 
     /**
@@ -210,7 +210,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
     KafkaRpcAdapter(
             final KafkaRpcSettings settings,
             final KafkaRpcMessageGateway gateway,
-            final RpcTransportObserver observer) {
+            final RpcTransportObserver observer, final java.util.concurrent.ScheduledExecutorService timer) {
         this.settings = Objects.requireNonNull(settings, "settings");
         this.observer = Objects.requireNonNull(observer, "observer");
         KafkaRpcMessageGateway currentGateway = gateway == null
@@ -223,7 +223,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
             currentPendingRequests = new KafkaRpcPendingRequests(
                     settings.pendingCapacity(),
                     this::observe,
-                    name());
+                    name(), timer);
             this.pendingRequests = currentPendingRequests;
             ensureReplySubscription(settings.replyTopic());
         } catch (RuntimeException | Error ex) {
@@ -447,7 +447,13 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
     }
 
     private CompletionStage<Void> onRequestMessageAsync(final KafkaRpcMessage message) {
-        KafkaRpcEnvelope envelope = envelopeCodec.decode(message.value());
+        final KafkaRpcEnvelope envelope;
+        try {
+            envelope = envelopeCodec.decode(message.value());
+        } catch (RuntimeException | Error failure) {
+            LOGGER.log(System.Logger.Level.WARNING, "kafka rpc request envelope decode failed", failure);
+            return CompletableFuture.completedFuture(null);
+        }
         if (envelope.kind() != KafkaRpcEnvelopeKind.REQUEST) {
             return CompletableFuture.completedFuture(null);
         }
@@ -506,7 +512,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
             observe(RpcTransportEventType.HANDLER_FAILED, request, topicResolver.requestTopic(request),
                     request.group(), RpcErrorCode.HANDLER_FAILED, messageOf(ex));
             if (request.mode() == RpcMode.ONEWAY) {
-                return CompletableFuture.failedFuture(ex);
+                return CompletableFuture.completedFuture(null);
             }
             return reject(request, RpcErrorCode.HANDLER_FAILED, messageOf(ex));
         }
@@ -515,7 +521,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
                 observe(RpcTransportEventType.HANDLER_FAILED, request, topicResolver.requestTopic(request),
                         request.group(), RpcErrorCode.HANDLER_FAILED, messageOf(unwrap(throwable)));
                 if (request.mode() == RpcMode.ONEWAY) {
-                    return CompletableFuture.failedFuture(throwable);
+                    return CompletableFuture.completedFuture(null);
                 }
                 return reject(request, RpcErrorCode.HANDLER_FAILED, messageOf(unwrap(throwable)));
             }
@@ -612,7 +618,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
             return;
         }
         try {
-            targetGateway.subscribe(currentTopic, replyListener);
+            targetGateway.subscribeReply(currentTopic, replyListener);
             requireOpen();
         } catch (RuntimeException | Error ex) {
             replyTopics.remove(currentTopic);
@@ -620,7 +626,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
                     "subscribe kafka rpc reply topic failed",
                     ex);
             try {
-                targetGateway.unsubscribe(currentTopic, replyListener);
+                targetGateway.unsubscribeReply(currentTopic, replyListener);
             } catch (RuntimeException | Error cleanupFailure) {
                 failure = KafkaRpcResourceException.merge(
                         failure,
@@ -680,7 +686,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
         KafkaRpcResourceException failure = primary;
         for (String topic : replyTopics) {
             try {
-                gateway.unsubscribe(topic, replyListener);
+                gateway.unsubscribeReply(topic, replyListener);
             } catch (RuntimeException | Error ex) {
                 failure = KafkaRpcResourceException.merge(
                         failure,

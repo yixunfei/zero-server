@@ -198,3 +198,8 @@ consumer 侧默认调用路径仍由 `RpcClientFactory`、`RpcRoute` 和具体 t
 调用方取消 request/response RPC 时，本地 pending request、超时计时器和 transport response 必须一并结束；取消不会声称远端业务已回滚。Kafka/Nacos 外部 Actor 路径默认要求显式认证配置和 `external-tests` 开关，缺少真实中间件或认证材料时测试应 fail-closed，而不能伪造成功。服务发现解析使用快照和轮询 fencing，旧实例或旧路由不能覆盖新结果。
 
 同步 RPC 仍受 timeout budget、`timeoutAt` 和至少一次投递语义约束。跨进程业务必须自行提供幂等键、版本检查或补偿；Actor handler 不得阻塞等待远程结果。详见[专项审查报告](reports/concurrency-distributed-audit-20260926.zh-CN.md)。
+
+
+## 2026-10-01 Kafka 计时资源接入
+
+`KafkaRpcAdapter` / `KafkaRpcPendingRequests` 构造现在必须显式接收 `ScheduledExecutorService`。生产 Provider 依赖 `RuntimeBasics.EXECUTORS` 并注入 `scheduledExecutor("kafka-rpc")`；时间轮不再创建裸线程。Adapter close 取消自身周期句柄，运行时统一关闭执行器。自定义组合根必须管理相同的关闭顺序；请求超时/完成语义不变。详见 [0.x 迁移](migrations/20261001-audit-reliability.zh-CN.md)。

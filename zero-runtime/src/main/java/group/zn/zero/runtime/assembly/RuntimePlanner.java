@@ -390,7 +390,7 @@ final class RuntimePlanner {
                 .toList();
         List<String> roots = input.requirements().stream().sorted(KEY_ORDER).map(BindingKey::id).toList();
         return new RuntimeAssemblyPlan(
-                input.profile().name(), input.presetName(), roots, components, edges, config.metadata());
+                input.profile().name(), input.presetName(), roots, components, edges, config.metadata(), config.diagnostics());
     }
 
     private ComponentPlan componentPlan(

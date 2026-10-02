@@ -6,8 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import group.zn.zero.runtime.capability.MavenCoordinate;
+import group.zn.zero.runtime.api.ComponentId;
+import group.zn.zero.runtime.api.BindingCardinality;
+import group.zn.zero.runtime.capability.RuntimeCapability;
+import group.zn.zero.runtime.capability.RuntimeCapabilityModel;
+import group.zn.zero.runtime.capability.RuntimeProviderCapability;
 import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class ScaffoldComponentsTest {
@@ -17,7 +23,7 @@ class ScaffoldComponentsTest {
     void minimalSelectionOnlyUsesBootstrap() {
         var result = components.resolve(List.of(), List.of());
         assertEquals(List.of("bootstrap"), result.components());
-        assertEquals(List.of(MavenCoordinate.zero("zero-runtime-bootstrap")), result.artifacts());
+        assertEquals(List.of(MavenCoordinate.zero("zero-core"), MavenCoordinate.zero("zero-runtime-bootstrap")), result.artifacts());
         assertEquals(List.of("zero.config", "zero.executors"), result.capabilities());
     }
 
@@ -80,5 +86,49 @@ class ScaffoldComponentsTest {
         assertTrue(result.providers().contains("zero.production.nacos-rpc-resolver"));
         assertEquals(List.of("redis", "mongo", "postgresql"), ScaffoldComponents.repositorySources(result.components()));
         assertEquals(1, result.providers().stream().filter("zero.data.repository-catalog"::equals).count());
+    }
+
+    @Test
+    void customCatalogDefinitionShouldDriveProviderArtifactAndExpression() {
+        ComponentId providerId = ComponentId.of("application.custom-provider");
+        RuntimeCapabilityModel model = RuntimeCapabilityModel.builder("test.custom")
+                .capability(new RuntimeCapability("custom.capability", BindingCardinality.SINGLE, List.of(),
+                        List.of(StandardRuntimeCapabilityModel.PROFILE_LOCAL),
+                        List.of(MavenCoordinate.zero("custom-api"))))
+                .provider(new RuntimeProviderCapability(providerId, List.of("custom.capability"), List.of(),
+                        List.of(StandardRuntimeCapabilityModel.PROFILE_LOCAL),
+                        List.of(MavenCoordinate.zero("custom-api"), MavenCoordinate.zero("custom-provider"))))
+                .build();
+        ScaffoldComponentDefinition custom = new ScaffoldComponentDefinition(
+                "custom", List.of(providerId), List.of(), "application.CustomRuntime.module()",
+                Map.of("custom.enabled", "true"), "custom.endpoint=127.0.0.1\n");
+        ScaffoldComponents components = new ScaffoldComponents(model, List.of(
+                ScaffoldComponentDefinition.runtime("bootstrap", ""), custom));
+
+        var result = components.resolve(List.of(), List.of("custom"));
+
+        assertEquals(List.of("bootstrap", "custom"), result.components());
+        assertTrue(result.artifacts().containsAll(List.of(
+                MavenCoordinate.zero("custom-api"), MavenCoordinate.zero("custom-provider"))));
+        assertEquals("application.CustomRuntime.module()", result.definitions().get("custom").installExpression());
+        assertEquals("true", result.definitions().get("custom").configDefaults().get("custom.enabled"));
+    }
+
+    @Test
+    void customCatalogShouldRejectDuplicateComponentAndUnknownProvider() {
+        assertThrows(IllegalArgumentException.class, () -> new ScaffoldComponents(
+                StandardRuntimeCapabilityModel.instance(),
+                List.of(ScaffoldComponentDefinition.runtime("bootstrap", ""),
+                        ScaffoldComponentDefinition.runtime("bootstrap", ""))));
+        assertThrows(IllegalArgumentException.class, () -> new ScaffoldComponents(
+                StandardRuntimeCapabilityModel.instance(),
+                List.of(ScaffoldComponentDefinition.runtime("bootstrap", ""),
+                        ScaffoldComponentDefinition.runtime("custom", "", ComponentId.of("missing.provider")))));
+        assertThrows(IllegalArgumentException.class, () -> new ScaffoldComponents(
+                StandardRuntimeCapabilityModel.instance(),
+                List.of(ScaffoldComponentDefinition.runtime("bootstrap", "", StandardRuntimeCapabilityModel.LOCAL_CONFIG),
+                        ScaffoldComponentDefinition.runtime("duplicate", "", StandardRuntimeCapabilityModel.LOCAL_CONFIG))));
+        assertThrows(IllegalArgumentException.class, () -> new ScaffoldComponents(
+                StandardRuntimeCapabilityModel.instance(), List.of()));
     }
 }

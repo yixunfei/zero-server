@@ -30,4 +30,13 @@ public interface ConfigSource {
      * @return 原始值；为空表示不存在。
      */
     Optional<String> value(String alias);
+
+    /**
+     * 返回同次读取值的实际来源；包装来源可保留文件或应用默认值归因。
+     * @param alias schema 允许的键。
+     * @return 不可变定位信息；不包含值，线程安全性与来源一致。
+     */
+    default ConfigSourceOrigin origin(final String alias) {
+        return new ConfigSourceOrigin(kind(), id(), alias);
+    }
 }

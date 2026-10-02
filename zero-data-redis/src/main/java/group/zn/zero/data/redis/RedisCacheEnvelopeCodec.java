@@ -18,6 +18,9 @@ import java.util.Objects;
  */
 public final class RedisCacheEnvelopeCodec {
 
+    /** 单个缓存 payload 的最大允许大小，避免损坏长度触发过量分配。 */
+    private static final int MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
+
     /**
      * 编码缓存信封。
      *
@@ -64,10 +67,16 @@ public final class RedisCacheEnvelopeCodec {
             long expireAt = input.readLong();
             boolean negative = input.readBoolean();
             int payloadLength = input.readInt();
-            if (payloadLength < 0) {
+            if (payloadLength < 0 || payloadLength > MAX_PAYLOAD_BYTES) {
                 throw ZeroException.of(
                         CacheErrorCode.DESERIALIZE_FAILED,
                         "redis cache envelope payload length invalid",
+                        null);
+            }
+            if (payloadLength > input.available()) {
+                throw ZeroException.of(
+                        CacheErrorCode.DESERIALIZE_FAILED,
+                        "redis cache envelope payload truncated",
                         null);
             }
             byte[] payload = input.readNBytes(payloadLength);

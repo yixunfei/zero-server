@@ -32,7 +32,7 @@ public final class RuntimeBasics {
             .defaultValue(ZeroRuntimeConfigKeys.MODE_LOCAL).validate(value -> !value.isBlank(), "non-blank").build();
     private static final ConfigKey<String> NAME = ConfigKey.string(
                     StandardRuntimeCapabilityModel.LOCAL_CONFIG, ZeroRuntimeConfigKeys.ZERO_NAME)
-            .defaultValue(ZeroRuntimeConfigKeys.DEFAULT_NAME).validate(value -> !value.isBlank(), "non-blank").build();
+            .defaultValue(ZeroRuntimeConfigKeys.DEFAULT_NAME).validate(value -> !value.isBlank(), "non-blank").sensitive().build();
 
     private RuntimeBasics() {
     }

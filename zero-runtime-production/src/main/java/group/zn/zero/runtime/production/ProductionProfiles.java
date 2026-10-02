@@ -1,6 +1,6 @@
 package group.zn.zero.runtime.production;
 
-import group.zn.zero.core.config.MapZeroConfig;
+import group.zn.zero.core.config.SourcedZeroConfig;
 import group.zn.zero.core.config.ZeroConfig;
 import group.zn.zero.core.error.SystemErrorCode;
 import group.zn.zero.core.error.ZeroException;
@@ -23,11 +23,11 @@ public final class ProductionProfiles {
         var values = new LinkedHashMap<String, String>();
         values.put(ZeroRuntimeConfigKeys.ZERO_MODE, profile);
         values.put(ZeroRuntimeConfigKeys.ZERO_NAME, ZeroRuntimeConfigKeys.DEFAULT_NAME);
-        values.putAll(Objects.requireNonNull(config, "config").asMap());
-        if (!profile.equals(values.get(ZeroRuntimeConfigKeys.ZERO_MODE))) {
+        ZeroConfig merged = SourcedZeroConfig.withDefaults(Objects.requireNonNull(config, "config"), values);
+        if (!profile.equals(merged.require(ZeroRuntimeConfigKeys.ZERO_MODE))) {
             throw ZeroException.of(SystemErrorCode.INVALID_ARGUMENT,
                     "zero.mode must match the production assembly profile", null);
         }
-        return new MapZeroConfig(values);
+        return merged;
     }
 }

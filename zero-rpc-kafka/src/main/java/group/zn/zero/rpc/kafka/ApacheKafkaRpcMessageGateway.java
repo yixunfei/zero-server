@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
@@ -49,6 +50,9 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
      * Kafka RPC 配置。
      */
     private final KafkaRpcSettings settings;
+
+    /** 当前网关独占的 reply consumer group，避免多节点共享 group 丢失响应。 */
+    private final String replyConsumerGroup;
 
     /**
      * RPC 传输观测器。
@@ -137,6 +141,8 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
             final KafkaRpcClientFactory clientFactory,
             final WorkerLifecycleProbe workerLifecycleProbe) {
         this.settings = Objects.requireNonNull(settings, "settings");
+        this.replyConsumerGroup = settings.consumerGroupId() + "-reply-"
+                + UUID.randomUUID().toString().replace("-", "");
         this.observer = Objects.requireNonNull(observer, "observer");
         this.clientFactory = Objects.requireNonNull(clientFactory, "clientFactory");
         this.workerLifecycleProbe = Objects.requireNonNull(workerLifecycleProbe, "workerLifecycleProbe");
@@ -190,6 +196,12 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
         subscribe(topic, settings.consumerGroupId(), listener);
     }
 
+    /** 使用进程独占 consumer group 订阅 reply topic。 */
+    @Override
+    public void subscribeReply(final String topic, final KafkaRpcMessageListener listener) {
+        subscribe(topic, replyConsumerGroup, listener);
+    }
+
     /**
      * 按 consumer group 订阅 Kafka topic。
      *
@@ -221,6 +233,12 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
     @Override
     public void unsubscribe(final String topic, final KafkaRpcMessageListener listener) {
         unsubscribe(topic, settings.consumerGroupId(), listener);
+    }
+
+    /** 取消 reply topic 的进程独占订阅。 */
+    @Override
+    public void unsubscribeReply(final String topic, final KafkaRpcMessageListener listener) {
+        unsubscribe(topic, replyConsumerGroup, listener);
     }
 
     /**

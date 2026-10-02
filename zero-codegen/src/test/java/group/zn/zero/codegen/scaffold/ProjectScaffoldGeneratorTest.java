@@ -176,6 +176,27 @@ class ProjectScaffoldGeneratorTest {
         }
     }
 
+    @Test
+    void forceGenerationRefusesToOverwriteModifiedGeneratedFile() throws Exception {
+        ScaffoldCatalog catalog = ScaffoldCatalog.standard();
+        Path output = temporaryDirectory.resolve("force-conflict");
+        ProjectScaffoldRequest initial = new ProjectScaffoldRequest(
+                "force-game", "group.zn.force.game", output, "0.1.0-SNAPSHOT", catalog.require("local"),
+                Path.of("../templates"), "", List.of(), false);
+        ProjectScaffoldGenerator generator = new ProjectScaffoldGenerator(catalog.capabilityModel());
+        generator.generate(initial);
+
+        Path application = output.resolve("src/main/java/group/zn/force/game/ForceGameApplication.java");
+        String changed = Files.readString(application, StandardCharsets.UTF_8) + "\n// user change\n";
+        Files.writeString(application, changed, StandardCharsets.UTF_8);
+        ProjectScaffoldRequest forced = new ProjectScaffoldRequest(
+                "force-game", "group.zn.force.game", output, "0.1.0-SNAPSHOT", catalog.require("local"),
+                Path.of("../templates"), "", List.of(), true);
+
+        assertThrows(IllegalStateException.class, () -> generator.generate(forced));
+        assertEquals(changed, Files.readString(application, StandardCharsets.UTF_8));
+    }
+
     private void createMinimalTemplate(final Path root, final ScaffoldTemplate template) throws IOException {
         Files.createDirectories(root);
         write(root, "pom.xml.tpl", "<dependencies>\n__FRAMEWORK_DEPENDENCIES_XML__\n</dependencies>\n");

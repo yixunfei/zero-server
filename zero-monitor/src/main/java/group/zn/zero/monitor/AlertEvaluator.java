@@ -2,9 +2,13 @@ package group.zn.zero.monitor;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 告警规则评估器。
@@ -27,6 +31,12 @@ public final class AlertEvaluator {
      * 时钟。
      */
     private final Clock clock;
+
+    /** 每条规则当前连续满足条件的起始时间。 */
+    private final Map<AlertKey, Instant> activeSince = new HashMap<>();
+
+    /** 已经发出过告警、尚未恢复的规则实例。 */
+    private final Set<AlertKey> alerted = new HashSet<>();
 
     /**
      * 创建告警规则评估器。
@@ -59,13 +69,28 @@ public final class AlertEvaluator {
      * @param registry 指标注册表；不可为空。
      * @return 触发的告警事件；不可为空；有序；可能为空。
      */
-    public List<AlertEvent> evaluate(final MetricRegistry registry) {
+    public synchronized List<AlertEvent> evaluate(final MetricRegistry registry) {
         MetricRegistry current = Objects.requireNonNull(registry, "registry");
-        List<AlertEvent> events = current.samples().stream()
-                .flatMap(sample -> rules.stream()
-                        .filter(rule -> matches(rule, sample))
-                        .map(rule -> event(rule, sample)))
-                .toList();
+        List<MetricSample> samples = current.samples();
+        List<AlertEvent> events = new ArrayList<>();
+        for (AlertRule rule : rules) {
+            AlertKey key = new AlertKey(rule.name(), rule.metricName(), rule.labels());
+            MetricSample sample = latestSample(rule, samples);
+            if (sample == null || !rule.condition().matches(sample.value(), rule.threshold())) {
+                activeSince.remove(key);
+                alerted.remove(key);
+                continue;
+            }
+            Instant since = activeSince.computeIfAbsent(key, ignored -> sample.time());
+            if (sample.time().isBefore(since)) {
+                since = sample.time();
+                activeSince.put(key, since);
+            }
+            Instant now = Instant.now(clock);
+            if (!now.isBefore(since.plus(rule.holdFor())) && alerted.add(key)) {
+                events.add(event(rule, sample, now));
+            }
+        }
         for (AlertEvent event : events) {
             for (AlertSink sink : sinks) {
                 sink.publish(event);
@@ -74,10 +99,16 @@ public final class AlertEvaluator {
         return events;
     }
 
-    private boolean matches(final AlertRule rule, final MetricSample sample) {
-        return rule.metricName().equals(sample.name())
-                && labelsMatch(rule.labels(), sample.labels())
-                && rule.condition().matches(sample.value(), rule.threshold());
+    private MetricSample latestSample(final AlertRule rule, final List<MetricSample> samples) {
+        MetricSample latest = null;
+        for (MetricSample sample : samples) {
+            if (rule.metricName().equals(sample.name())
+                    && labelsMatch(rule.labels(), sample.labels())
+                    && (latest == null || !sample.time().isBefore(latest.time()))) {
+                latest = sample;
+            }
+        }
+        return latest;
     }
 
     private boolean labelsMatch(final Map<String, String> expected, final Map<String, String> actual) {
@@ -89,8 +120,7 @@ public final class AlertEvaluator {
         return true;
     }
 
-    private AlertEvent event(final AlertRule rule, final MetricSample sample) {
-        Instant now = Instant.now(clock);
+    private AlertEvent event(final AlertRule rule, final MetricSample sample, final Instant now) {
         return new AlertEvent(
                 rule.name(),
                 rule.metricName(),
@@ -100,5 +130,9 @@ public final class AlertEvaluator {
                 sample.labels(),
                 now,
                 rule.message());
+    }
+
+    /** 唯一标识一条规则及其标签维度。 */
+    private record AlertKey(String ruleName, String metricName, Map<String, String> labels) {
     }
 }

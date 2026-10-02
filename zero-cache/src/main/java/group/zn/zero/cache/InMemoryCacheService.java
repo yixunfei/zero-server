@@ -197,7 +197,7 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
                     loadCount.increment();
                     loading.remove(key, future);
                     future.complete(value);
-                } catch (RuntimeException ex) {
+                } catch (RuntimeException | Error ex) {
                     completeLoadFailure(future, key, ex);
                 }
             });
@@ -208,7 +208,7 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
                     boundedLoad.completeExceptionally(failure);
                 }
             });
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             boundedLoad.completeExceptionally(ex);
         }
         return future;

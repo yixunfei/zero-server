@@ -159,7 +159,12 @@ public final class InMemoryEventBus implements EventBus {
         try {
             for (InterceptorRegistration registration : registrations.interceptors()) {
                 if (!registration.interceptor().beforePublish(event)) {
-                    return SUCCESS;
+                    ZeroException rejection = ZeroException.of(
+                            SystemErrorCode.SYSTEM_ERROR,
+                            "event publication rejected by interceptor: " + event.eventId(),
+                            null);
+                    recordDeadLetter(event, rejection);
+                    return CompletableFuture.failedFuture(rejection);
                 }
             }
         } catch (RuntimeException | Error ex) {

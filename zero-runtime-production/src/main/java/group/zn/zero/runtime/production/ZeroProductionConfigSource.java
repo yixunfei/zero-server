@@ -8,7 +8,7 @@ import java.util.Objects;
  * <p>该记录只保存逻辑配置键、来源类型和来源键名，不保存原始配置值。
  *
  * @param logicalKey 逻辑配置键。
- * @param sourceType 来源类型，例如 `ZeroConfig`、`systemProperty` 或 `environment`。
+ * @param sourceType 来源类型：ZeroConfig、systemProperty、environment、file 或 default。
  * @param sourceKey 实际命中的键名。
  * @param sensitive 是否属于敏感配置项。
  * @author zn

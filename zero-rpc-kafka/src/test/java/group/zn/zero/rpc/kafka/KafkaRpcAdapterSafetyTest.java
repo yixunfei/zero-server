@@ -25,6 +25,9 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class KafkaRpcAdapterSafetyTest {
+    /** 测试拥有计时器，Adapter 仅拥有任务。 */
+    @org.junit.jupiter.api.extension.RegisterExtension
+    private final KafkaTestTimer timer = new KafkaTestTimer();
 
     /** 测试使用的第三方敏感异常标记。 */
     private static final String FAILURE_SECRET = "adapter-observer-secret";
@@ -42,7 +45,7 @@ class KafkaRpcAdapterSafetyTest {
                 throw new AssertionError(FAILURE_SECRET + "-oneway");
             }
         };
-        KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings(), gateway, observer);
+        KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings(), gateway, observer, timer.executor());
 
         adapter.oneway(request("observer-error", "service", "method")).toCompletableFuture().join();
 
@@ -58,7 +61,7 @@ class KafkaRpcAdapterSafetyTest {
     @Test
     void unregisterFailureShouldPreserveRegistrationForRetry() {
         SafetyGateway gateway = new SafetyGateway(true);
-        KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings(), gateway);
+        KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings(), gateway, timer.executor());
         adapter.securityMetadataVerifier(group.zn.zero.security.SecurityMetadataAssertion.verifier(
                 group.zn.zero.security.SecurityMetadataAssertion.digest(new byte[] {1})));
         AtomicInteger handlerCalls = new AtomicInteger();

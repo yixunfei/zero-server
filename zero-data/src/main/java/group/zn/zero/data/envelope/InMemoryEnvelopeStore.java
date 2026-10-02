@@ -22,6 +22,11 @@ public final class InMemoryEnvelopeStore implements ZeroDataEnvelopeStore {
 
     @Override
     public synchronized void save(final ZeroDataEnvelope envelope) {
+        ZeroDataEnvelope previous = entries.get(envelope.id());
+        if (previous != null && previous.version() > envelope.version()) {
+            throw group.zn.zero.core.error.ZeroException.of(
+                    group.zn.zero.data.error.DataErrorCode.VERSION_CONFLICT, "snapshot version would regress", null);
+        }
         entries.put(envelope.id(), envelope);
     }
 

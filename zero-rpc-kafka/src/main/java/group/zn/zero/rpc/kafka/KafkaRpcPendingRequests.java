@@ -102,8 +102,8 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
      * @param capacity pending 最大容量。
      * @throws IllegalArgumentException 当容量非法时抛出。
      */
-    public KafkaRpcPendingRequests(final int capacity) {
-        this(capacity, KafkaRpcTimeoutWheel.DEFAULT_TICK_DURATION, KafkaRpcTimeoutWheel.DEFAULT_WHEEL_SIZE);
+    public KafkaRpcPendingRequests(final int capacity, final java.util.concurrent.ScheduledExecutorService timer) {
+        this(capacity, KafkaRpcTimeoutWheel.DEFAULT_TICK_DURATION, KafkaRpcTimeoutWheel.DEFAULT_WHEEL_SIZE, timer);
     }
 
     /**
@@ -117,13 +117,13 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
     public KafkaRpcPendingRequests(
             final int capacity,
             final RpcTransportObserver observer,
-            final String transportName) {
+            final String transportName, final java.util.concurrent.ScheduledExecutorService timer) {
         this(
                 capacity,
                 KafkaRpcTimeoutWheel.DEFAULT_TICK_DURATION,
                 KafkaRpcTimeoutWheel.DEFAULT_WHEEL_SIZE,
                 observer,
-                transportName);
+                transportName, timer);
     }
 
     /**
@@ -135,8 +135,8 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
      * @throws NullPointerException 当 tick 间隔为空时抛出。
      * @throws IllegalArgumentException 当容量、tick 间隔或桶数量非法时抛出。
      */
-    KafkaRpcPendingRequests(final int capacity, final Duration tickDuration, final int wheelSize) {
-        this(capacity, tickDuration, wheelSize, RpcTransportObserver.noop(), "kafka");
+    KafkaRpcPendingRequests(final int capacity, final Duration tickDuration, final int wheelSize, final java.util.concurrent.ScheduledExecutorService timer) {
+        this(capacity, tickDuration, wheelSize, RpcTransportObserver.noop(), "kafka", timer);
     }
 
     /**
@@ -155,7 +155,7 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
             final Duration tickDuration,
             final int wheelSize,
             final RpcTransportObserver observer,
-            final String transportName) {
+            final String transportName, final java.util.concurrent.ScheduledExecutorService timer) {
         if (capacity <= 0) {
             throw new IllegalArgumentException("capacity must be positive");
         }
@@ -163,7 +163,7 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
         this.permits = new Semaphore(capacity);
         this.observer = Objects.requireNonNull(observer, "observer");
         this.transportName = requireText(transportName, "transportName");
-        this.timeoutWheel = new KafkaRpcTimeoutWheel(tickDuration, wheelSize, this::timeout);
+        this.timeoutWheel = new KafkaRpcTimeoutWheel(tickDuration, wheelSize, this::timeout, timer);
     }
 
     /**

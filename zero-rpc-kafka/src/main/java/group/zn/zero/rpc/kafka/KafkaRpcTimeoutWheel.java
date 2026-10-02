@@ -6,12 +6,12 @@ import java.util.ArrayDeque;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.LockSupport;
+
 
 /**
  * Kafka RPC pending 请求超时时间轮。
  *
- * <p>该实现使用单个后台线程按固定 tick 扫描桶位，避免为每个 pending 请求创建
+ * <p>该实现使用外部受管计时器按固定 tick 扫描桶位，避免为每个 pending 请求创建
  * {@code ScheduledFuture}。完成或失败的请求不需要从桶内移除，超时回调触发时由 pending 表
  * 自身做幂等删除。</p>
  *
@@ -70,9 +70,9 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
     private final AtomicLong currentTick = new AtomicLong();
 
     /**
-     * 后台 worker 线程。
+     * 外部计时器上的任务句柄；关闭只取消任务，不关闭外部执行器。
      */
-    private final Thread worker;
+    private final java.util.concurrent.ScheduledFuture<?> ticking;
 
     /**
      * 创建默认时间轮。
@@ -80,8 +80,8 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
      * @param timeoutHandler 超时回调；不可为空。
      * @throws NullPointerException 当超时回调为空时抛出。
      */
-    KafkaRpcTimeoutWheel(final TimeoutHandler timeoutHandler) {
-        this(DEFAULT_TICK_DURATION, DEFAULT_WHEEL_SIZE, timeoutHandler);
+    KafkaRpcTimeoutWheel(final TimeoutHandler timeoutHandler, final java.util.concurrent.ScheduledExecutorService timer) {
+        this(DEFAULT_TICK_DURATION, DEFAULT_WHEEL_SIZE, timeoutHandler, timer);
     }
 
     /**
@@ -97,7 +97,7 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
     KafkaRpcTimeoutWheel(
             final Duration tickDuration,
             final int wheelSize,
-            final TimeoutHandler timeoutHandler) {
+            final TimeoutHandler timeoutHandler, final java.util.concurrent.ScheduledExecutorService timer) {
         Duration currentTickDuration = Objects.requireNonNull(tickDuration, "tickDuration");
         if (currentTickDuration.isNegative() || currentTickDuration.isZero()) {
             throw new IllegalArgumentException("tickDuration must be positive");
@@ -113,9 +113,8 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
         for (int index = 0; index < wheelSize; index++) {
             buckets[index] = new ArrayDeque<>();
         }
-        this.worker = new Thread(this::run, "zero-rpc-kafka-pending-time-wheel");
-        this.worker.setDaemon(true);
-        this.worker.start();
+        this.ticking = Objects.requireNonNull(timer, "timer").scheduleWithFixedDelay(
+                this::tick, tickNanos, tickNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
     }
 
     /**
@@ -152,9 +151,7 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
         if (!running.compareAndSet(true, false)) {
             return;
         }
-        LockSupport.unpark(worker);
-        worker.interrupt();
-        joinWorker();
+        ticking.cancel(false);
         for (ArrayDeque<TimeoutTask> bucket : buckets) {
             synchronized (bucket) {
                 bucket.clear();
@@ -162,27 +159,11 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
         }
     }
 
-    private void run() {
-        long nextTickAt = System.nanoTime() + tickNanos;
-        while (running.get()) {
-            long waitNanos = nextTickAt - System.nanoTime();
-            if (waitNanos > 0L) {
-                LockSupport.parkNanos(waitNanos);
-            }
-            if (!running.get()) {
-                break;
-            }
-            if (Thread.interrupted() && !running.get()) {
-                break;
-            }
-            long tick = currentTick.incrementAndGet();
-            expireBucket(bucketIndex(tick), System.currentTimeMillis());
-            nextTickAt = nextTickAt + tickNanos;
-            long now = System.nanoTime();
-            if (nextTickAt < now - tickNanos) {
-                nextTickAt = now + tickNanos;
-            }
-        }
+    /** Tick 由组合根受管计时器调用；关闭后不再推进。 */
+    private void tick() {
+        if (!running.get()) return;
+        long tick = currentTick.incrementAndGet();
+        expireBucket(bucketIndex(tick), System.currentTimeMillis());
     }
 
     private void expireBucket(final int bucketIndex, final long nowMillis) {
@@ -202,7 +183,7 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
             }
             bucket.addAll(postponedTasks);
         }
-        while (!dueTasks.isEmpty()) {
+        while (running.get() && !dueTasks.isEmpty()) {
             TimeoutTask task = dueTasks.removeFirst();
             if (nowMillis >= task.deadlineMillis()) {
                 notifyTimeout(task);
@@ -223,14 +204,6 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
 
     private int bucketIndex(final long tick) {
         return (int) Math.floorMod(tick, wheelSize);
-    }
-
-    private void joinWorker() {
-        try {
-            worker.join(Math.max(100L, tickMillis * 2L));
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-        }
     }
 
     private static long divideCeil(final long value, final long divisor) {
