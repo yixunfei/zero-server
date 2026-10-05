@@ -19,7 +19,7 @@ public final class PrometheusExporter {
      * 导出 Prometheus 文本。
      *
      * @param registry 指标注册表；不可为空。
-     * @return Prometheus 文本；不可为空；按定义和样本快照输出。
+     * @return Prometheus 文本；不可为空；按定义和序列首次出现顺序输出各序列的最新样本。
      * @throws NullPointerException 当注册表为空时抛出。
      * @throws ZeroException 当快照包含冲突定义、未注册样本或 schema 不一致样本时抛出。
      */
@@ -27,6 +27,7 @@ public final class PrometheusExporter {
         MetricRegistry current = Objects.requireNonNull(registry, "registry");
         StringBuilder builder = new StringBuilder();
         Map<String, MetricDefinition> defined = new LinkedHashMap<>();
+        Map<SeriesKey, MetricSample> latest = new LinkedHashMap<>();
         for (MetricDefinition definition : current.definitions()) {
             if (definition == null) {
                 throw MetricContract.failure(
@@ -61,6 +62,15 @@ public final class PrometheusExporter {
                         null);
             }
             MetricContract.requireMatchingSchema(definition, sample);
+            epochMillis(sample);
+            SeriesKey key = new SeriesKey(sample.name(), sample.labels());
+            MetricSample previous = latest.get(key);
+            if (previous == null || !sample.time().isBefore(previous.time())) {
+                latest.put(key, sample);
+            }
+        }
+        for (MetricSample sample : latest.values()) {
+            MetricDefinition definition = defined.get(sample.name());
             appendSample(builder, definition, sample);
         }
         return builder.toString();
@@ -84,15 +94,19 @@ public final class PrometheusExporter {
         builder.append(sample.name());
         appendLabels(builder, definition.labelNames(), sample.labels());
         builder.append(' ').append(formatValue(sample.value())).append(' ');
+        builder.append(epochMillis(sample));
+        builder.append('\n');
+    }
+
+    private long epochMillis(final MetricSample sample) {
         try {
-            builder.append(sample.time().toEpochMilli());
+            return sample.time().toEpochMilli();
         } catch (ArithmeticException exception) {
             throw MetricContract.failure(
                     MonitorErrorCode.METRIC_SAMPLE_INVALID,
                     "sample timestamp is outside epoch millisecond range",
                     exception);
         }
-        builder.append('\n');
     }
 
     private String typeOf(final MetricDefinition definition) {
@@ -150,5 +164,8 @@ public final class PrometheusExporter {
             }
             builder.append(current);
         }
+    }
+
+    private record SeriesKey(String name, Map<String, String> labels) {
     }
 }

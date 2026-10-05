@@ -6,6 +6,12 @@
 
 | 日期 / 主题 | 适用范围 |
 | --- | --- |
+| [2026-10-05 全仓可靠性复核](20261005-full-reliability-review.zh-CN.md) | 本地告警失败重试、Prometheus 单序列最新样本和 API 门禁解释 |
+| [2026-10-05 数据、同步与 Kafka 性能修复](20261005-performance-issues.zh-CN.md) | 显式 IO executor、批量/分页、连接池、flush 并发、共享摘要、KCP Cipher 和独占 reply topic |
+| [2026-10-04 反馈专项：RPC、网络、数据与边界适配](20261004-feedback-hardening.zh-CN.md) | S1-S3、H1-H10 的确认修复、可配置并发行为、协议限制和未覆盖风险 |
+| [2026-10-04 帧同步容量复核](20261004-frame-sync-capacity.zh-CN.md) | `MARK` 消费后释放参与者槽位、非历史策略减少逐帧复制 |
+| [2026-10-03 并发、异步与性能](20261003-concurrency-async-performance.zh-CN.md) | 缓存取消/写入准入、ownership fencing、异步异常、drain 与 Room/NPC 热路径 |
+| [脚手架首次运行路径（2026-10-03）](20261003-scaffold-onboarding.zh-CN.md) | Maven Wrapper、默认版本、Java 21 前置检查、CLI 错误提示和生成项目上手文档 |
 | [线程、缓存与分布式一致性专项审查（2026-09-26）](20260926-concurrency-distributed-audit-20260926.md) | Actor/事件/运行时并发、分层缓存代际与取消、RPC/Kafka/Nacos/Redis 一致性及 World/Frame/Network 边界修复 |
 | [质量基线与 Production 装配修复（2026-09-26）](20260926-quality-baseline.md) | 恢复显式 Adapter 选择；强制配置与健康校验、失败不回退的边界验证 |
 | [代码审计修复（2026-09-24）](20260924-code-audit-20260924.md) | 既有 GM、网络、数据与游戏域修复；production 禁止 LOCAL 策略已由 9 月 26 日说明纠正 |

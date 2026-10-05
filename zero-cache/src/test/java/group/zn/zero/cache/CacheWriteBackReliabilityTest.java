@@ -17,6 +17,22 @@ import org.junit.jupiter.api.Timeout;
 /** 队列满、旧回填重试与重启版本三个真实故障边界。 @author zn */
 @Timeout(10)
 class CacheWriteBackReliabilityTest {
+    /** 取消观察句柄不能跳过重试生命周期清理，后续批次仍可重试未成功的条目。 */
+    @Test void cancelledRetryObserverDoesNotDisableFutureRetries() {
+        var store = new Store();
+        store.fail = true;
+        var cache = new LayeredCacheService<String, String>(CachePolicy.defaults(), store);
+        cache.getOrLoad("k", CacheLoader.sync(key -> Optional.of("value"))).toCompletableFuture().join();
+        store.fail = false;
+        store.delayedWrite = new CompletableFuture<>();
+        var observer = cache.retryWriteBacks(1).toCompletableFuture();
+        assertTrue(observer.cancel(false));
+        store.delayedWrite.completeExceptionally(new IllegalStateException("retry failed"));
+        store.delayedWrite = null;
+        assertEquals(1, cache.retryWriteBacks(1).toCompletableFuture().join());
+        assertEquals(0, cache.healthSnapshot().backlogCount());
+    }
+
     /** 未读取 L2 的新服务也必须能推进已有高版本缓存。 */
     @Test void restartedServiceAdvancesBackendVersionBeforeDirectPut() {
         var store = new Store();
@@ -72,6 +88,8 @@ class CacheWriteBackReliabilityTest {
         private final Map<String, CacheStoreEntry<String>> values = new HashMap<>();
         /** 写故障开关。 */
         private boolean fail;
+        /** 可控重试完成阶段。 */
+        private CompletableFuture<Boolean> delayedWrite;
         /** @return 当前值。 */
         public CompletionStage<Optional<CacheStoreEntry<String>>> get(String key) { return CompletableFuture.completedFuture(Optional.ofNullable(values.get(key))); }
         /** @return 保存完成。 */
@@ -79,6 +97,7 @@ class CacheWriteBackReliabilityTest {
         /** @return 原子单调版本比较结果。 */
         public synchronized CompletionStage<Boolean> putIfVersion(String key, CacheStoreEntry<String> entry) {
             if (fail) return CompletableFuture.failedFuture(new IllegalStateException("backend unavailable"));
+            if (delayedWrite != null) return delayedWrite;
             var previous = values.get(key);
             if (previous != null && previous.cacheVersion() >= entry.cacheVersion()) return CompletableFuture.completedFuture(false);
             values.put(key, entry); return CompletableFuture.completedFuture(true);

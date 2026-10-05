@@ -3,6 +3,7 @@ package group.zn.zero.runtime.redis;
 import group.zn.zero.data.redis.RedisDataAdapter;
 import group.zn.zero.data.repository.RepositorySource;
 import group.zn.zero.runtime.api.ComponentId;
+import group.zn.zero.runtime.bootstrap.RuntimeBasics;
 import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
 import group.zn.zero.runtime.data.DataRuntime;
 import group.zn.zero.runtime.health.HealthPhase;
@@ -31,6 +32,7 @@ final class ProductionRedisDataProvider implements RuntimeComponentProvider {
             .provide(DataRuntime.DATA_SERVICES)
             .provide(DataRuntime.REPOSITORY_SOURCES)
             .require(ProductionRedisRuntimeCapabilities.RESOURCE)
+            .require(RuntimeBasics.EXECUTORS)
             .kind(ComponentKind.EXTERNAL)
             .health(HealthPhase.STARTUP)
             .build();
@@ -53,11 +55,16 @@ final class ProductionRedisDataProvider implements RuntimeComponentProvider {
     public ComponentContribution create(final ComponentCreationContext context) {
         ComponentCreationContext checked = Objects.requireNonNull(context, "context");
         try {
+            var executors = checked.require(RuntimeBasics.EXECUTORS);
+            if (executors.remoteIoMayInline()) {
+                throw new IllegalStateException("redis repositories require non-inline remote IO execution");
+            }
             ProductionRedisResource resource = checked.require(ProductionRedisRuntimeCapabilities.RESOURCE);
             resource.acquire(checked.resources());
             RedisDataAdapter created = new RedisDataAdapter();
             diagnostic.mark(ZeroProductionAdapterState.CREATED);
-            var repositories = checked.resources().register(created.repositoryFactory(resource.client()));
+            var repositories = checked.resources().register(created.repositoryFactory(
+                    resource.client(), executors.remoteIoExecutor()));
             return ComponentContribution.builder()
                     .contribute(DataRuntime.DATA_SERVICES, created)
                     .contribute(DataRuntime.REPOSITORY_SOURCES, new RepositorySource("redis", repositories))

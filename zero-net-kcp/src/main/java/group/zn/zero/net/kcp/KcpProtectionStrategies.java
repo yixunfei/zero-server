@@ -30,12 +30,30 @@ public final class KcpProtectionStrategies {
         public Context create(final byte[] key) { return new Crypto(this, key); }
     }
     private static final class Crypto implements KcpDatagramProtection.Context {
-        private final Builtin algorithm; private final byte[] key; private final Cipher cipher; private final Mac mac; private boolean closed;
+        /** 固定算法。 */
+        private final Builtin algorithm;
+        /** 关闭时清除的方向密钥副本。 */
+        private final byte[] key;
+        /** 按方向复用，避免 seal/open 混用影响 provider 的 nonce 校验。 */
+        private Cipher sealCipher;
+        /** 接收密码实例；认证失败后允许再次 init 同 nonce 验证原包。 */
+        private Cipher openCipher;
+        /** 缓存的 JCA 密钥规格，关闭后释放引用。 */
+        private SecretKeySpec keySpec;
+        /** HMAC 实例；独占上下文。 */
+        private Mac mac;
+        /** 关闭状态；仅由上下文所属线程访问。 */
+        private boolean closed;
         Crypto(final Builtin algorithm, final byte[] key) {
             if (key == null || key.length != 32) throw new IllegalArgumentException("32-byte traffic key required");
             this.algorithm = algorithm; this.key = key.clone();
             try {
-                cipher = algorithm.encrypted() ? Cipher.getInstance(algorithm == Builtin.AES ? "AES/GCM/NoPadding" : "ChaCha20-Poly1305") : null;
+                if (algorithm.encrypted()) {
+                    String transformation = algorithm == Builtin.AES ? "AES/GCM/NoPadding" : "ChaCha20-Poly1305";
+                    sealCipher = Cipher.getInstance(transformation);
+                    openCipher = Cipher.getInstance(transformation);
+                    keySpec = new SecretKeySpec(this.key, algorithm == Builtin.AES ? "AES" : "ChaCha20");
+                }
                 mac = algorithm == Builtin.HMAC ? Mac.getInstance("HmacSHA256") : null;
                 if (mac != null) mac.init(new SecretKeySpec(this.key, "HmacSHA256"));
             } catch (GeneralSecurityException failure) { throw new IllegalStateException("UDP protection unavailable", failure); }
@@ -51,12 +69,21 @@ public final class KcpProtectionStrategies {
             try { return crypt(Cipher.DECRYPT_MODE, nonce, aad, body); } catch (AEADBadTagException invalid) { return null; } catch (GeneralSecurityException failure) { throw new IllegalStateException("UDP opening failed", failure); }
         }
         private byte[] crypt(final int mode, final byte[] nonce, final byte[] aad, final byte[] body) throws GeneralSecurityException {
-            Cipher operation = Cipher.getInstance(algorithm == Builtin.AES ? "AES/GCM/NoPadding" : "ChaCha20-Poly1305");
-            if (algorithm == Builtin.AES) operation.init(mode, new SecretKeySpec(key, "AES"), new GCMParameterSpec(128, nonce));
-            else operation.init(mode, new SecretKeySpec(key, "ChaCha20"), new IvParameterSpec(nonce));
+            Cipher operation = mode == Cipher.ENCRYPT_MODE ? sealCipher : openCipher;
+            if (algorithm == Builtin.AES) operation.init(mode, keySpec, new GCMParameterSpec(128, nonce));
+            else operation.init(mode, keySpec, new IvParameterSpec(nonce));
             operation.updateAAD(aad); return operation.doFinal(body);
         }
         private void check(final byte[] nonce) { if (closed) throw new IllegalStateException("UDP protection closed"); if (nonce == null || nonce.length != 12) throw new IllegalArgumentException("96-bit nonce required"); }
-        public void close() { if (!closed) { closed = true; Arrays.fill(key, (byte) 0); } }
+        public void close() {
+            if (!closed) {
+                closed = true;
+                Arrays.fill(key, (byte) 0);
+                keySpec = null;
+                sealCipher = null;
+                openCipher = null;
+                mac = null;
+            }
+        }
     }
 }

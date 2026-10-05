@@ -324,7 +324,7 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
             armTimer(control, nanoTime.getAsLong() + initialDelayNanos, initialDelayNanos, true);
             emitRegistration(control);
             return control;
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             ZeroException failure = asZeroException(ex, SchedulerErrorCode.TIMER_REJECTED);
             if (control == null) {
                 taskSlots.release();
@@ -383,7 +383,7 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
                     delayNanos,
                     TimeUnit.NANOSECONDS);
             registration.attach(future);
-        } catch (RuntimeException failure) {
+        } catch (RuntimeException | Error failure) {
             control.clearElapsedTimer(registration);
             registration.cancel();
             throw failure;
@@ -419,7 +419,7 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
         try {
             armTimer(control, nextDeadline, delay, false);
             return true;
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             control.terminateTimerFailure(ex);
             return false;
         }
@@ -447,7 +447,7 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
         ExecutionLease lease = new ExecutionLease();
         try {
             taskExecutor.execute(() -> startExecution(control, scheduledAt, lease));
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             lease.release();
             control.onExecutorRejected(ex);
         }
@@ -566,7 +566,7 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
         long delay = control.intervalNanos();
         try {
             armTimer(control, nanoTime.getAsLong() + delay, delay, false);
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             control.terminateTimerFailure(ex);
         }
     }
@@ -638,7 +638,7 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
     private void dispatchObservation(final ScheduledTaskEvent event) {
         try {
             taskExecutor.execute(() -> observe(event));
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             fallbackObserverFailure(event, ex);
         }
     }
@@ -1173,7 +1173,7 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
             }
         }
 
-        private void onExecutorRejected(final RuntimeException failure) {
+        private void onExecutorRejected(final Throwable failure) {
             if (terminal.get() || cancelRequested.get()) {
                 fallbackSystemFailure(SchedulerErrorCode.EXECUTOR_REJECTED, this, failure);
                 return;
@@ -1210,7 +1210,7 @@ public final class LocalManagedScheduler extends AbstractLifecycle implements Ma
             }
         }
 
-        private void terminateTimerFailure(final RuntimeException failure) {
+        private void terminateTimerFailure(final Throwable failure) {
             if (transitionToTerminal(InternalState.REJECTED, false)) {
                 rejectionCount.incrementAndGet();
                 lastErrorCode.set(SchedulerErrorCode.TIMER_REJECTED);

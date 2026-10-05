@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.MockConsumer;
@@ -46,7 +45,7 @@ class KafkaRpcConsumerBatchTest {
             consumer.assign(List.of(partition));
             var batch = new KafkaRpcConsumerBatch(consumer);
             batch.track(records(partition), CompletableFuture.failedFuture(new IllegalStateException("send failed")));
-            assertThrows(CompletionException.class, batch::commitCompleted);
+            assertThrows(KafkaRpcResourceException.class, batch::commitCompleted);
             assertTrue(consumer.committed(Set.of(partition)).get(partition) == null);
             batch.onPartitionsRevoked(List.of(partition));
             assertThrows(KafkaRpcResourceException.class, batch::commitCompleted);

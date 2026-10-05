@@ -12,7 +12,11 @@ public interface KcpDatagramProtection {
     boolean encrypted();
     /** @param key 32 字节方向密钥。 @return 独占上下文。 */
     Context create(byte[] key);
-    /** 独占密码上下文。 @author zn */
+    /**
+     * 独占密码上下文，非线程安全；seal/open/close 均由所属 EventLoop 串行调用。
+     * 接收方只有认证成功后才应提交 replay 窗口，认证失败不消耗 nonce。
+     * @author zn
+     */
     interface Context extends AutoCloseable {
         /** 保护数据；nonce 必须唯一。 */
         byte[] seal(byte[] nonce, byte[] aad, byte[] body);

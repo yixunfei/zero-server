@@ -62,6 +62,12 @@ public final class PostgresqlFencedStateStore<T> implements FencedStateStore<T> 
                     return replay;
                 }
                 validateLease(connection, request.lease());
+                // 等待租约行锁期间，同请求可能已由另一事务提交；必须在 CAS 前重读收据。
+                replay = replayIfPresent(connection, request, encoded);
+                if (replay != null) {
+                    connection.commit();
+                    return replay;
+                }
                 StateVersion actual = currentVersion(connection, request.resource());
                 if (!actual.equals(request.expectedVersion())) {
                     throw new OwnershipException("state version conflict");

@@ -46,9 +46,11 @@ Pause and create a separate task before changing:
 Run from the zeroServer repository root and replace the project directory as needed:
 
 ~~~powershell
-mvn -q -DskipTests install
+./mvnw.cmd -q -DskipTests install
 java scripts/RunLocalScaffold.java --projectDir path\to\__PROJECT_NAME__
 ~~~
+
+On Linux/macOS use `./mvnw`.
 
 Before extracting a formal framework module or changing a public contract, open a GitHub Design Proposal and describe the API, thread, compatibility, performance, security and verification boundaries.
 

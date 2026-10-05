@@ -30,6 +30,44 @@ import org.junit.jupiter.api.Test;
  */
 class DefaultPersistenceManagerTest {
 
+    /** 同步快照 Error 必须进入失败收据，不能永久占有 activeFlush 并阻塞后续刷新。 */
+    @Test
+    void snapshotErrorRetainsDirtyEntryAndAllowsLaterFlush() {
+        var manager = new DefaultPersistenceManager();
+        var repository = new InMemoryCrudRepository<String, PlayerArchive>();
+        manager.registerTarget(new PersistenceTarget<>("player", repository));
+        manager.markDirty("player", "error", DataThreadBinding.unbound(), () -> {
+            throw new AssertionError("snapshot failed");
+        });
+        var failed = manager.flushNow().toCompletableFuture().join();
+        assertEquals(1, failed.failureCount());
+        assertEquals(1, failed.remainingDirtyCount());
+        manager.markDirty("player", "error", DataThreadBinding.unbound(),
+                () -> new PlayerArchive("error", 0, "recovered"));
+        assertTrue(manager.retryFailed("player", "error"));
+        var recovered = manager.flushNow().toCompletableFuture().join();
+        assertEquals(1, recovered.successCount());
+        assertEquals(0, recovered.remainingDirtyCount());
+    }
+
+    /** 调度器在注册期间触发停机时，迟到句柄必须取消并向调用方报告失败。 */
+    @Test
+    void scheduleRegistrationCannotEscapeShutdown() {
+        var manager = new DefaultPersistenceManager();
+        var scheduler = new ManualPersistenceScheduler();
+        manager.start();
+        PersistenceScheduler stoppingScheduler = (name, interval, task) -> {
+            var handle = scheduler.scheduleAtFixedRate(name, interval, task);
+            manager.stop();
+            return handle;
+        };
+        ZeroException failure = assertThrows(ZeroException.class,
+                () -> manager.scheduleFlush(stoppingScheduler, Duration.ofSeconds(1)));
+        assertEquals(DataErrorCode.PERSISTENCE_FLUSH_FAILED, failure.errorCode());
+        assertEquals(0, scheduler.triggerAll());
+        assertThrows(ZeroException.class, () -> manager.scheduleFlush(scheduler, Duration.ofSeconds(1)));
+    }
+
     /**
      * 验证 flush 会按绑定执行器捕获快照并写入仓库。
      */

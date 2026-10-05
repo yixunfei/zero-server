@@ -324,25 +324,38 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
                 final NettyUdpConnection connection,
                 final ProtocolFrame frame) {
             try {
-                frameHandler.handle(connection, frame).whenComplete((responses, cause) -> {
+                Objects.requireNonNull(frameHandler.handle(connection, frame), "handlerStage").whenComplete((responses, cause) -> {
                     if (cause != null) {
-                        context.executor().execute(() -> context.fireExceptionCaught(cause));
+                        reportFailure(context, connection, cause);
                         return;
                     }
-                    writeResponses(connection, responses);
+                    try { writeResponses(context, connection, responses); }
+                    catch (RuntimeException | Error failure) { reportFailure(context, connection, failure); }
                 });
-            } catch (RuntimeException ex) {
-                context.executor().execute(() -> context.fireExceptionCaught(ZeroException.of(
-                        NetErrorCode.HANDLER_FAILED,
-                        "UDP net handler failed",
-                        ex)));
+            } catch (RuntimeException | Error ex) {
+                reportFailure(context, connection, ex);
             }
         }
 
-        private void writeResponses(final NettyUdpConnection connection, final List<ProtocolFrame> responses) {
+        private void writeResponses(final ChannelHandlerContext context, final NettyUdpConnection connection,
+                final List<ProtocolFrame> responses) {
             List<ProtocolFrame> frames = List.copyOf(Objects.requireNonNull(responses, "responses"));
             for (ProtocolFrame response : frames) {
-                connection.sendFrame(response);
+                connection.sendFrame(response).whenComplete((ignored, failure) -> {
+                    if (failure != null) reportFailure(context, connection, failure);
+                });
+            }
+        }
+
+        /** 所有异步完成路径均进入连接异常观察器；关闭后的调度拒绝也不能吞掉原错误。 */
+        private void reportFailure(final ChannelHandlerContext context, final NettyUdpConnection connection,
+                final Throwable failure) {
+            ZeroException error = failure instanceof ZeroException existing ? existing
+                    : ZeroException.of(NetErrorCode.HANDLER_FAILED, "UDP net handler failed", failure);
+            try { context.executor().execute(() -> safeException(connection, error)); }
+            catch (RuntimeException rejected) {
+                error.addSuppressed(rejected);
+                safeException(connection, error);
             }
         }
     }
@@ -377,8 +390,12 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
     private void safeException(final NettyUdpConnection connection, final Throwable cause) {
         try {
             connectionListener.onException(connection, cause);
-        } catch (RuntimeException ignored) {
-            // 监听器异常不能反向破坏 Netty 路径。
+        } catch (RuntimeException | Error observerFailure) {
+            ZeroException error = ZeroException.of(NetErrorCode.OBSERVER_FAILED,
+                    "UDP connection exception observer failed", observerFailure);
+            if (cause != observerFailure) error.addSuppressed(cause);
+            System.getLogger(NettyUdpServer.class.getName()).log(System.Logger.Level.ERROR,
+                    NetErrorCode.OBSERVER_FAILED.code(), error);
         }
     }
 }

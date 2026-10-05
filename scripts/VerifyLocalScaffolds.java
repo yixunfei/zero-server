@@ -29,7 +29,7 @@ public final class VerifyLocalScaffolds {
     /**
      * 默认 zeroServer 版本。
      */
-    private static final String DEFAULT_ZERO_VERSION = "0.1.1";
+    private static final String DEFAULT_ZERO_VERSION = "0.1.2-SNAPSHOT";
 
     /**
      * 脚手架验证矩阵。
@@ -110,7 +110,15 @@ public final class VerifyLocalScaffolds {
             printHelp();
             return;
         }
-        Options options = Options.parse(args);
+        Options options;
+        try {
+            options = Options.parse(args);
+        } catch (IllegalArgumentException exception) {
+            System.err.println("SCAFFOLD-VERIFY-INVALID-ARGUMENT|" + exception.getMessage());
+            System.err.println("Hint: run `java scripts/VerifyLocalScaffolds.java --help` for the supported options.");
+            System.exit(2);
+            return;
+        }
         Path outputRoot = options.outputDir().toAbsolutePath().normalize();
 
         System.out.println("Verifying zeroServer local scaffolds:");
@@ -289,6 +297,15 @@ public final class VerifyLocalScaffolds {
     }
 
     private static String mavenCommand() {
+        String configured = System.getenv("ZERO_MAVEN_CMD");
+        if (configured != null && !configured.isBlank()) {
+            return configured;
+        }
+        Path root = Path.of("").toAbsolutePath().normalize();
+        Path wrapper = root.resolve(isWindows() ? "mvnw.cmd" : "mvnw");
+        if (Files.isRegularFile(wrapper) && (isWindows() || Files.isExecutable(wrapper))) {
+            return wrapper.toString();
+        }
         return isWindows() ? "mvn.cmd" : "mvn";
     }
 
@@ -329,7 +346,8 @@ public final class VerifyLocalScaffolds {
         System.out.println("  --help, -h                Print this help");
         System.out.println();
         System.out.println("Before running:");
-        System.out.println("  mvn -q -DskipTests install");
+        System.out.println("  ./mvnw -q -DskipTests install   (PowerShell: ./mvnw.cmd)");
+        System.out.println("  Set ZERO_MAVEN_CMD to use another Maven command.");
     }
 
     /**
@@ -347,10 +365,14 @@ public final class VerifyLocalScaffolds {
                 if (!key.startsWith("--")) {
                     throw new IllegalArgumentException("unsupported argument: " + key);
                 }
+                String normalizedKey = key.toLowerCase(Locale.ROOT);
+                if (!List.of("--outputdir", "--zeroversion").contains(normalizedKey)) {
+                    throw new IllegalArgumentException("unsupported argument: " + key);
+                }
                 if (index + 1 >= args.length || args[index + 1].startsWith("--")) {
                     throw new IllegalArgumentException("missing value for argument: " + key);
                 }
-                values.put(key.toLowerCase(Locale.ROOT), args[++index]);
+                values.put(normalizedKey, args[++index]);
             }
             Path outputDir = Path.of(values.getOrDefault("--outputdir", DEFAULT_OUTPUT_DIR.toString()));
             String zeroVersion = values.getOrDefault("--zeroversion", DEFAULT_ZERO_VERSION);

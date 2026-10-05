@@ -30,8 +30,10 @@ import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
 /**
@@ -59,6 +61,8 @@ final class NettyProductionLifecycleSession {
     private final OrderedObserverDispatcher observerDispatcher;
     /** 鉴权期间的有界 frame 队列。 */
     private final Queue<ProtocolFrame> pendingFrames = new ArrayDeque<>();
+    /** 连接内按到达顺序等待 replay 判定的 frame 队列。 */
+    private final Queue<PendingReplayCheck> pendingReplayChecks = new ArrayDeque<>();
     /** 连接级 traceId。 */
     private final String traceId = "net-" + UUID.randomUUID();
 
@@ -66,6 +70,10 @@ final class NettyProductionLifecycleSession {
     private ConnectionLifecycleState state = ConnectionLifecycleState.ACCEPTED;
     /** 待完成的异步安全检查数量。 */
     private int pendingSecurityChecks;
+    /** 当前是否有正在调用 replay provider 的队头元素。 */
+    private boolean replayCheckInProgress;
+    /** 连接内的单调接收序列，仅用作现有协议下的 replay provider 输入。 */
+    private long nextReplaySequence;
     /** 当前业务 in-flight 数量。 */
     private int inboundInFlight;
     /** 握手开始时间。 */
@@ -244,6 +252,7 @@ final class NettyProductionLifecycleSession {
         requireEventLoop();
         cancelTimers();
         pendingFrames.clear();
+        clearReplayChecks();
         inboundInFlight = 0;
         if (state != ConnectionLifecycleState.CLOSED) {
             transition(ConnectionLifecycleState.CLOSED);
@@ -481,6 +490,8 @@ final class NettyProductionLifecycleSession {
                     0L);
             return false;
         }
+        // 任意合法业务流量都证明链路存活，不能只依赖显式 heartbeat 帧。
+        missedHeartbeats = 0;
         SecurityContext securityContext = null;
         if (lifecycle.policy() instanceof SecurityNetworkPolicy securityPolicy) {
             securityContext = connection.attributes()
@@ -513,33 +524,65 @@ final class NettyProductionLifecycleSession {
                         null);
                 return false;
             }
-            CompletionStage<ReplayProtection.ReplayDecision> replayStage =
-                    securityPolicy.checkReplayAsync(frame, securityContext);
             pendingSecurityChecks++;
-            SecurityContext admittedIdentity = securityContext;
-            replayStage.toCompletableFuture()
-                    .orTimeout(30L, TimeUnit.SECONDS)
-                    .whenComplete((replay, cause) -> executeOnEventLoop(
-                            () -> replayCompleted(frame, admittedIdentity, replay, cause)));
+            pendingReplayChecks.add(new PendingReplayCheck(
+                    securityPolicy,
+                    frame,
+                    securityContext,
+                    nextReplaySequence++));
+            startNextReplayCheck();
             return false;
         }
         return admitEstablishedFrame(frame);
     }
 
+    /** 只启动队头 replay 检查，异步完成顺序不会改变同一连接的 frame 顺序。 */
+    private void startNextReplayCheck() {
+        if (replayCheckInProgress || state != ConnectionLifecycleState.ESTABLISHED) {
+            return;
+        }
+        PendingReplayCheck next = pendingReplayChecks.peek();
+        if (next == null) {
+            return;
+        }
+        replayCheckInProgress = true;
+        CompletionStage<ReplayProtection.ReplayDecision> stage;
+        try {
+            stage = next.policy().checkReplayAsync(
+                    connection.connectionId(), next.frame(), next.identity(), next.sequence());
+        } catch (RuntimeException | Error failure) {
+            replayCompleted(next, null, failure);
+            return;
+        }
+        next.timeoutTask = context.executor().schedule(
+                () -> replayCompleted(next, null, new TimeoutException("network replay check timed out")),
+                30L,
+                TimeUnit.SECONDS);
+        try {
+            stage.whenComplete((replay, cause) -> executeOnEventLoop(
+                    () -> replayCompleted(next, replay, cause)));
+        } catch (RuntimeException | Error failure) {
+            replayCompleted(next, null, failure);
+        }
+    }
+
     private void replayCompleted(
-            final ProtocolFrame frame,
-            final SecurityContext expectedIdentity,
+            final PendingReplayCheck check,
             final ReplayProtection.ReplayDecision replay,
             final Throwable cause) {
-        if (pendingSecurityChecks > 0) {
-            pendingSecurityChecks--;
+        if (pendingReplayChecks.peek() != check) {
+            return;
         }
+        pendingReplayChecks.remove();
+        replayCheckInProgress = false;
+        cancel(check.timeoutTask);
+        pendingSecurityChecks--;
         if (state != ConnectionLifecycleState.ESTABLISHED) {
             return;
         }
         SecurityContext currentIdentity = connection.attributes()
                 .get(ProductionNetworkConnectionAttributes.SECURITY_CONTEXT).orElse(null);
-        if (currentIdentity != expectedIdentity || currentIdentity.expired(Instant.now())
+        if (currentIdentity != check.identity() || currentIdentity.expired(Instant.now())
                 || !currentIdentity.allows("network.request")) {
             reject(ConnectionLifecycleEventType.CONNECTION_REJECTED, NetErrorCode.UNAUTHENTICATED,
                     ConnectionRejectionReason.UNAUTHENTICATED, NetworkRateLimitScope.FRAME, null);
@@ -558,10 +601,21 @@ final class NettyProductionLifecycleSession {
                     decision == ReplayProtection.ReplayDecision.EXPIRED
                             ? NetErrorCode.AUTHENTICATION_EXPIRED : NetErrorCode.REPLAY_DETECTED,
                     0L);
+            scheduleNextReplayCheck();
             return;
         }
-        if (admitEstablishedFrame(frame)) {
-            readyFrameConsumer.accept(frame);
+        if (admitEstablishedFrame(check.frame())) {
+            readyFrameConsumer.accept(check.frame());
+        }
+        scheduleNextReplayCheck();
+    }
+
+    /**
+     * 在下一次 EventLoop 轮转继续 replay 队列，避免同步 provider 递归消耗调用栈。
+     */
+    private void scheduleNextReplayCheck() {
+        if (state == ConnectionLifecycleState.ESTABLISHED && !pendingReplayChecks.isEmpty()) {
+            context.executor().execute(this::startNextReplayCheck);
         }
     }
 
@@ -611,9 +665,8 @@ final class NettyProductionLifecycleSession {
 
     private void scheduleHeartbeatCheck() {
         long intervalNanos = lifecycle.config().heartbeatInterval().toNanos();
-        heartbeatTask = context.executor().scheduleAtFixedRate(
+        heartbeatTask = context.executor().schedule(
                 this::checkHeartbeat,
-                intervalNanos,
                 intervalNanos,
                 TimeUnit.NANOSECONDS);
     }
@@ -624,6 +677,7 @@ final class NettyProductionLifecycleSession {
         }
         missedHeartbeats++;
         if (missedHeartbeats < lifecycle.config().allowedMissedHeartbeats()) {
+            scheduleHeartbeatCheck();
             return;
         }
         emit(
@@ -652,7 +706,7 @@ final class NettyProductionLifecycleSession {
         }
         cancelTimers();
         pendingFrames.clear();
-        pendingSecurityChecks = 0;
+        clearReplayChecks();
         transition(ConnectionLifecycleState.REJECTED);
         emit(event, ConnectionLifecycleResult.REJECTED, reason, scope, errorCode, 0L);
         if (event != ConnectionLifecycleEventType.CONNECTION_REJECTED) {
@@ -745,7 +799,7 @@ final class NettyProductionLifecycleSession {
                             ex));
                 }
             });
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             observerFailureCallback.accept(ZeroException.of(
                     NetErrorCode.OBSERVER_FAILED,
                     "submit network lifecycle observer failed",
@@ -762,6 +816,9 @@ final class NettyProductionLifecycleSession {
      */
     private static final class OrderedObserverDispatcher implements Executor {
 
+        /** 单连接 observer 排队上限，避免慢 observer 导致生命周期事件无限积压。 */
+        private static final int MAX_PENDING_TASKS = 1024;
+
         /** 框架受管的共享 observer 执行器。 */
         private final Executor delegate;
         /** 单连接有序任务队列。 */
@@ -777,13 +834,17 @@ final class NettyProductionLifecycleSession {
          * 按单连接提交顺序排队 observer 任务。
          *
          * @param command observer 任务；不可为空。
-         * @throws RuntimeException 底层执行器拒绝首个 drain 时抛出；队列会恢复为空闲状态。
+         * @throws RuntimeException 队列超限时拒绝当前任务；底层执行器拒绝首个 drain 时清空队列并恢复空闲状态。
          */
         @Override
         public void execute(final Runnable command) {
             Runnable current = Objects.requireNonNull(command, "command");
             boolean submitDrain;
             synchronized (tasks) {
+                if (tasks.size() >= MAX_PENDING_TASKS) {
+                    throw new RejectedExecutionException(
+                            "network lifecycle observer queue capacity exhausted");
+                }
                 tasks.add(current);
                 submitDrain = !drainScheduled;
                 if (submitDrain) {
@@ -795,7 +856,7 @@ final class NettyProductionLifecycleSession {
             }
             try {
                 delegate.execute(this::drain);
-            } catch (RuntimeException exception) {
+            } catch (RuntimeException | Error exception) {
                 synchronized (tasks) {
                     tasks.clear();
                     drainScheduled = false;
@@ -903,9 +964,60 @@ final class NettyProductionLifecycleSession {
         cancel(heartbeatTask);
     }
 
+    /** 取消连接私有 replay 超时任务，并释放已占用的入站预算。 */
+    private void clearReplayChecks() {
+        for (PendingReplayCheck check : pendingReplayChecks) {
+            cancel(check.timeoutTask);
+        }
+        pendingReplayChecks.clear();
+        replayCheckInProgress = false;
+        pendingSecurityChecks = 0;
+    }
+
     private void cancel(final ScheduledFuture<?> future) {
         if (future != null) {
             future.cancel(false);
+        }
+    }
+
+    /** 一个尚未完成的连接内 replay 判定；仅所属 EventLoop 可变。 */
+    private static final class PendingReplayCheck {
+        /** 当前安全策略。 */
+        private final SecurityNetworkPolicy policy;
+        /** 等待判定的业务帧。 */
+        private final ProtocolFrame frame;
+        /** 入队时固定的认证身份。 */
+        private final SecurityContext identity;
+        /** 连接内接收序列。 */
+        private final long sequence;
+        /** 连接 EventLoop 上注册的超时任务。 */
+        private ScheduledFuture<?> timeoutTask;
+
+        private PendingReplayCheck(
+                final SecurityNetworkPolicy policy,
+                final ProtocolFrame frame,
+                final SecurityContext identity,
+                final long sequence) {
+            this.policy = Objects.requireNonNull(policy, "policy");
+            this.frame = Objects.requireNonNull(frame, "frame");
+            this.identity = Objects.requireNonNull(identity, "identity");
+            this.sequence = sequence;
+        }
+
+        private SecurityNetworkPolicy policy() {
+            return policy;
+        }
+
+        private ProtocolFrame frame() {
+            return frame;
+        }
+
+        private SecurityContext identity() {
+            return identity;
+        }
+
+        private long sequence() {
+            return sequence;
         }
     }
 }

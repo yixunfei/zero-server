@@ -27,6 +27,7 @@ public final class FrameMatchRuntime implements AutoCloseable {
     private final MissingInputPolicy missingPolicy;
     private final int maxPayloadBytes;
     private final int maxBufferedInputs;
+    private final int maxFutureFrames;
     private final Map<String, Map<Long, FrameInput>> pending = new java.util.TreeMap<>();
     /** 复用不可变 tick 描述；每次提交仍有独立完成信号。 */
     private final FrameDispatchRegistry.Command tickCommand;
@@ -58,6 +59,7 @@ public final class FrameMatchRuntime implements AutoCloseable {
         this.missingPolicy = config.missingInputPolicy();
         this.maxPayloadBytes = config.maxPayloadBytes();
         this.maxBufferedInputs = config.maxBufferedInputs();
+        this.maxFutureFrames = config.maxFutureFrames();
         this.lane = LaneKey.custom("frame-match:" + matchId);
         this.tickCommand = new FrameDispatchRegistry.Command(() -> {
             if (closed.get()) throw new IllegalStateException("match closed");
@@ -88,6 +90,11 @@ public final class FrameMatchRuntime implements AutoCloseable {
     private void accept(FrameInput input) {
         Objects.requireNonNull(input, "input");
         if (input.payloadLength() > maxPayloadBytes) throw new IllegalArgumentException("payload exceeds capacity");
+        long currentFrame = frameNo.get();
+        if (input.targetFrame() > currentFrame
+                && input.targetFrame() - currentFrame > maxFutureFrames) {
+            throw new IllegalArgumentException("input is too far ahead");
+        }
         InputSequence sequenceKey = new InputSequence(input.uid(), input.inputSeq());
         if (seenSequences.contains(sequenceKey) || pendingSequences.contains(sequenceKey)) return;
         if (input.targetFrame() <= frameNo.get()) {
@@ -125,13 +132,14 @@ public final class FrameMatchRuntime implements AutoCloseable {
         long currentFrame = frameNo.get() + 1;
         List<FrameInput> inputs = new ArrayList<>();
         List<FrameInput> consumed = new ArrayList<>();
-        Map<String, FrameInput> nextLastInputs = new HashMap<>(lastInputs);
+        Map<String, FrameInput> nextLastInputs = missingPolicy == MissingInputPolicy.REPEAT_LAST
+                ? new HashMap<>(lastInputs) : null;
         for (Map.Entry<String, Map<Long, FrameInput>> entry : pending.entrySet()) {
             FrameInput input = entry.getValue().get(currentFrame);
             if (input != null) {
                 inputs.add(input);
                 consumed.add(input);
-                nextLastInputs.put(entry.getKey(), input);
+                if (nextLastInputs != null) nextLastInputs.put(entry.getKey(), input);
             } else if (missingPolicy == MissingInputPolicy.REPEAT_LAST && lastInputs.containsKey(entry.getKey())) {
                 inputs.add(lastInputs.get(entry.getKey()));
             }
@@ -144,16 +152,14 @@ public final class FrameMatchRuntime implements AutoCloseable {
             if (playerInputs != null && playerInputs.remove(currentFrame) != null) {
                 pendingSequences.remove(new InputSequence(input.uid(), input.inputSeq()));
                 buffered--;
-                if (playerInputs.isEmpty() && missingPolicy == MissingInputPolicy.EMPTY) {
+                if (playerInputs.isEmpty() && missingPolicy != MissingInputPolicy.REPEAT_LAST) {
                     pending.remove(input.uid());
                 }
             }
         }
         frameNo.set(currentFrame);
-        if (missingPolicy == MissingInputPolicy.EMPTY) {
-            lastInputs.clear();
-        } else {
-            lastInputs.clear();
+        lastInputs.clear();
+        if (nextLastInputs != null) {
             lastInputs.putAll(nextLastInputs);
         }
         FrameCommitted committed = new FrameCommitted(matchId, currentFrame, batch,

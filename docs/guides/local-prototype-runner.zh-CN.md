@@ -11,7 +11,7 @@
 `RunLocalPrototype` 是显式 opt-in 的本地原型生成并 smoke 工具。它串联当前已有能力：
 
 ```text
-mvn -q -DskipTests install
+./mvnw -q -DskipTests install
   -> NewLocalGame
   -> RunLocalScaffold
   -> InspectLocalScaffold
@@ -20,6 +20,7 @@ mvn -q -DskipTests install
 ```
 
 它会写入生成目录并运行 Maven，因此应由使用者显式启动；默认 CI 不会自动在任意业务输出目录执行该命令。
+Windows PowerShell 将上面的 `./mvnw` 替换为 `./mvnw.cmd`。首次下载 Maven 和依赖需要网络，无需安装全局 Maven。
 
 执行生成前会 fail-fast 检查：
 
@@ -108,9 +109,9 @@ zero-local-prototype-runner=ok|template=world-shard|project=my-world-game|instal
 | `--projectName <name>` | 生成项目名 |
 | `--packageName <package>` | 生成项目 Java 包名 |
 | `--outputDir <path>` | 输出目录；默认 `target/generated/<projectName>` |
-| `--zeroVersion <version>` | 生成项目依赖的 zeroServer 版本 |
+| `--zeroVersion <version>` | 生成项目依赖的 zeroServer 版本，默认 `0.1.2-SNAPSHOT` |
 | `--force` | 对已有目录执行受 ownership 约束的更新；不绕过手工修改冲突或旧 manifest 迁移要求 |
-| `--skipInstall` | 跳过根仓库 `mvn -q -DskipTests install` |
+| `--skipInstall` | 跳过根仓库 `./mvnw -q -DskipTests install`（Windows 使用 `./mvnw.cmd`） |
 | `--skipTests` | 跳过生成项目 Maven `clean test` |
 | `--skipRun` | 跳过生成项目 Maven `exec:java` |
 
@@ -118,16 +119,13 @@ zero-local-prototype-runner=ok|template=world-shard|project=my-world-game|instal
 
 ```text
 ZeroLocalDoctor
-  -> ZeroArchitectureGuard
-  -> mvn -B -ntp test
   -> RunLocalPrototype --fromKeywords "<需求关键词>"
   -> 阅读 <outputDir>/BUSINESS_GUIDE.md
-  -> 在抽取正式模块或修改公共契约前提交 GitHub Design Proposal
 ```
 
-如果 `RunLocalPrototype` 失败，先按输出中的子命令单独排查：
+如果 `RunLocalPrototype` 失败，先看 stderr 中的 `RUNNER-INVALID-ARGUMENT` 或 `RUNNER-ENVIRONMENT`，再按输出中的子命令单独排查：
 
-- `mvn -q -DskipTests install`
+- `./mvnw -q -DskipTests install`（Windows 使用 `./mvnw.cmd`）
 - `java scripts/NewLocalGame.java ...`
 - `java scripts/RunLocalScaffold.java --projectDir ...`
 

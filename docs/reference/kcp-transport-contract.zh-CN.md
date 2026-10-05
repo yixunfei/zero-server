@@ -1,5 +1,7 @@
 # KCP 接入设计与协议契约
 
+2026-10-05：内置加密策略在 protection Context 中复用 seal/open 各方向 Cipher 和 SecretKeySpec，每包仍执行 init/AAD/doFinal。Context 仅供单 EventLoop/单线程独占，不可跨线程共享；close 清理密钥副本与原语引用。认证、nonce、方向隔离及 ZKCP v1 线格式保持，回归覆盖错误标签后同 nonce 的正确接收包。
+
 日期：2026-09-28；服务端闭环与多场景优化均已确认；独立 `zero-net-kcp` Adapter 和可选 `zero-runtime-kcp` 装配。
 
 ## 背景与依赖

@@ -170,18 +170,21 @@ class SimpleBusinessFullChainExternalIT {
                         mongoSettings.databaseName(),
                         new ZeroDataMappingIntrospector().inspect(PlayerProfile.class),
                         PlayerProfileCodec.INSTANCE,
-                        1);
+                        1, resources.io.remoteIoExecutor());
 
         PostgresqlDriverSettings postgresqlSettings = postgresqlSettings();
         assertTrue(new PostgresqlDataHealthCheck(postgresqlSettings).check(),
                 "PostgreSQL external service is unavailable");
+        resources.postgresqlPool = group.zn.zero.data.postgresql.PostgresqlPool.create(
+                postgresqlSettings, 4, Duration.ofSeconds(3));
         ZeroDataEnvelopeCrudRepository<String, AccountProfile> accountRepository =
                 new PostgresqlDataAdapter().registerDriverRepository(
                         "account_full_chain",
-                        postgresqlSettings,
+                        resources.postgresqlPool,
+                        postgresqlSettings.tableName(),
                         new ZeroDataMappingIntrospector().inspect(AccountProfile.class),
                         AccountProfileCodec.INSTANCE,
-                        1);
+                        1, resources.io.remoteIoExecutor());
         accountRepository.deleteById(accountId).toCompletableFuture().join();
 
         RedisDriverSettings redisSettings = RedisDriverSettings.fromSystemProperties();
@@ -412,6 +415,11 @@ class SimpleBusinessFullChainExternalIT {
     }
 
     private static final class ExternalResources implements AutoCloseable {
+        /** 测试拥有框架受管的远程 IO 执行域。 */
+        private final group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors io =
+                group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors.localPrototype("external-data");
+        /** 本测试拥有的 PostgreSQL 连接池。 */
+        private com.zaxxer.hikari.HikariDataSource postgresqlPool;
         /** 测试资源拥有并关闭 RPC 计时器。 */
         private final java.util.concurrent.ScheduledExecutorService timer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
 
@@ -429,6 +437,8 @@ class SimpleBusinessFullChainExternalIT {
         @Override
         public void close() {
             timer.shutdownNow();
+            io.close();
+            if (postgresqlPool != null) { postgresqlPool.close(); }
             if (caller != null) {
                 caller.close();
             }

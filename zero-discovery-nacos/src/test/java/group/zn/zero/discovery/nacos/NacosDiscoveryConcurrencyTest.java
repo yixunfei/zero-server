@@ -140,6 +140,64 @@ class NacosDiscoveryConcurrencyTest {
         adapter.stop();
     }
 
+    /** lookup 在 TTL 内复用 SDK 结果，注册和注销必须使旧路由结果失效。 */
+    @Test
+    void lookupCacheReusesResultsAndInvalidatesOnMembershipChanges() {
+        AtomicInteger lookupCalls = new AtomicInteger();
+        NamingService client = namingService((proxy, method, arguments) -> switch (method.getName()) {
+            case "getServerStatus" -> "UP";
+            case "getAllInstances", "selectInstances" -> {
+                lookupCalls.incrementAndGet();
+                yield List.of(sdkInstance("logic-1", "blue", true));
+            }
+            case "registerInstance", "deregisterInstance", "shutDown" -> null;
+            default -> defaultValue(method.getReturnType());
+        });
+        NacosDiscoveryAdapter adapter = new NacosDiscoveryAdapter(
+                settings(Map.of("zero.discovery.nacos.lookup-cache-ttl-millis", "1000")), ignored -> client);
+        adapter.start();
+        try {
+            assertEquals(1, adapter.lookup("logic-service").size());
+            assertEquals(1, adapter.lookup("logic-service").size());
+            assertEquals(1, lookupCalls.get());
+
+            adapter.register(instance());
+            adapter.lookup("logic-service");
+            assertEquals(3, lookupCalls.get());
+
+            adapter.unregister("logic-service", "logic-1");
+            adapter.lookup("logic-service");
+            assertEquals(5, lookupCalls.get());
+        } finally {
+            adapter.stop();
+        }
+    }
+
+    /** TTL 为零时，每次 lookup 都应直接调用 SDK。 */
+    @Test
+    void lookupCacheCanBeDisabled() {
+        AtomicInteger lookupCalls = new AtomicInteger();
+        NamingService client = namingService((proxy, method, arguments) -> switch (method.getName()) {
+            case "getServerStatus" -> "UP";
+            case "getAllInstances", "selectInstances" -> {
+                lookupCalls.incrementAndGet();
+                yield List.of();
+            }
+            case "shutDown" -> null;
+            default -> defaultValue(method.getReturnType());
+        });
+        NacosDiscoveryAdapter adapter = new NacosDiscoveryAdapter(
+                settings(Map.of("zero.discovery.nacos.lookup-cache-ttl-millis", "0")), ignored -> client);
+        adapter.start();
+        try {
+            adapter.lookup("logic-service");
+            adapter.lookup("logic-service");
+            assertEquals(2, lookupCalls.get());
+        } finally {
+            adapter.stop();
+        }
+    }
+
     private static void recordCallback(
             final NacosDiscoveryAdapter adapter,
             final ServiceQuery query,
@@ -153,11 +211,15 @@ class NacosDiscoveryConcurrencyTest {
     }
 
     private static NacosDiscoverySettings settings() {
+        return settings(Map.of());
+    }
+
+    private static NacosDiscoverySettings settings(final Map<String, String> extraProperties) {
         return new NacosDiscoverySettings(
                 "127.0.0.1:8848", NacosDiscoverySettings.DEFAULT_NAMESPACE,
                 "", "", "", "", ServiceDiscoveryConstants.DEFAULT_GROUP_NAME,
                 ServiceDiscoveryConstants.DEFAULT_CLUSTER_NAME, 1_000, false,
-                NacosHealthUpdateMode.REREGISTER, Map.of());
+                NacosHealthUpdateMode.REREGISTER, extraProperties);
     }
 
     private static ServiceInstance instance() {

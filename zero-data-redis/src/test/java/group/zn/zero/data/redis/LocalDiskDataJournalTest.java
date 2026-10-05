@@ -21,6 +21,26 @@ class LocalDiskDataJournalTest {
     @TempDir
     private Path tempDir;
 
+    /** 混合集合批量追加保留各文件内顺序；重启后同样能够恢复撕裂尾帧再批量写入。 */
+    @Test
+    void batchAppendPreservesPerCollectionOrderAndRecoversTornTail() throws Exception {
+        var journal = new LocalDiskDataJournal(tempDir);
+        var first = RedisDataJournalEntry.delete("game", "player", "p1", 1, 1000);
+        var other = RedisDataJournalEntry.delete("game", "item", "i1", 1, 1000);
+        var second = RedisDataJournalEntry.delete("game", "player", "p2", 2, 1001);
+        journal.appendAll(List.of(first, other, second));
+        assertEquals(List.of("p1", "p2"), journal.readAll("game", "player").stream().map(RedisDataJournalEntry::id).toList());
+        assertEquals(List.of("i1"), journal.readAll("game", "item").stream().map(RedisDataJournalEntry::id).toList());
+        Files.write(journal.journalPath("game", "player"), new byte[] {(byte) 0x80},
+                java.nio.file.StandardOpenOption.APPEND);
+        var restarted = new LocalDiskDataJournal(tempDir);
+        restarted.appendAll(List.of(second, first, other));
+        assertEquals(List.of("p1", "p2", "p2", "p1"), restarted.readAll("game", "player").stream().map(RedisDataJournalEntry::id).toList());
+        assertEquals(List.of("i1", "i1"), restarted.readAll("game", "item").stream().map(RedisDataJournalEntry::id).toList());
+        restarted.appendAll(List.of());
+        assertEquals(4, restarted.readAll("game", "player").size());
+    }
+
     /** 完整记录后追加撕裂记录时，只读取完整前缀。 */
     @Test
     void readAllShouldIgnoreTornTailRecord() throws Exception {

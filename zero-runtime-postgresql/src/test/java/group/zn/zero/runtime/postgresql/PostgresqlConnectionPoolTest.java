@@ -26,10 +26,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 
+/** 连接池复用、等待预算和生产资源所有权的回归测试。 @author zn */
 class PostgresqlConnectionPoolTest {
+    /** 不可连接的地址，验证装配不会提前建立物理连接。 */
     private static final PostgresqlDriverSettings SETTINGS = new PostgresqlDriverSettings(
             "jdbc:postgresql://127.0.0.1:1/test", "test", "test", "records");
 
+    /** 归还后复用、耗尽后超时、关闭时释放物理连接。 */
     @Test
     void poolReusesConnectionsBoundsAcquisitionAndClosesPhysicalResources() throws Exception {
         var opened = new AtomicInteger();
@@ -54,38 +57,43 @@ class PostgresqlConnectionPoolTest {
         assertThrows(SQLException.class, pool::getConnection);
     }
 
+    /** 资源按登记逆序关闭，工厂访问先于池失效；装配保持懒连接。 */
     @Test
     void providerRegistersPoolBeforeRepositoryFactoryWithoutConnecting() throws Exception {
-        var resources = new ArrayList<AutoCloseable>();
-        ResourceRegistrar registrar = new ResourceRegistrar() {
-            @Override
-            public <T extends AutoCloseable> T register(final T resource) { resources.add(resource); return resource; }
-        };
-        var context = (ComponentCreationContext) Proxy.newProxyInstance(ComponentCreationContext.class.getClassLoader(),
-                new Class<?>[] {ComponentCreationContext.class}, (proxy, method, arguments) -> {
-                    if (method.getName().equals("resources")) { return registrar; }
-                    throw new AssertionError(method);
-                });
-        var config = new MapZeroConfig(Map.of("zero.adapter.data.postgresql.enabled", "true",
-                PostgresqlDriverSettings.JDBC_URL_PROPERTY, SETTINGS.jdbcUrl(),
-                PostgresqlDriverSettings.USERNAME_PROPERTY, SETTINGS.username(),
-                PostgresqlDriverSettings.PASSWORD_PROPERTY, SETTINGS.password(),
-                PostgresqlDriverSettings.TABLE_NAME_PROPERTY, SETTINGS.tableName()));
-        var resolver = new ProductionConfigResolver(config, key -> null, key -> null);
-        var budget = new ProductionStartupBudget(Duration.ofSeconds(10), Duration.ofSeconds(2));
-        var resolution = ProductionPostgresqlDataProvider.resolve(resolver, budget, 3);
-        try {
-            resolution.provider().create(context);
-            assertEquals(2, resources.size());
-            var pool = assertInstanceOf(HikariDataSource.class, resources.getFirst());
-            assertEquals(3, pool.getMaximumPoolSize());
-            assertNull(pool.getHikariPoolMXBean());
-            assertInstanceOf(EnvelopeRepositoryFactory.class, resources.getLast());
-        } finally {
-            for (var resource : resources.reversed()) { resource.close(); }
+        try (var executors = group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors.localPrototype("pg-pool-test")) {
+            var resources = new ArrayList<AutoCloseable>();
+            ResourceRegistrar registrar = new ResourceRegistrar() {
+                @Override
+                public <T extends AutoCloseable> T register(final T resource) { resources.add(resource); return resource; }
+            };
+            var context = (ComponentCreationContext) Proxy.newProxyInstance(ComponentCreationContext.class.getClassLoader(),
+                    new Class<?>[] {ComponentCreationContext.class}, (proxy, method, arguments) -> {
+                        if (method.getName().equals("resources")) { return registrar; }
+                        if (method.getName().equals("require") && arguments[0].equals(
+                                group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS)) { return executors; }
+                        throw new AssertionError(method);
+                    });
+            var config = new MapZeroConfig(Map.of("zero.adapter.data.postgresql.enabled", "true",
+                    PostgresqlDriverSettings.JDBC_URL_PROPERTY, SETTINGS.jdbcUrl(),
+                    PostgresqlDriverSettings.USERNAME_PROPERTY, SETTINGS.username(),
+                    PostgresqlDriverSettings.PASSWORD_PROPERTY, SETTINGS.password(),
+                    PostgresqlDriverSettings.TABLE_NAME_PROPERTY, SETTINGS.tableName()));
+            var resolver = new ProductionConfigResolver(config, key -> null, key -> null);
+            var budget = new ProductionStartupBudget(Duration.ofSeconds(10), Duration.ofSeconds(2));
+            var resolution = ProductionPostgresqlDataProvider.resolve(resolver, budget, 3);
+            try {
+                resolution.provider().create(context);
+                assertEquals(2, resources.size());
+                var pool = assertInstanceOf(HikariDataSource.class, resources.getFirst());
+                assertEquals(3, pool.getMaximumPoolSize());
+                assertNull(pool.getHikariPoolMXBean());
+                assertInstanceOf(EnvelopeRepositoryFactory.class, resources.getLast());
+            } finally {
+                for (var resource : resources.reversed()) { resource.close(); }
+            }
+            assertTrue(((HikariDataSource) resources.getFirst()).isClosed());
+            assertThrows(IllegalArgumentException.class, () -> PostgresqlRuntime.module(0));
         }
-        assertTrue(((HikariDataSource) resources.getFirst()).isClosed());
-        assertThrows(IllegalArgumentException.class, () -> PostgresqlRuntime.module(0));
     }
 
     private static DataSource source(final AtomicInteger opened, final AtomicInteger closed) {

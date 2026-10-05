@@ -34,7 +34,7 @@ class RepositoryCatalogTest {
         try (var factory = new EnvelopeRepositoryFactory(metadata -> {
             stores.incrementAndGet();
             return new InMemoryEnvelopeStore();
-        })) {
+        }, Runnable::run)) {
             var catalog = new RepositoryCatalog(List.of(new RepositorySource("chosen", factory)),
                     Map.of("game", "chosen", "audit", "chosen"));
             assertEquals(0, stores.get());
@@ -52,7 +52,7 @@ class RepositoryCatalogTest {
 
     @Test
     void rejectsMissingRolesDuplicateSourcesAndConflictingDefinitions() {
-        try (var factory = EnvelopeRepositoryFactory.inMemory()) {
+        try (var factory = EnvelopeRepositoryFactory.inMemory(Runnable::run)) {
             var source = new RepositorySource("local", factory);
             assertThrows(IllegalArgumentException.class,
                     () -> new RepositoryCatalog(List.of(source, source), Map.of()));
@@ -70,7 +70,7 @@ class RepositoryCatalogTest {
 
     @Test
     void closedFactoriesInvalidateRetainedRepositoriesAndDoNotLeakStorageFailures() {
-        var factory = EnvelopeRepositoryFactory.inMemory();
+        var factory = EnvelopeRepositoryFactory.inMemory(Runnable::run);
         var repository = factory.create(BALANCES);
         factory.close();
         assertThrows(ZeroException.class, () -> factory.create(BALANCES));
@@ -79,7 +79,7 @@ class RepositoryCatalogTest {
         assertEquals(DataErrorCode.BACKEND_UNAVAILABLE, ((ZeroException) failure.getCause()).errorCode());
         try (var broken = new EnvelopeRepositoryFactory(metadata -> {
             throw new IllegalStateException("private-connection-string");
-        })) {
+        }, Runnable::run)) {
             var error = assertThrows(ZeroException.class, () -> broken.create(BALANCES));
             assertNull(error.getCause());
             assertFalse(error.toString().contains("private-connection-string"));

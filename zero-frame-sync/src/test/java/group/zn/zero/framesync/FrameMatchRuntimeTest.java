@@ -57,6 +57,44 @@ class FrameMatchRuntimeTest {
         assertThrows(CompletionException.class, () -> runtime.submit(new FrameInput("u", 2, 2, 0, new byte[] {1, 2}, "t")).toCompletableFuture().join());
     }
 
+    /** 远期窗口边界可配置；被拒绝的输入不得占用参与者或输入容量。 */
+    @Test void futureWindowRejectsOnlyBeyondConfiguredBoundary() {
+        FrameMatchConfig config = new FrameMatchConfig(InputTimingPolicy.REJECT, MissingInputPolicy.EMPTY, 32, 1, 2);
+        FrameMatchRuntime runtime = new FrameMatchRuntime("future", config, (f, b) -> { }, event -> { }, event -> { });
+        runtime.submit(new FrameInput("u", 1, 2, 0, new byte[]{1}, "t")).toCompletableFuture().join();
+        assertThrows(CompletionException.class,
+                () -> runtime.submit(new FrameInput("v", 1, 3, 0, new byte[]{1}, "t")).toCompletableFuture().join());
+        assertThrows(CompletionException.class,
+                () -> runtime.submit(new FrameInput("w", 1, Long.MAX_VALUE, 0, new byte[]{1}, "t"))
+                        .toCompletableFuture().join());
+        runtime.tick().toCompletableFuture().join();
+        runtime.tick().toCompletableFuture().join();
+        assertEquals(2, runtime.frameNo());
+        runtime.submit(new FrameInput("v", 1, 4, 0, new byte[]{1}, "t")).toCompletableFuture().join();
+    }
+
+    /** tick 推进后，远期窗口随当前帧移动。 */
+    @Test void futureWindowMovesWithFrameClock() {
+        FrameMatchConfig config = new FrameMatchConfig(InputTimingPolicy.REJECT, MissingInputPolicy.EMPTY, 32, 2, 1);
+        FrameMatchRuntime runtime = new FrameMatchRuntime("moving-future", config, (f, b) -> { }, event -> { }, event -> { });
+        assertThrows(CompletionException.class,
+                () -> runtime.submit(new FrameInput("u", 1, 2, 0, new byte[]{1}, "t")).toCompletableFuture().join());
+        runtime.tick().toCompletableFuture().join();
+        runtime.submit(new FrameInput("u", 1, 2, 0, new byte[]{1}, "t")).toCompletableFuture().join();
+    }
+
+    /** MARK 策略消费后应释放参与者名额，允许新玩家进入后续帧。 */
+    @Test void markPolicyReleasesConsumedParticipantCapacity() {
+        FrameMatchRuntime runtime = new FrameMatchRuntime("mark",
+                new FrameMatchConfig(InputTimingPolicy.REJECT, MissingInputPolicy.MARK, 8, 1),
+                (frame, batch) -> { }, event -> { }, event -> { });
+        runtime.submit(new FrameInput("first", 1, 1, 0, new byte[]{1}, "t")).toCompletableFuture().join();
+        runtime.tick().toCompletableFuture().join();
+        runtime.submit(new FrameInput("second", 1, 2, 0, new byte[]{2}, "t")).toCompletableFuture().join();
+        runtime.tick().toCompletableFuture().join();
+        assertEquals(2, runtime.frameNo());
+    }
+
     @Test void failedSimulationDoesNotAdvanceFrameOrConsumeInput() {
         AtomicBoolean fail = new AtomicBoolean(true);
         FrameMatchRuntime runtime = new FrameMatchRuntime("retry", FrameMatchConfig.defaults(),

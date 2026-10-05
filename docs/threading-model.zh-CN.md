@@ -1,5 +1,29 @@
 # 线程模型设计
 
+## 2026-10-05 同步驱动 IO 与 flush 并发
+
+Envelope Repository 不持有全方法同步锁，实际 Store IO 提交到必填的受管 executor。保存实体和复合 ID 在所属调用域编码快照；解码和 completion 可能在 IO 域运行，写 Actor 状态必须回投。自定义 Store/codec 需要可并发使用，不能依赖 Repository 锁保护共享状态。
+
+`ZeroProductionRuntimeFactory` 默认通过 `ZeroRuntimeExecutors.remoteIo(prefix)` 托管 Java 21 虚拟线程远程 IO，runtime 关闭这些资源；logic/actor/background 仍内联。底层 `ProductionAssembly` 组合根使用真实 provider 时须显式选择非内联执行器。虚拟线程不提供业务背压，仍应匹配连接池和在途请求预算。持久化默认最多 16 个独立脏键在途，flush 队列保持串行以保护同键；快照仍从绑定域捕获。迁移见[说明](migrations/20261005-performance-issues.zh-CN.md)。
+
+## 2026-10-04 反馈专项边界
+
+边界适配层不得把用户业务或阻塞驱动放在 poll、Netty EventLoop、Actor lane 或生命周期状态锁内。Kafka consumer、TCP replay、Nacos SDK、Redis/Envelope repository、runtime lifecycle 和 EventBus 均提供显式执行域或锁外调用路径；线程池大小、拒绝策略、partition 保序和 TCP 顺序保护由组合根配置。
+
+TCP replay 判定在连接内按到达顺序推进，避免异步完成顺序改变业务帧顺序；TCP 业务 handler 的 per-connection 顺序保护仍是可选项，开启后会产生该连接的 head-of-line blocking。H1 未修改协议，当前序列只代表接收顺序，不能提供跨连接 authenticated nonce 的安全属性。
+
+同步 API 的 NPC zone 仍通过短 monitor 保护 map，尚未改成异步 lane facade；调用方应从所属 zone 执行域进入。未注入受管执行器的旧兼容构造器仍可能保留直接调用语义，生产组合根必须显式注入执行器并在启动时检查线程角色。
+
+## 2026-10-04 帧同步容量边界
+
+帧对局仍由单 match lane 串行修改权威状态。`MissingInputPolicy.MARK` 消费玩家最后一条待处理输入后立即释放其参与者槽位；`EMPTY` 同样释放，`REPEAT_LAST` 则为后续缺失帧保留历史输入和参与者槽位。非 `REPEAT_LAST` 策略不维护上一输入的逐帧副本。容量按仍需保留的玩家及输入计算，迁移和复核证据见[说明](migrations/20261004-frame-sync-capacity.zh-CN.md)。
+
+## 2026-10-03 异步与关闭边界
+
+Actor 提交、Player 回投、RPC 解码及网络扩展抛错时必须终结独立结果，不得只让无人观察的衍生 stage 失败。KCP dispatch 只在短锁内管理队列与预算，执行器提交、响应发送及关闭在锁外调用，仍要求非内联执行器。Redis KCP 物理 IO 结束后先还准入配额，再通知调用方。
+
+缓存写入取消只终止观察，同键物理完成屏障仍保留；内部写入预算每键 1024、总计 4096，同步完成队列非递归推进。Player 同 UID 的 cache-miss 仓库加载与回填合并为一个内部流程，最多 4096 个 UID；观察者取消不终止共享流程。并发 drain 共享一次关闭，配置 watcher 回调关闭自身不自等待。迁移与验证见[专项说明](migrations/20261003-concurrency-async-performance.zh-CN.md)。
+
 ## 2026-09-28 KCP 调度与客户端
 
 单 socket/单会话仍绑定一个 EventLoop。服务端每会话一个截止记录、每服务一个等待计时器，每轮至多处理64个到期会话；空闲会话不更新算法，授权在250ms内复查。
@@ -170,7 +194,7 @@ Java 21 虚拟线程允许用于：
 - `ProductionNetworkPolicy.authenticate` 与 `coordinateReconnect` 必须由 starter 管理的非内联 remote IO executor 调用；production factory 会拒绝可能内联的执行器。
 - 业务 `ServerFrameHandler` 仍使用调用方传入的业务 executor，不在 Netty IO 线程运行。
 - 日志和指标 observer 复用 starter 管理的共享 background executor；每个连接通过私有有序 drain 最多提交一个活动排空任务，同一连接按会话提交顺序执行，不同连接仍可并发。该 drain 不创建线程池，也不要求共享 executor 自身为单线程。
-- observer 失败通知必须回到连接 EventLoop 后再进入 `ConnectionListener`。当前每连接 observer 待执行队列没有独立容量上限、背压或丢弃策略，慢 observer 可能积压，因此有序执行不等于容量、长稳或故障降级已经验证。
+- observer 失败通知必须回到连接 EventLoop 后再进入 `ConnectionListener`。每连接 observer 待执行队列最多保留 1024 个任务，超限只拒绝当前任务并保留已排队 drain；底层执行器首次提交失败时清空队列并恢复 drain 状态。该上限仍不等于容量、长稳或故障降级已经验证。
 - 重连若涉及玩家在线状态，只允许由 `coordinateReconnect` 实现向 player actor 发送消息，不允许网络线程或 remote IO 线程直接修改玩家状态。
 - observer、鉴权或业务完成回调必须先投递回 EventLoop，再修改连接生命周期状态或释放 in-flight 预算。
 

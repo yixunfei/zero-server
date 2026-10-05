@@ -158,7 +158,7 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
     private void scheduleDrain(final LaneKey laneKey, final LaneStripe stripe, final LaneQueue laneQueue) {
         try {
             executor.execute(() -> runDrain(laneKey, stripe, laneQueue));
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             failLane(laneKey, stripe, laneQueue, ZeroException.of(
                     ActorErrorCode.EXECUTOR_REJECTED, "actor executor rejected", ex));
         }

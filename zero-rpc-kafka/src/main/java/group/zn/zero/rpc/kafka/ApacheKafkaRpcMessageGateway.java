@@ -29,6 +29,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.common.errors.WakeupException;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -69,6 +70,9 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
      */
     private final KafkaRpcClientFactory clientFactory;
 
+    /** 已拉取消息的业务交付策略；poll 线程永不直接调用监听器。 */
+    private final KafkaRpcConsumerExecution consumerExecution;
+
     /** subscribe、unsubscribe 与 close 的线性化监视器；不进入消息发送热路径。 */
     private final Object workerLifecycleMonitor = new Object();
 
@@ -108,7 +112,22 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
      * @throws ZeroException 当 producer 创建失败时抛出。
      */
     ApacheKafkaRpcMessageGateway(final KafkaRpcSettings settings, final RpcTransportObserver observer) {
-        this(settings, observer, KafkaRpcClientFactory.APACHE);
+        this(settings, observer, KafkaRpcConsumerExecution.compatibilityDefault(), KafkaRpcClientFactory.APACHE,
+                WorkerLifecycleProbe.noop());
+    }
+
+    /**
+     * 使用指定业务交付策略创建 Apache Kafka RPC 消息网关。
+     *
+     * @param settings Kafka RPC 配置；不可为空。
+     * @param observer RPC 传输观测器；不可为空。
+     * @param consumerExecution consumer 业务交付策略；不可为空。
+     */
+    ApacheKafkaRpcMessageGateway(
+            final KafkaRpcSettings settings,
+            final RpcTransportObserver observer,
+            final KafkaRpcConsumerExecution consumerExecution) {
+        this(settings, observer, consumerExecution, KafkaRpcClientFactory.APACHE, WorkerLifecycleProbe.noop());
     }
 
     /**
@@ -124,7 +143,8 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
             final KafkaRpcSettings settings,
             final RpcTransportObserver observer,
             final KafkaRpcClientFactory clientFactory) {
-        this(settings, observer, clientFactory, WorkerLifecycleProbe.noop());
+        this(settings, observer, KafkaRpcConsumerExecution.compatibilityDefault(), clientFactory,
+                WorkerLifecycleProbe.noop());
     }
 
     /**
@@ -140,10 +160,22 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
             final RpcTransportObserver observer,
             final KafkaRpcClientFactory clientFactory,
             final WorkerLifecycleProbe workerLifecycleProbe) {
+        this(settings, observer, KafkaRpcConsumerExecution.compatibilityDefault(), clientFactory,
+                workerLifecycleProbe);
+    }
+
+    /** 使用指定业务交付策略、客户端工厂与并发探针创建网关。 */
+    ApacheKafkaRpcMessageGateway(
+            final KafkaRpcSettings settings,
+            final RpcTransportObserver observer,
+            final KafkaRpcConsumerExecution consumerExecution,
+            final KafkaRpcClientFactory clientFactory,
+            final WorkerLifecycleProbe workerLifecycleProbe) {
         this.settings = Objects.requireNonNull(settings, "settings");
         this.replyConsumerGroup = settings.consumerGroupId() + "-reply-"
                 + UUID.randomUUID().toString().replace("-", "");
         this.observer = Objects.requireNonNull(observer, "observer");
+        this.consumerExecution = Objects.requireNonNull(consumerExecution, "consumerExecution");
         this.clientFactory = Objects.requireNonNull(clientFactory, "clientFactory");
         this.workerLifecycleProbe = Objects.requireNonNull(workerLifecycleProbe, "workerLifecycleProbe");
         try {
@@ -355,6 +387,7 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
                 settings,
                 consumerProperties(settings, subscription),
                 observer,
+                consumerExecution,
                 clientFactory);
     }
 
@@ -381,6 +414,8 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
         properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        properties.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 100);
+        properties.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, 300_000);
         append(properties, settings.consumerProperties());
         // 处理确认是网关契约，扩展属性不得重新打开自动提交。
         properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
@@ -596,6 +631,16 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
          */
         private final Properties consumerProperties;
 
+        /** 已拉取消息的应用执行策略。 */
+        private final KafkaRpcConsumerExecution consumerExecution;
+
+        /** 单个分区处理的最大预算，预留 poll 心跳与提交时间。 */
+        private final Duration processingBudget;
+
+        /** 分区有序策略的尾阶段，仅存活分区会保留条目。 */
+        private final ConcurrentMap<TopicPartition, CompletableFuture<Void>> partitionTails =
+                new ConcurrentHashMap<>();
+
         /**
          * 消息监听器集合。
          */
@@ -655,11 +700,14 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
                 final KafkaRpcSettings settings,
                 final Properties consumerProperties,
                 final RpcTransportObserver observer,
+                final KafkaRpcConsumerExecution consumerExecution,
                 final KafkaRpcClientFactory clientFactory) {
             this.subscription = Objects.requireNonNull(subscription, "subscription");
             this.settings = Objects.requireNonNull(settings, "settings");
             this.consumerProperties = Objects.requireNonNull(consumerProperties, "consumerProperties");
             this.observer = Objects.requireNonNull(observer, "observer");
+            this.consumerExecution = Objects.requireNonNull(consumerExecution, "consumerExecution");
+            this.processingBudget = processingBudget(consumerProperties, settings.pollTimeout());
             this.clientFactory = Objects.requireNonNull(clientFactory, "clientFactory");
         }
 
@@ -790,7 +838,7 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
                 KafkaRpcConsumerBatch batch = new KafkaRpcConsumerBatch(current);
                 current.subscribe(List.of(subscription.topic()), batch);
                 while (running.get()) {
-                    batch.commitCompleted();
+                    batch.commitCompleted(processingBudget);
                     ConsumerRecords<String, byte[]> records = current.poll(settings.pollTimeout());
                     if (!records.isEmpty()) {
                         batch.track(records, dispatch(records));
@@ -828,26 +876,164 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
             }
         }
 
-        private CompletionStage<Void> dispatch(final ConsumerRecords<String, byte[]> records) {
+        private Map<TopicPartition, CompletionStage<Void>> dispatch(final ConsumerRecords<String, byte[]> records) {
             if (listeners.isEmpty()) {
-                return CompletableFuture.failedFuture(KafkaRpcResourceException.create("no kafka rpc listener"));
+                Map<TopicPartition, CompletionStage<Void>> failures = new ConcurrentHashMap<>();
+                for (TopicPartition partition : records.partitions()) {
+                    failures.put(partition, CompletableFuture.failedFuture(
+                            KafkaRpcResourceException.create("no kafka rpc listener")));
+                }
+                return failures;
             }
-            List<CompletableFuture<Void>> completions = new ArrayList<>();
+            Map<TopicPartition, List<CompletionStage<Void>>> completions = new ConcurrentHashMap<>();
             for (ConsumerRecord<String, byte[]> record : records) {
                 KafkaRpcMessage message = new KafkaRpcMessage(record.topic(), record.key(), record.value());
-                for (KafkaRpcMessageListener listener : listeners) {
-                    try {
-                        completions.add(Objects.requireNonNull(listener.onMessageAsync(message),
-                                "listener stage").toCompletableFuture());
-                    } catch (RuntimeException ex) {
-                        lastListenerException = KafkaRpcResourceException.create(
-                                "kafka rpc listener failed");
-                        LOGGER.log(System.Logger.Level.ERROR, "kafka rpc listener failed");
-                        completions.add(CompletableFuture.failedFuture(lastListenerException));
+                TopicPartition partition = new TopicPartition(record.topic(), record.partition());
+                CompletionStage<Void> completion = consumerExecution.preservePartitionOrder()
+                        ? dispatchOrdered(partition, message)
+                        : dispatchOnApplicationExecutor(message);
+                completions.computeIfAbsent(partition, ignored -> new ArrayList<>()).add(completion);
+            }
+            Map<TopicPartition, CompletionStage<Void>> result = new ConcurrentHashMap<>();
+            completions.forEach((partition, stages) -> result.put(partition, combine(stages)));
+            return result;
+        }
+
+        /** 把同一分区的下一条消息接在前一条的最终完成之后。 */
+        private CompletionStage<Void> dispatchOrdered(
+                final TopicPartition partition, final KafkaRpcMessage message) {
+            CompletableFuture<Void> current = new CompletableFuture<>();
+            CompletableFuture<Void> previous = partitionTails.put(partition, current);
+            current.whenComplete((ignored, failure) -> partitionTails.remove(partition, current));
+            if (previous == null) {
+                bridge(dispatchOnApplicationExecutor(message), current);
+            } else {
+                bridgeAfter(previous, message, current);
+            }
+            return current;
+        }
+
+        /** 前一条分区消息成功完成后，才投递下一条；失败时保留 offset 并让 worker 重建。 */
+        private void bridgeAfter(
+                final CompletionStage<Void> previous,
+                final KafkaRpcMessage message,
+                final CompletableFuture<Void> current) {
+            try {
+                previous.whenComplete((ignored, priorFailure) -> {
+                    if (priorFailure != null) {
+                        current.completeExceptionally(priorFailure);
+                    } else {
+                        bridge(dispatchOnApplicationExecutor(message), current);
+                    }
+                });
+            } catch (RuntimeException | Error failure) {
+                current.completeExceptionally(failure);
+            }
+        }
+
+        /** 将一个消息交给应用执行器，consumer poll 线程只负责提交任务。 */
+        private CompletionStage<Void> dispatchOnApplicationExecutor(final KafkaRpcMessage message) {
+            CompletableFuture<Void> result = new CompletableFuture<>();
+            try {
+                consumerExecution.executor().execute(() -> invokeListeners(message, result));
+            } catch (RuntimeException | Error failure) {
+                listenerFailure(result, failure);
+            }
+            return result;
+        }
+
+        /** 在应用执行器中调用所有监听器并以框架拥有的 future 汇总结果。 */
+        private void invokeListeners(final KafkaRpcMessage message, final CompletableFuture<Void> result) {
+            List<KafkaRpcMessageListener> currentListeners = List.copyOf(listeners);
+            if (currentListeners.isEmpty()) {
+                listenerFailure(result, KafkaRpcResourceException.create("no kafka rpc listener"));
+                return;
+            }
+            List<CompletionStage<Void>> stages = new ArrayList<>(currentListeners.size());
+            for (KafkaRpcMessageListener listener : currentListeners) {
+                try {
+                    stages.add(Objects.requireNonNull(listener.onMessageAsync(message), "listener stage"));
+                } catch (RuntimeException | Error failure) {
+                    listenerFailure(result, failure);
+                    return;
+                }
+            }
+            bridge(combine(stages), result);
+        }
+
+        /** 汇总 CompletionStage，避免假定第三方实现支持 toCompletableFuture。 */
+        private CompletionStage<Void> combine(final List<? extends CompletionStage<Void>> stages) {
+            CompletableFuture<Void> result = new CompletableFuture<>();
+            if (stages.isEmpty()) {
+                result.complete(null);
+                return result;
+            }
+            java.util.concurrent.atomic.AtomicInteger remaining =
+                    new java.util.concurrent.atomic.AtomicInteger(stages.size());
+            AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+            for (CompletionStage<Void> stage : stages) {
+                try {
+                    stage.whenComplete((ignored, failure) -> {
+                        if (failure != null) {
+                            firstFailure.compareAndSet(null, failure);
+                        }
+                        if (remaining.decrementAndGet() == 0) {
+                            Throwable currentFailure = firstFailure.get();
+                            if (currentFailure == null) {
+                                result.complete(null);
+                            } else {
+                                result.completeExceptionally(currentFailure);
+                            }
+                        }
+                    });
+                } catch (RuntimeException | Error failure) {
+                    firstFailure.compareAndSet(null, failure);
+                    if (remaining.decrementAndGet() == 0) {
+                        result.completeExceptionally(firstFailure.get());
                     }
                 }
             }
-            return CompletableFuture.allOf(completions.toArray(CompletableFuture[]::new));
+            return result;
+        }
+
+        /** 使用 whenComplete 桥接第三方阶段到框架拥有的 CompletableFuture。 */
+        private void bridge(final CompletionStage<Void> source, final CompletableFuture<Void> target) {
+            try {
+                source.whenComplete((ignored, failure) -> {
+                    if (failure == null) {
+                        target.complete(null);
+                    } else {
+                        target.completeExceptionally(failure);
+                    }
+                });
+            } catch (RuntimeException | Error failure) {
+                target.completeExceptionally(failure);
+            }
+        }
+
+        /** 记录安全失败并结束本条消息；worker 会放弃未确认 offset 后受控重建。 */
+        private void listenerFailure(final CompletableFuture<Void> result, final Throwable failure) {
+            lastListenerException = KafkaRpcResourceException.create("kafka rpc listener failed");
+            LOGGER.log(System.Logger.Level.ERROR, "kafka rpc listener failed");
+            result.completeExceptionally(failure);
+        }
+
+        /** 从有效 max.poll.interval.ms 导出处理预算，并预留一次 poll 与提交的时间。 */
+        private static Duration processingBudget(final Properties properties, final Duration pollTimeout) {
+            Object configured = properties.get(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG);
+            long interval;
+            try {
+                interval = Long.parseLong(String.valueOf(configured));
+            } catch (RuntimeException failure) {
+                throw KafkaRpcResourceException.create("kafka rpc max.poll.interval.ms is invalid");
+            }
+            long pollMillis = Math.max(1L, pollTimeout.toMillis());
+            long reserve = Math.max(250L, Math.min(10_000L, pollMillis * 2L));
+            if (interval <= reserve) {
+                throw KafkaRpcResourceException.create(
+                        "kafka rpc max.poll.interval.ms must exceed poll and commit reserve");
+            }
+            return Duration.ofMillis(interval - reserve);
         }
 
         private Duration consumerCloseTimeout() {

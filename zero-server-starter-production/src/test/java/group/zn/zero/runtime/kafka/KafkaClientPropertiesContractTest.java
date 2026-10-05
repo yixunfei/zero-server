@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.rpc.kafka.KafkaRpcSettings;
@@ -39,6 +41,30 @@ class KafkaClientPropertiesContractTest {
 
     /** 用于反证非法属性值不会进入异常图的敏感哨兵。 */
     private static final String SECRET = "PAF1-KAFKA-CLIENT-PROPERTY-SECRET";
+
+    /** 相同生产配置必须产生各实例独占的 reply topic，避免所有进程订阅一个广播 topic。 */
+    @Test
+    void sameReplyPrefixProducesDistinctInstanceTopics() {
+        Map<String, String> config = Map.of(
+                ZeroProductionRuntimeConfigKeys.ADAPTER_RPC_KAFKA_ENABLED, "true",
+                ZeroProductionRuntimeConfigKeys.RPC_KAFKA_BOOTSTRAP_SERVERS, "127.0.0.1:9092",
+                ZeroProductionRuntimeConfigKeys.RPC_KAFKA_CLIENT_ID, "routing-client",
+                ZeroProductionRuntimeConfigKeys.RPC_KAFKA_CONSUMER_GROUP_ID, "routing-group",
+                ZeroProductionRuntimeConfigKeys.RPC_KAFKA_TOPIC_PREFIX, "routing.request",
+                ZeroProductionRuntimeConfigKeys.RPC_KAFKA_REPLY_TOPIC, "routing.reply");
+        var first = isolatedBuilder(config).build();
+        var second = isolatedBuilder(config).build();
+        try {
+            String firstTopic = ((KafkaRpcLifecycleAdapter) first.require(RpcRuntime.RPC_TRANSPORT)).settings().replyTopic();
+            String secondTopic = ((KafkaRpcLifecycleAdapter) second.require(RpcRuntime.RPC_TRANSPORT)).settings().replyTopic();
+            assertTrue(firstTopic.matches("routing\\.reply\\.[a-f0-9]{32}"));
+            assertTrue(secondTopic.matches("routing\\.reply\\.[a-f0-9]{32}"));
+            assertNotEquals(firstTopic, secondTopic);
+        } finally {
+            second.close();
+            first.close();
+        }
+    }
 
     /**
      * 验证白名单拒绝所有不属于精确 {@code security.protocol}、{@code ssl.*} 或 {@code sasl.*} 的键。

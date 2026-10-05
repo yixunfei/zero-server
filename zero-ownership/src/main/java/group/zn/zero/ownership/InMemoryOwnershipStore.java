@@ -87,6 +87,14 @@ public final class InMemoryOwnershipStore implements OwnershipStore {
         requireMatch(current, lease, clock.instant(), true);
     }
 
+    /** 在本地租约锁内校验并提交本地状态；action 只能执行内存状态更新，不得执行远程 IO。 */
+    synchronized <T> T withCurrent(final OwnershipLease lease, final Clock validationClock,
+            final java.util.function.Supplier<T> action) {
+        OwnershipLease current = requireCurrent(lease.resource());
+        requireMatch(current, lease, validationClock.instant(), true);
+        return action.get();
+    }
+
     private OwnershipLease issue(
             final OwnershipResource resource,
             final ProcessIncarnation owner,

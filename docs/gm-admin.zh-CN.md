@@ -1,5 +1,13 @@
 # GM 与后台接入
 
+## 2026-10-04 反馈专项边界
+
+`GmOperationEndpoint` 现在先完成授权，再登记幂等 claim；指纹包含 `approvalToken`，授权失败不会创建或锁死幂等键，因此补充正确授权事实的重试仍可进入授权流程。handler 的 `ZeroException`、运行时异常和 `Error` 都会结束或清理 `IN_PROGRESS`，避免异常路径遗留临时锁。
+
+审批 token 目前仍只验证不核销，跨请求重放窗口需要由真实授权 provider 提供一次性消费或状态 fencing；本轮没有改变 GM 协议和持久化接口。
+
+2026-10-03：本地 `InMemoryGmIdempotencyStore` 在 claim 时按到期索引回收，最多保留 4096 条记录；满额时新键返回 FAILED 并由入口拒绝，已有键仍可查询去重结果。高容量及耐久需求应注入应用实现；详见[迁移说明](migrations/20261003-concurrency-async-performance.zh-CN.md)。
+
 适用版本：`0.1.1`，`productionReady=false`。框架提供 GM 命令、授权与审计边界，后台页面和真实运营服务由应用实现。
 
 ## 当前可用能力

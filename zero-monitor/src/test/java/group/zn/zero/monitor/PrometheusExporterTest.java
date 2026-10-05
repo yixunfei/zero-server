@@ -67,6 +67,25 @@ class PrometheusExporterTest {
         assertTrue(text.contains("zero_value{kind=\"negative\"} -Inf "));
     }
 
+    /** Each scrape must expose one current value per metric and label set. */
+    @Test
+    void exporterShouldExposeOnlyLatestValuePerSeries() {
+        InMemoryMetricRegistry registry = new InMemoryMetricRegistry();
+        registry.register(new MetricDefinition("zero_value", "value", "count", List.of("scope")));
+        registry.record(new MetricSample("zero_value", 1, Map.of("scope", "a"), Instant.EPOCH));
+        registry.record(new MetricSample("zero_value", 2, Map.of("scope", "a"), Instant.EPOCH.plusSeconds(1)));
+        registry.record(new MetricSample("zero_value", 3, Map.of("scope", "a"), Instant.EPOCH));
+        registry.record(new MetricSample("zero_value", 4, Map.of("scope", "b"), Instant.EPOCH));
+        registry.record(new MetricSample("zero_value", 5, Map.of("scope", "a"), Instant.EPOCH.plusSeconds(1)));
+
+        String text = new PrometheusExporter().export(registry);
+
+        assertEquals(2, text.lines().filter(line -> line.startsWith("zero_value{")).count());
+        assertTrue(text.contains("zero_value{scope=\"a\"} 5.0 1000\n"));
+        assertTrue(text.contains("zero_value{scope=\"b\"} 4.0 0\n"));
+        assertEquals(5, registry.samples().size());
+    }
+
     /**
      * 验证 exporter 不会静默跳过任意注册表提供的未注册样本。
      */
@@ -96,6 +115,18 @@ class PrometheusExporterTest {
         assertErrorCode(
                 MonitorErrorCode.METRIC_LABEL_SCHEMA_MISMATCH,
                 () -> new PrometheusExporter().export(fixedRegistry(List.of(definition), List.of(sample))));
+    }
+
+    /** Historical samples must still be valid even when a newer value wins selection. */
+    @Test
+    void exporterShouldRejectInvalidOlderTimestamp() {
+        InMemoryMetricRegistry registry = new InMemoryMetricRegistry();
+        registry.register(new MetricDefinition("zero_value", "value", "count", List.of()));
+        registry.record(new MetricSample("zero_value", 1, Map.of(), Instant.MIN));
+        registry.record(new MetricSample("zero_value", 2, Map.of(), Instant.EPOCH));
+
+        assertErrorCode(MonitorErrorCode.METRIC_SAMPLE_INVALID,
+                () -> new PrometheusExporter().export(registry));
     }
 
     private MetricRegistry fixedRegistry(

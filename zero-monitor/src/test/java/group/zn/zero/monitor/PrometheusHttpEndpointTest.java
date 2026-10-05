@@ -85,6 +85,7 @@ class PrometheusHttpEndpointTest {
         InMemoryMetricRegistry registry = new InMemoryMetricRegistry();
         registry.register(new MetricDefinition("zero_requests_total", "requests", "count", List.of("result")));
         registry.record(new MetricSample("zero_requests_total", 2D, Map.of("result", "ok"), Instant.parse("2026-08-04T00:00:00Z")));
+        registry.record(new MetricSample("zero_requests_total", 3D, Map.of("result", "ok"), Instant.parse("2026-08-04T00:00:01Z")));
         PrometheusHttpEndpoint endpoint = new PrometheusHttpEndpoint(new InetSocketAddress("127.0.0.1", 0), registry, executor);
 
         assertFalse(endpoint.isRunning());
@@ -98,7 +99,8 @@ class PrometheusHttpEndpointTest {
         assertEquals(200, metrics.statusCode());
         assertEquals("text/plain; version=0.0.4; charset=utf-8", metrics.headers().firstValue("Content-Type").orElseThrow());
         assertTrue(metrics.body().contains("# TYPE zero_requests_total counter\n"));
-        assertTrue(metrics.body().contains("zero_requests_total{result=\"ok\"} 2.0 "));
+        assertEquals(1, metrics.body().lines().filter(line -> line.startsWith("zero_requests_total{")).count());
+        assertTrue(metrics.body().contains("zero_requests_total{result=\"ok\"} 3.0 1785801601000\n"));
         assertEquals(200, health.statusCode());
         assertEquals("ok\n", health.body());
         endpoint.start();

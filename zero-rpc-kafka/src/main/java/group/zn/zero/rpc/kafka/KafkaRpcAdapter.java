@@ -173,7 +173,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
      * @throws ZeroException 当 Kafka producer 创建失败时抛出。
      */
     public KafkaRpcAdapter(final KafkaRpcSettings settings, final java.util.concurrent.ScheduledExecutorService timer) {
-        this(settings, RpcTransportObserver.noop(), timer);
+        this(settings, RpcTransportObserver.noop(), KafkaRpcConsumerExecution.compatibilityDefault(), timer);
     }
 
     /**
@@ -185,7 +185,23 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
      * @throws ZeroException 当 Kafka producer 创建失败时抛出。
      */
     public KafkaRpcAdapter(final KafkaRpcSettings settings, final RpcTransportObserver observer, final java.util.concurrent.ScheduledExecutorService timer) {
-        this(settings, null, observer, timer);
+        this(settings, observer, KafkaRpcConsumerExecution.compatibilityDefault(), timer);
+    }
+
+    /**
+     * 创建使用显式 consumer 业务执行策略的 Kafka RPC 适配器。
+     *
+     * @param settings Kafka RPC 配置；不可为空。
+     * @param observer RPC 传输观测器；不可为空。
+     * @param consumerExecution 监听器业务执行策略；不可为空，生产必须使用受管非内联执行器。
+     * @param timer 超时清理计时器；不可为空。
+     */
+    public KafkaRpcAdapter(
+            final KafkaRpcSettings settings,
+            final RpcTransportObserver observer,
+            final KafkaRpcConsumerExecution consumerExecution,
+            final java.util.concurrent.ScheduledExecutorService timer) {
+        this(settings, null, observer, consumerExecution, timer);
     }
 
     /**
@@ -196,7 +212,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
      * @throws NullPointerException 当配置为空时抛出。
      */
     KafkaRpcAdapter(final KafkaRpcSettings settings, final KafkaRpcMessageGateway gateway, final java.util.concurrent.ScheduledExecutorService timer) {
-        this(settings, gateway, RpcTransportObserver.noop(), timer);
+        this(settings, gateway, RpcTransportObserver.noop(), KafkaRpcConsumerExecution.compatibilityDefault(), timer);
     }
 
     /**
@@ -211,10 +227,21 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
             final KafkaRpcSettings settings,
             final KafkaRpcMessageGateway gateway,
             final RpcTransportObserver observer, final java.util.concurrent.ScheduledExecutorService timer) {
+        this(settings, gateway, observer, KafkaRpcConsumerExecution.compatibilityDefault(), timer);
+    }
+
+    /** 创建允许测试网关注入与显式业务执行策略的适配器。 */
+    KafkaRpcAdapter(
+            final KafkaRpcSettings settings,
+            final KafkaRpcMessageGateway gateway,
+            final RpcTransportObserver observer,
+            final KafkaRpcConsumerExecution consumerExecution,
+            final java.util.concurrent.ScheduledExecutorService timer) {
         this.settings = Objects.requireNonNull(settings, "settings");
         this.observer = Objects.requireNonNull(observer, "observer");
         KafkaRpcMessageGateway currentGateway = gateway == null
-                ? new ApacheKafkaRpcMessageGateway(settings, this::observe)
+                ? new ApacheKafkaRpcMessageGateway(settings, this::observe,
+                        Objects.requireNonNull(consumerExecution, "consumerExecution"))
                 : gateway;
         this.gateway = currentGateway;
         KafkaRpcPendingRequests currentPendingRequests = null;

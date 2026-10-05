@@ -211,7 +211,7 @@ public final class KcpServer extends AbstractLifecycle implements IServer {
                         pendingTickets.decrementAndGet();
                         if (failure == null) result.complete(ticket); else result.completeExceptionally(failure);
                     });
-                } catch (RuntimeException failure) { pendingTickets.decrementAndGet(); result.completeExceptionally(failure); }
+                } catch (RuntimeException | Error failure) { pendingTickets.decrementAndGet(); result.completeExceptionally(failure); }
             });
         } catch (RuntimeException failure) {
             pendingTickets.decrementAndGet();
@@ -234,7 +234,7 @@ public final class KcpServer extends AbstractLifecycle implements IServer {
         try {
             current.eventLoop().execute(() -> {
                 try { sessions.fallback(control, conv); result.complete(null); }
-                catch (RuntimeException failure) { result.completeExceptionally(failure); }
+                catch (RuntimeException | Error failure) { result.completeExceptionally(failure); }
             });
         } catch (RuntimeException failure) { result.completeExceptionally(error(NetErrorCode.STOP_FAILED, failure)); }
         return result.minimalCompletionStage();
@@ -288,7 +288,7 @@ public final class KcpServer extends AbstractLifecycle implements IServer {
                     operation.get().whenComplete((value, failure) -> {
                         if (failure == null) result.complete(value); else result.completeExceptionally(failure);
                     });
-                } catch (RuntimeException failure) { result.completeExceptionally(failure); }
+                } catch (RuntimeException | Error failure) { result.completeExceptionally(failure); }
             });
         } catch (RuntimeException failure) { result.completeExceptionally(failure); }
         return result.minimalCompletionStage();
@@ -326,7 +326,7 @@ public final class KcpServer extends AbstractLifecycle implements IServer {
         try {
             current.eventLoop().execute(() -> {
                 try { sessions.removeCurrent(session); result.complete(null); }
-                catch (RuntimeException failure) { result.completeExceptionally(error(NetErrorCode.STOP_FAILED, failure)); }
+                catch (RuntimeException | Error failure) { result.completeExceptionally(error(NetErrorCode.STOP_FAILED, failure)); }
             });
         } catch (RuntimeException failure) { result.completeExceptionally(error(NetErrorCode.STOP_FAILED, failure)); }
         return result.minimalCompletionStage();
@@ -344,7 +344,7 @@ public final class KcpServer extends AbstractLifecycle implements IServer {
         failures.incrementAndGet();
         ZeroException error = error(code, failure);
         try { listener.onException(connection, error); }
-        catch (RuntimeException observerFailure) {
+        catch (RuntimeException | Error observerFailure) {
             failures.incrementAndGet();
             observerFailure.addSuppressed(error);
             System.getLogger(KcpServer.class.getName()).log(System.Logger.Level.ERROR,

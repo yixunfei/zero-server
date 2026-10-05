@@ -22,6 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -56,6 +57,12 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
      * 当前进程注册过的服务实例。
      */
     private final ConcurrentMap<InstanceKey, ServiceInstance> registeredInstances = new ConcurrentHashMap<>();
+
+    /** 短期 lookup 缓存，避免路由热路径每次穿透 Nacos；TTL 可由 extraProperties 配置。 */
+    private final ConcurrentMap<ServiceQuery, LookupCacheEntry> lookupCache = new ConcurrentHashMap<>();
+
+    /** lookup 缓存 TTL，默认一秒；配置为 0 可关闭缓存。 */
+    private final long lookupCacheTtlNanos;
 
     /**
      * 全局服务事件监听器。
@@ -117,6 +124,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
             final NacosNamingServiceFactory namingServiceFactory) {
         this.settings = Objects.requireNonNull(settings, "settings");
         this.namingServiceFactory = Objects.requireNonNull(namingServiceFactory, "namingServiceFactory");
+        this.lookupCacheTtlNanos = parseLookupCacheTtl(settings.extraProperties());
     }
 
     /**
@@ -197,6 +205,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
                 return null;
             });
             registeredInstances.remove(key, removed);
+            lookupCache.clear();
             notifySnapshot(ServiceEventType.UNREGISTERED, removed.serviceName(), removed.groupName(),
                     List.of(removed.clusterName()), current);
             return null;
@@ -250,6 +259,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
                         DiscoveryErrorCode.HEALTH_UPDATE_UNSUPPORTED,
                         "unknown health update mode: " + settings.healthUpdateMode(), null);
             }
+            lookupCache.clear();
             notifySnapshot(ServiceEventType.HEALTH_CHANGED, serviceName, groupName,
                     List.of(updated.clusterName()), client);
             return null;
@@ -281,7 +291,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
     @Override
     public List<ServiceInstance> lookup(final ServiceQuery query) {
         ServiceQuery checked = Objects.requireNonNull(query, "query");
-        return withClient(current -> lookupFromClient(current, checked));
+        return withClient(current -> lookupCached(current, checked));
     }
 
     /**
@@ -364,6 +374,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
      */
     @Override
     protected void doStop() {
+        awaitSdkOperations();
         NamingService current = namingService;
         if (current == null) {
             return;
@@ -396,6 +407,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
                 }
             }
             registeredInstances.clear();
+            lookupCache.clear();
             try {
                 current.shutDown();
             } catch (NacosException ex) {
@@ -424,6 +436,21 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
         }
     }
 
+    /** 停止前等待已获取旧客户端的操作提交，避免清理期间发生半提交。 */
+    private void awaitSdkOperations() {
+        boolean interrupted = false;
+        while (sdkOperationDepth != 0) {
+            try {
+                wait();
+            } catch (InterruptedException failure) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     /** 查询固定客户端并应用统一过滤，调用方必须已在线性化事务内。 */
     private List<ServiceInstance> lookupFromClient(
             final NamingService current,
@@ -447,6 +474,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
             return null;
         });
         registeredInstances.put(new InstanceKey(instance.serviceName(), instance.groupName(), instance.instanceId()), instance);
+        lookupCache.clear();
     }
 
     /** 应用服务名、分组、集群和健康过滤。 */
@@ -459,20 +487,39 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
 
     /** 将一次生命周期操作固定到当前客户端，并在锁外投递通知。 */
     private <T> T withClient(final Function<NamingService, T> operation) {
+        NamingService current;
+        synchronized (this) {
+            ensureAvailable();
+            current = namingService;
+            sdkOperationDepth++;
+        }
         try {
-            synchronized (this) {
-                ensureAvailable();
-                NamingService current = namingService;
-                sdkOperationDepth++;
-                try {
-                    return operation.apply(current);
-                } finally {
-                    sdkOperationDepth--;
-                }
-            }
+            return operation.apply(current);
         } finally {
+            synchronized (this) {
+                sdkOperationDepth--;
+                notifyAll();
+            }
             drainNotifications();
         }
+    }
+
+    /** 短期缓存 lookup 结果；缓存只用于读路径，事件通知始终直接查询 SDK。 */
+    private List<ServiceInstance> lookupCached(
+            final NamingService current,
+            final ServiceQuery query) {
+        long now = System.nanoTime();
+        if (lookupCacheTtlNanos > 0L) {
+            LookupCacheEntry cached = lookupCache.get(query);
+            if (cached != null && now - cached.createdAtNanos() < lookupCacheTtlNanos) {
+                return cached.instances();
+            }
+        }
+        List<ServiceInstance> loaded = lookupFromClient(current, query);
+        if (lookupCacheTtlNanos > 0L) {
+            lookupCache.put(query, new LookupCacheEntry(System.nanoTime(), loaded));
+        }
+        return loaded;
     }
 
     /** 排队事件；生命周期锁内或 SDK 操作期间不执行用户代码。 */
@@ -617,6 +664,29 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
         }
     }
 
+    private long parseLookupCacheTtl(final Map<String, String> properties) {
+        String configured = properties.get("zero.discovery.nacos.lookup-cache-ttl-millis");
+        if (configured == null || configured.isBlank()) {
+            return TimeUnit.SECONDS.toNanos(1L);
+        }
+        try {
+            long millis = Long.parseLong(configured);
+            if (millis < 0L) {
+                throw new NumberFormatException("negative");
+            }
+            return TimeUnit.MILLISECONDS.toNanos(millis);
+        } catch (NumberFormatException failure) {
+            throw new IllegalArgumentException(
+                    "zero.discovery.nacos.lookup-cache-ttl-millis must be non-negative", failure);
+        }
+    }
+
+    private record LookupCacheEntry(long createdAtNanos, List<ServiceInstance> instances) {
+        private LookupCacheEntry {
+            instances = List.copyOf(instances);
+        }
+    }
+
     private void waitUntilReady(final NamingService service) {
         long deadline = requestDeadline();
         while (remainingNanos(deadline) > 0L) {
@@ -755,22 +825,23 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
          */
         @Override
         public void close() {
-            try {
-                synchronized (NacosDiscoveryAdapter.this) {
-                    NamingService current = namingService;
-                    if (current != ownerClient || current == null) {
-                        closed.set(true);
-                        subscriptions.remove(this);
-                        return;
-                    }
-                    sdkOperationDepth++;
-                    try {
-                        closeWith(current, true);
-                    } finally {
-                        sdkOperationDepth--;
-                    }
+            NamingService current;
+            synchronized (NacosDiscoveryAdapter.this) {
+                current = namingService;
+                if (current != ownerClient || current == null) {
+                    closed.set(true);
+                    subscriptions.remove(this);
+                    return;
                 }
+                sdkOperationDepth++;
+            }
+            try {
+                closeWith(current, true);
             } finally {
+                synchronized (NacosDiscoveryAdapter.this) {
+                    sdkOperationDepth--;
+                    NacosDiscoveryAdapter.this.notifyAll();
+                }
                 drainNotifications();
             }
         }

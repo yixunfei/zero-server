@@ -19,8 +19,9 @@ class PostgresqlVersionBoundaryExternalIT {
     /** 低版本不能覆盖，等版本可重放，高版本可保存；两个独立 store 只有一个 CAS 成功。 */
     @Test void savesRemainMonotonicAndCasHasOneWinner() throws Exception {
         var settings = PostgresqlDriverSettings.fromSystemProperties();
-        var first = new PostgresqlDriverEnvelopeStore("audit_followup", "versions", settings);
-        var second = new PostgresqlDriverEnvelopeStore("audit_followup", "versions", settings);
+        try (var pool = PostgresqlPool.create(settings, 4, java.time.Duration.ofSeconds(3))) {
+        var first = new PostgresqlDriverEnvelopeStore("audit_followup", "versions", settings.tableName(), pool);
+        var second = new PostgresqlDriverEnvelopeStore("audit_followup", "versions", settings.tableName(), pool);
         String id = UUID.randomUUID().toString();
         try {
             first.save(envelope(id, 3, 3));
@@ -36,6 +37,7 @@ class PostgresqlVersionBoundaryExternalIT {
             assertEquals(1, compete(first, second, id, 0));
             assertEquals(1, second.findById(id).orElseThrow().version());
         } finally { first.deleteById(id); }
+        }
     }
 
     private int compete(ZeroDataEnvelopeStore first, ZeroDataEnvelopeStore second, String id, long expected)

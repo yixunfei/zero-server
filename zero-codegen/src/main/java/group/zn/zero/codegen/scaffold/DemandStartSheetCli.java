@@ -14,7 +14,7 @@ import java.util.Objects;
 public final class DemandStartSheetCli {
 
     private static final String DEFAULT_KEYWORDS = "local rpg";
-    private static final String DEFAULT_ZERO_VERSION = "0.1.1";
+    private static final String DEFAULT_ZERO_VERSION = "0.1.2-SNAPSHOT";
 
     private static final Map<String, StackMetadata> LOCAL_STACKS = localStacks();
 

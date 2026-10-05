@@ -2,6 +2,7 @@ package group.zn.zero.runtime.kafka;
 
 import group.zn.zero.log.LogAppender;
 import group.zn.zero.rpc.kafka.KafkaRpcSettings;
+import group.zn.zero.rpc.kafka.KafkaRpcConsumerExecution;
 import group.zn.zero.rpc.observer.RpcTransportObserver;
 import group.zn.zero.security.SecurityMetadataVerifier;
 import group.zn.zero.runtime.api.ComponentId;
@@ -66,8 +67,13 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
             ZeroProductionRuntimeConfigKeys.RPC_KAFKA_CONSUMER_GROUP_ID, DIRECT_SOURCES, null);
     private static final ConfigKey<String> TOPIC_PREFIX = sensitiveString(
             ZeroProductionRuntimeConfigKeys.RPC_KAFKA_TOPIC_PREFIX, DIRECT_SOURCES, null);
-    private static final ConfigKey<String> REPLY_TOPIC = sensitiveString(
-            ZeroProductionRuntimeConfigKeys.RPC_KAFKA_REPLY_TOPIC, DIRECT_SOURCES, null);
+    /** 配置值是 topic 前缀，每个 runtime 实例追加独立随机后缀。 */
+    private static final ConfigKey<String> REPLY_TOPIC = ConfigKey.string(
+            ID, ZeroProductionRuntimeConfigKeys.RPC_KAFKA_REPLY_TOPIC)
+            .acceptedSources(DIRECT_SOURCES)
+            .validate(value -> !value.isBlank() && value.length() <= 216 && value.matches("[a-zA-Z0-9._-]+"),
+                    "valid-kafka-reply-prefix")
+            .sensitive().build();
     private static final ConfigKey<Integer> PENDING_CAPACITY = positiveInteger(
             ZeroProductionRuntimeConfigKeys.RPC_KAFKA_PENDING_CAPACITY, 4096);
     private static final ConfigKey<Integer> POLL_TIMEOUT_MILLIS = positiveInteger(
@@ -179,9 +185,15 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
             LogAppender logAppender = checked.require(LogRuntime.LOG_APPENDER);
             KafkaRpcSettings settings = settings(checked.config());
             RpcTransportObserver observer = new KafkaProductionTelemetryObserver(logAppender);
+            group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors executors = checked.require(
+                    group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS);
+            if (executors.remoteIoMayInline()) {
+                throw new IllegalStateException("production kafka rpc requires a non-inline remote IO executor");
+            }
             KafkaRpcLifecycleAdapter adapter = new KafkaRpcLifecycleAdapter(
                     settings, observer, KafkaRpcAdapterResourceFactory.production(verifier,
-                            checked.require(group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS).scheduledExecutor("kafka-rpc")));
+                            KafkaRpcConsumerExecution.concurrent(executors.remoteIoExecutor()),
+                            executors.scheduledExecutor("kafka-rpc")));
             ProductionStartupHealthProbe healthProbe = new ProductionStartupHealthProbe(
                     diagnostic,
                     new KafkaClusterHealthCheck(settings),
@@ -226,7 +238,7 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
                 config.require(CLIENT_ID),
                 config.require(CONSUMER_GROUP_ID),
                 config.require(TOPIC_PREFIX),
-                config.require(REPLY_TOPIC),
+                config.require(REPLY_TOPIC) + "." + java.util.UUID.randomUUID().toString().replace("-", ""),
                 config.require(PENDING_CAPACITY),
                 Duration.ofMillis(config.require(POLL_TIMEOUT_MILLIS)),
                 Duration.ofMillis(config.require(CLOSE_TIMEOUT_MILLIS)),

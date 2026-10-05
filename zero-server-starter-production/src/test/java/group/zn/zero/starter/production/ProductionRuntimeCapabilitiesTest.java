@@ -104,12 +104,14 @@ class ProductionRuntimeCapabilitiesTest {
         assertEquals(
                 List.of(
                         MavenCoordinate.zero("zero-data"),
+                        MavenCoordinate.zero("zero-runtime-bootstrap"),
                         MavenCoordinate.zero("zero-runtime-postgresql")),
                 StandardRuntimeCapabilityModel.instance().artifactsForProviders(
                         List.of(StandardRuntimeCapabilityModel.PRODUCTION_POSTGRESQL_DATA)));
         assertEquals(
                 List.of(
                         MavenCoordinate.zero("zero-data"),
+                        MavenCoordinate.zero("zero-runtime-bootstrap"),
                         MavenCoordinate.zero("zero-runtime-mongo")),
                 StandardRuntimeCapabilityModel.instance().artifactsForProviders(
                         List.of(StandardRuntimeCapabilityModel.PRODUCTION_MONGO_DATA)));

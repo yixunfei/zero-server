@@ -38,6 +38,13 @@ public final class GmOperationEndpoint {
         boolean idempotent = idempotencyStore != null && !key.isBlank() && !request.dryRun();
         Duration ttl = Duration.ofMinutes(10);
         Instant now = Instant.now();
+        try {
+            authorizer.authorize(request.context(), request.target(), request.approvalToken(), request.secondReviewer());
+        } catch (ZeroException exception) {
+            return GmOperationResponse.rejected(toGmCode(exception), request.context().traceId());
+        } catch (RuntimeException exception) {
+            return GmOperationResponse.rejected(GmErrorCode.COMMAND_REJECTED, request.context().traceId());
+        }
         if (idempotent) {
             GmIdempotencyStore.Claim claim = idempotencyStore.claim(key, fingerprint, now, ttl);
             if (claim.state() == GmIdempotencyStore.State.COMPLETED) {
@@ -50,7 +57,6 @@ public final class GmOperationEndpoint {
             }
         }
         try {
-            authorizer.authorize(request.context(), request.target(), request.approvalToken(), request.secondReviewer());
             GmCommandExecutionResult result = request.dryRun()
                     ? executor.dryRun(request.context(), request.rawCommand())
                     : executor.execute(request.context(), request.rawCommand());
@@ -64,6 +70,16 @@ public final class GmOperationEndpoint {
                 idempotencyStore.fail(key, fingerprint, now.plus(ttl));
             }
             return GmOperationResponse.rejected(toGmCode(exception), request.context().traceId());
+        } catch (RuntimeException exception) {
+            if (idempotent) {
+                idempotencyStore.fail(key, fingerprint, now.plus(ttl));
+            }
+            return GmOperationResponse.rejected(GmErrorCode.COMMAND_REJECTED, request.context().traceId());
+        } catch (Error failure) {
+            if (idempotent) {
+                idempotencyStore.fail(key, fingerprint, now.plus(ttl));
+            }
+            throw failure;
         }
     }
 
@@ -73,7 +89,8 @@ public final class GmOperationEndpoint {
         String canonical = request.context().operator() + "\u0000"
                 + request.target() + "\u0000"
                 + request.rawCommand() + "\u0000"
-                + request.dryRun();
+                + request.dryRun() + "\u0000"
+                + request.approvalToken();
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(canonical.getBytes(StandardCharsets.UTF_8)));

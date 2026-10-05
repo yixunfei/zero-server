@@ -2,6 +2,9 @@ package group.zn.zero.data.envelope;
 
 import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.data.error.DataErrorCode;
+import group.zn.zero.data.model.PageRequest;
+import group.zn.zero.data.model.PageResult;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -22,8 +25,18 @@ final class ScopedEnvelopeStore implements ZeroDataEnvelopeStore {
     }
 
     @Override
+    public List<ZeroDataEnvelope> findByIds(final Collection<String> ids) {
+        return access(() -> delegate.findByIds(ids), DataErrorCode.READ_FAILED);
+    }
+
+    @Override
     public List<ZeroDataEnvelope> findAll() {
         return access(delegate::findAll, DataErrorCode.READ_FAILED);
+    }
+
+    @Override
+    public PageResult<ZeroDataEnvelope> findPage(final PageRequest request) {
+        return access(() -> delegate.findPage(request), DataErrorCode.READ_FAILED);
     }
 
     @Override
@@ -37,8 +50,18 @@ final class ScopedEnvelopeStore implements ZeroDataEnvelopeStore {
     }
 
     @Override
+    public List<Boolean> saveIfVersionBatch(final Collection<ConditionalWrite> writes) {
+        return access(() -> delegate.saveIfVersionBatch(writes), DataErrorCode.WRITE_FAILED);
+    }
+
+    @Override
     public void deleteById(final String id) {
         access(() -> { delegate.deleteById(id); return null; }, DataErrorCode.DELETE_FAILED);
+    }
+
+    @Override
+    public void deleteAll(final Collection<String> ids) {
+        access(() -> { delegate.deleteAll(ids); return null; }, DataErrorCode.DELETE_FAILED);
     }
 
     @Override

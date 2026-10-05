@@ -54,7 +54,15 @@ public final class RunLocalScaffold {
             printHelp();
             return;
         }
-        Options options = Options.parse(args);
+        Options options;
+        try {
+            options = Options.parse(args);
+        } catch (IllegalArgumentException exception) {
+            System.err.println("SCAFFOLD-RUNNER-INVALID-ARGUMENT|" + exception.getMessage());
+            System.err.println("Hint: run `java scripts/RunLocalScaffold.java --help` for the supported options.");
+            System.exit(2);
+            return;
+        }
         Path projectDir = options.projectDir().toAbsolutePath().normalize();
         Manifest manifest = Manifest.read(projectDir.resolve(MANIFEST_FILE));
 
@@ -137,10 +145,12 @@ public final class RunLocalScaffold {
         if (configured != null && !configured.isBlank()) {
             return configured;
         }
-        if (isWindows()) {
-            return "mvn.cmd";
+        Path root = Path.of("").toAbsolutePath().normalize();
+        Path wrapper = root.resolve(isWindows() ? "mvnw.cmd" : "mvnw");
+        if (Files.isRegularFile(wrapper) && (isWindows() || Files.isExecutable(wrapper))) {
+            return wrapper.toString();
         }
-        return Files.isExecutable(Path.of("mvnw")) ? "./mvnw" : "mvn";
+        return isWindows() ? "mvn.cmd" : "mvn";
     }
 
     private static boolean isWindows() {
@@ -226,7 +236,8 @@ public final class RunLocalScaffold {
         System.out.println("  --help, -h            Print this help.");
         System.out.println();
         System.out.println("Before running:");
-        System.out.println("  mvn -q -DskipTests install");
+        System.out.println("  ./mvnw -q -DskipTests install   (PowerShell: ./mvnw.cmd)");
+        System.out.println("  Set ZERO_MAVEN_CMD to use another Maven command.");
         System.out.println();
         System.out.println("This tool is for local/prototype smoke only, not production readiness.");
     }

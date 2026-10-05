@@ -8,8 +8,6 @@ import group.zn.zero.actor.handler.ActorHandler;
 import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Consumer;
@@ -26,6 +24,8 @@ public final class LocalRoomService {
     private final Consumer<RoomEvent> eventConsumer;
     /** 每个房间内存历史容量；不限制实时事件交付。 */
     private final int eventHistoryCapacity;
+    /** 创建提交与首个房间命令的线性化监视器；不保护房间内部状态。 */
+    private final Object creationMonitor = new Object();
 
     public LocalRoomService() { this(new LocalActorScheduler(), ignored -> { }, DEFAULT_EVENT_HISTORY_CAPACITY); }
     public LocalRoomService(ActorScheduler scheduler) { this(scheduler, ignored -> { }, DEFAULT_EVENT_HISTORY_CAPACITY); }
@@ -53,13 +53,15 @@ public final class LocalRoomService {
         scheduler.register(Command.class, ActorHandler.sync((context, message) -> apply((Command) message.payload())));
     }
     public RoomSnapshot create(RoomId id, int capacity, long reconnectWindowMillis) {
-        Objects.requireNonNull(id, "id");
-        if (capacity < 1 || reconnectWindowMillis < 0) throw new IllegalArgumentException("invalid room configuration");
-        MutableRoom room = new MutableRoom(id, capacity, reconnectWindowMillis, eventHistoryCapacity);
-        RoomEvent created = room.events.getFirst();
-        if (rooms.putIfAbsent(id, room) != null) throw failure("room already exists");
-        room.deliver(created);
-        return room.view.snapshot();
+        synchronized (creationMonitor) {
+            Objects.requireNonNull(id, "id");
+            if (capacity < 1 || reconnectWindowMillis < 0) throw new IllegalArgumentException("invalid room configuration");
+            MutableRoom room = new MutableRoom(id, capacity, reconnectWindowMillis, eventHistoryCapacity);
+            RoomEvent created = room.events.getFirst();
+            if (rooms.putIfAbsent(id, room) != null) throw failure("room already exists");
+            room.deliver(created);
+            return room.view.snapshot();
+        }
     }
     /** 读取最近一次完整提交的不可变快照；线程安全，不会观察到部分成员变更。 */
     public RoomSnapshot snapshot(RoomId id) { return room(id).view.snapshot(); }
@@ -126,23 +128,27 @@ public final class LocalRoomService {
     }
     private CompletionStage<Void> dispatch(RoomId id, Operation operation) {
         Objects.requireNonNull(id, "id");
-        try { MutableRoom expected = room(id); return scheduler.dispatch(new ActorMessage(
-                "room-" + id.value(),
-                LaneKey.custom(id.value()),
-                "room",
-                new Command(id, expected, operation))); } catch (RuntimeException ex) { CompletableFuture<Void> f = new CompletableFuture<>(); f.completeExceptionally(ex); return f; }
+        synchronized (creationMonitor) {
+            try { MutableRoom expected = room(id); return scheduler.dispatch(new ActorMessage(
+                    "room-" + id.value(),
+                    LaneKey.custom(id.value()),
+                    "room",
+                    new Command(id, expected, operation))); } catch (RuntimeException ex) {
+                CompletableFuture<Void> f = new CompletableFuture<>();
+                f.completeExceptionally(ex);
+                return f;
+            }
+        }
     }
     private void apply(Command command) {
         MutableRoom current = room(command.id);
         if (current != command.expected) throw failure("room generation has changed");
-        RoomCheckpoint checkpoint = current.checkpoint();
+        RoomView checkpoint = current.view;
         try {
             command.apply(current);
-        } catch (RoomEventDeliveryFailure failure) {
-            // 事件已经进入历史队列并交给消费者，不能再回滚已提交的房间状态。
-            throw failure;
         } catch (RuntimeException failure) {
-            current.restore(checkpoint);
+            // view 是提交边界；提交前失败才恢复。历史及成员无需在每条命令前全量复制。
+            if (current.view == checkpoint) current.restore(checkpoint);
             throw failure;
         }
     }
@@ -189,10 +195,12 @@ public final class LocalRoomService {
         void emit(RoomEvent.Type type, String player) {
             long eventSequence = type == RoomEvent.Type.CREATED ? seq : ++seq;
             RoomEvent event = new RoomEvent(id, eventSequence, type, player, System.currentTimeMillis());
+            // 先物化所有可能失败的快照；历史只在下一快照就绪后进入不可回滚的提交点。
+            RoomView next = snapshotView();
             synchronized (events) {
                 if (events.size() == historyCapacity) { events.removeFirst(); droppedEvents++; }
                 events.addLast(event);
-                publish();
+                view = next;
             }
             deliver(event);
         }
@@ -203,45 +211,28 @@ public final class LocalRoomService {
                 throw new RoomEventDeliveryFailure(failure);
             }
         }
-        RoomCheckpoint checkpoint() {
-            synchronized (events) {
-                return new RoomCheckpoint(state, new HashMap<>(members), new ArrayDeque<>(events),
-                        droppedEvents, seq, settlementId, settlementResult, stats);
-            }
-        }
-        void restore(RoomCheckpoint checkpoint) {
+        void restore(RoomView checkpoint) {
+            RoomSnapshot snapshot = checkpoint.snapshot();
             members.clear();
-            members.putAll(checkpoint.members());
-            synchronized (events) {
-                events.clear();
-                events.addAll(checkpoint.events());
-                droppedEvents = checkpoint.droppedEvents();
-            }
-            state = checkpoint.state();
-            seq = checkpoint.seq();
-            settlementId = checkpoint.settlementId();
-            settlementResult = checkpoint.settlementResult();
+            snapshot.members().forEach(member -> members.put(member.playerId(), member));
+            state = snapshot.state();
+            seq = snapshot.sequence();
+            settlementId = snapshot.settlementId();
+            settlementResult = snapshot.settlementResult();
             stats = checkpoint.stats();
-            publish();
+            view = checkpoint;
         }
         void publish() {
-            view = new RoomView(new RoomSnapshot(id, state, capacity,
+            view = snapshotView();
+        }
+        RoomView snapshotView() {
+            return new RoomView(new RoomSnapshot(id, state, capacity,
                     members.values().stream().sorted(Comparator.comparing(RoomMember::playerId)).toList(),
                     seq, settlementId, settlementResult), stats);
         }
     }
     /** 同一次状态提交的查询结果；记录及组成值均不可变。 */
     private record RoomView(RoomSnapshot snapshot, RoomStats stats) { }
-
-    private record RoomCheckpoint(
-            RoomState state,
-            Map<String, RoomMember> members,
-            ArrayDeque<RoomEvent> events,
-            long droppedEvents,
-            long seq,
-            String settlementId,
-            String settlementResult,
-            RoomStats stats) { }
 
     /** 标识事件已交付后失败，apply 不得回滚已提交状态。 */
     private static final class RoomEventDeliveryFailure extends group.zn.zero.core.error.ZeroException {

@@ -37,9 +37,11 @@ public final class VerifyPublicApiCompatibility {
                 }
                 List<String> oldSymbols = Files.readAllLines(baseline);
                 List<String> currentSymbols = surface(module);
-                Set<String> currentSet = Set.copyOf(currentSymbols);
+                Set<String> currentSet = currentSymbols.stream()
+                        .map(VerifyPublicApiCompatibility::binarySignature)
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet());
                 for (String symbol : oldSymbols) {
-                    if (!currentSet.contains(symbol)) {
+                    if (!currentSet.contains(binarySignature(symbol))) {
                         System.out.println("api-compatibility-failure=" + module + "|removed=" + symbol);
                         failures++;
                     }
@@ -102,5 +104,10 @@ public final class VerifyPublicApiCompatibility {
 
     private static boolean has(final String[] args, final String flag) {
         return Arrays.asList(args).contains(flag);
+    }
+
+    // synchronized changes locking behavior but is not part of a Java binary method descriptor.
+    private static String binarySignature(final String symbol) {
+        return symbol.replace(" synchronized ", " ");
     }
 }

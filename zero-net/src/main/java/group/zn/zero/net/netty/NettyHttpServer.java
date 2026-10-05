@@ -264,7 +264,7 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
             String encoded = request.headers().get(SecurityMetadataHttpCodec.HEADER);
             try {
                 handlerExecutor.execute(() -> verifyAndSubmit(context, zeroRequest, encoded));
-            } catch (RuntimeException ex) {
+            } catch (RuntimeException | Error ex) {
                 writeFailure(context, ex);
             }
         }
@@ -296,6 +296,9 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
                 }));
             } catch (RuntimeException invalidMetadata) {
                 writeUnauthorized(context);
+            } catch (Error failure) {
+                writeFailure(context, ZeroException.of(NetErrorCode.HANDLER_FAILED,
+                        "HTTP security verifier failed", failure));
             }
         }
 
@@ -303,7 +306,7 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
                 final ChannelHandlerContext context, final HttpRequest request, final SecurityContext securityContext) {
             try {
                 handlerExecutor.execute(() -> invokeHandler(context, request, securityContext));
-            } catch (RuntimeException ex) {
+            } catch (RuntimeException | Error ex) {
                 writeFailure(context, ZeroException.of(
                         NetErrorCode.HANDLER_FAILED,
                         "submit HTTP net handler failed",
@@ -350,7 +353,7 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
                     }
                     context.executor().execute(() -> writeResponseSafely(context, response));
                 });
-            } catch (RuntimeException ex) {
+            } catch (RuntimeException | Error ex) {
                 writeFailure(context, ZeroException.of(
                         NetErrorCode.HANDLER_FAILED,
                         "HTTP net handler failed",
@@ -361,7 +364,7 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
         private void writeResponseSafely(final ChannelHandlerContext context, final HttpResponse response) {
             try {
                 writeResponse(context, response);
-            } catch (RuntimeException ex) {
+            } catch (RuntimeException | Error ex) {
                 writeFailure(context, ZeroException.of(
                         NetErrorCode.HANDLER_FAILED,
                         "write HTTP response failed",
@@ -384,7 +387,18 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
                     Unpooled.wrappedBuffer(current.body()));
             current.headers().forEach((key, value) -> nettyResponse.headers().set(key, value));
             nettyResponse.headers().set(HttpHeaderNames.CONTENT_LENGTH, nettyResponse.content().readableBytes());
-            context.writeAndFlush(nettyResponse);
+            context.writeAndFlush(nettyResponse).addListener(future -> {
+                if (!future.isSuccess()) {
+                    ZeroException failure = ZeroException.of(NetErrorCode.SEND_FAILED,
+                            "write HTTP response failed", future.cause());
+                    try {
+                        // 先传播错误，让后继观察器仍能收到；无论观察器是否抛错都关闭连接。
+                        context.fireExceptionCaught(failure);
+                    } finally {
+                        context.close();
+                    }
+                }
+            });
         }
     }
 }

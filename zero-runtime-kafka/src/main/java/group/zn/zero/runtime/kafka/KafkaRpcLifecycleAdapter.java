@@ -107,6 +107,7 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
 
     /**
      * 发送 request/response 请求。
+     * production reply 路由由 runtime 独占，调用方 replyTopic 被替换为本实例 topic。
      *
      * @param request RPC 请求；不可为空。
      * @return 响应阶段；不可为空，线程安全。
@@ -114,7 +115,16 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
      */
     @Override
     public CompletionStage<RpcResponse> request(final RpcRequest request) {
-        return requireDelegate().request(request);
+        KafkaRpcAdapterResource current = requireDelegate();
+        RpcRequest original = Objects.requireNonNull(request, "request");
+        if (settings.replyTopic().equals(original.replyTopic())) {
+            return current.request(original);
+        }
+        RpcRequest routed = new RpcRequest(original.correlationId(), settings.replyTopic(),
+                original.serviceName(), original.methodName(), original.traceId(), original.timeoutAt(),
+                original.mode(), original.topic(), original.group(), original.partitionKey(),
+                original.securityMetadata(), original.payload());
+        return current.request(routed);
     }
 
     /**

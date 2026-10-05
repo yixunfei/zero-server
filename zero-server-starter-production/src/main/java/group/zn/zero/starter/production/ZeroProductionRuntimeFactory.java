@@ -70,7 +70,7 @@ public final class ZeroProductionRuntimeFactory {
                 ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION,
                 config,
                 terminalLogSink,
-                ZeroRuntimeExecutors.direct());
+                ZeroRuntimeExecutors.remoteIo("zero-production"));
     }
 
     /**
@@ -105,7 +105,7 @@ public final class ZeroProductionRuntimeFactory {
                 ZeroProductionRuntimeConfigKeys.MODE_EXTERNAL_TEST,
                 config,
                 terminalLogSink,
-                ZeroRuntimeExecutors.direct());
+                ZeroRuntimeExecutors.remoteIo("zero-external-test"));
     }
 
     /**
@@ -165,6 +165,6 @@ public final class ZeroProductionRuntimeFactory {
     private static ZeroProductionRuntimeBuilder defaultBuilder(final String profile, final ZeroConfig config) {
         return new ZeroProductionRuntimeBuilder(profile, ProductionProfiles.merge(profile, config),
                 () -> SystemLoggerLogSink.named(ZeroProductionRuntimeFactory.class.getName()),
-                ZeroRuntimeExecutors.direct());
+                ZeroRuntimeExecutors.remoteIo("zero-" + profile));
     }
 }

@@ -2,7 +2,6 @@ package group.zn.zero.runtime.kafka;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -66,10 +65,10 @@ class KafkaProductionTelemetryObserverTest {
     }
 
     /**
-     * 验证成功事件忽略偶然携带的 ErrorCode，空 TraceId 使用固定值且绝不回退到 correlationId。
+     * 验证成功与开始路径不触发 appender，异常的空 TraceId 使用固定安全值。
      */
     @Test
-    void successShouldUseSafeTraceFallbackAndIgnoreIncidentalErrorCode() {
+    void successShouldSkipLogsAndFailureShouldUseSafeTraceFallback() {
         List<ZeroLogRecord> records = new ArrayList<>();
         KafkaProductionTelemetryObserver observer = new KafkaProductionTelemetryObserver(records::add);
 
@@ -77,13 +76,17 @@ class KafkaProductionTelemetryObserverTest {
                 RpcTransportEventType.REQUEST_SENT,
                 "",
                 RpcErrorCode.SERVICE_NOT_FOUND));
+        observer.onEvent(event(RpcTransportEventType.HANDLER_STARTED, "trace-approved", null));
+        observer.onEvent(event(RpcTransportEventType.PENDING_REGISTERED, "trace-approved", null));
+        assertEquals(0, records.size());
+        observer.onEvent(event(RpcTransportEventType.PENDING_TIMED_OUT, "", null));
 
         ZeroLogRecord record = records.getFirst();
-        assertEquals(LogLevel.INFO, record.level());
-        assertEquals(LogType.RUNTIME, record.logType());
-        assertEquals("kafka-rpc-request_sent", record.operation());
-        assertEquals(LogResult.SUCCESS, record.result());
-        assertNull(record.errorCode());
+        assertEquals(LogLevel.ERROR, record.level());
+        assertEquals(LogType.ERROR, record.logType());
+        assertEquals("kafka-rpc-pending_timed_out", record.operation());
+        assertEquals(LogResult.TIMEOUT, record.result());
+        assertSame(RpcErrorCode.REQUEST_TIMEOUT, record.errorCode());
         assertEquals("rpc-transport-untraced", record.traceId());
         assertFalse(record.traceId().contains(SECRET));
         assertNoSecret(record);
@@ -133,9 +136,12 @@ class KafkaProductionTelemetryObserverTest {
             observer.onEvent(event(eventType, "trace-approved", errorCode));
         }
 
-        assertEquals(RpcTransportEventType.values().length, records.size());
+        List<RpcTransportEventType> loggedTypes = java.util.Arrays.stream(RpcTransportEventType.values())
+                .filter(type -> expectedResult(type) != LogResult.STARTED && expectedResult(type) != LogResult.SUCCESS)
+                .toList();
+        assertEquals(loggedTypes.size(), records.size());
         for (int index = 0; index < records.size(); index++) {
-            RpcTransportEventType eventType = RpcTransportEventType.values()[index];
+            RpcTransportEventType eventType = loggedTypes.get(index);
             LogResult result = expectedResult(eventType);
             String eventLabel = eventType.name().toLowerCase(Locale.ROOT);
             ZeroLogRecord record = records.get(index);

@@ -4,7 +4,6 @@ set -euo pipefail
 # zeroServer cross-platform thin entrypoint. It delegates behavior to existing Java tools.
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 MAVEN_CMD="${MAVEN_CMD:-${ZERO_MAVEN_CMD:-}}"
-if [[ -z "$MAVEN_CMD" && -x "$ROOT_DIR/mvnw" ]]; then MAVEN_CMD="$ROOT_DIR/mvnw"; fi
 STATE_DIR="${ZERO_STATE_DIR:-${ROOT_DIR}/target/zero-entry}"
 PID_FILE="${STATE_DIR}/server.pid"
 META_FILE="${STATE_DIR}/server.meta"
@@ -40,11 +39,7 @@ mvn_cmd() {
   printf '%s' mvn
 }
 run_java_tool() {
-  if is_windows_host; then
-    (cd "$ROOT_DIR" && ZERO_MAVEN_CMD="mvn.cmd" "$(java_cmd)" "$@")
-  else
-    (cd "$ROOT_DIR" && ZERO_MAVEN_CMD="mvn" "$(java_cmd)" "$@")
-  fi
+  (cd "$ROOT_DIR" && ZERO_MAVEN_CMD="$(mvn_cmd)" "$(java_cmd)" "$@")
 }
 
 require_root() {

@@ -1,10 +1,32 @@
 # 数据与缓存设计
 
+## 2026-10-05 Repository 与持久化性能
+
+Envelope CRUD 不再持有仓库级同步锁，所有同步 Store IO 交给必填的受管 Executor；保存前在实体所属调用域编码不可变 envelope，查询解码及完成回调可能在 IO 域执行。production 数据 provider 拒绝内联执行器，便利工厂默认提供 Java 21 虚拟线程 remote IO。自定义 Store/codec 必须支持并发，业务仍需按驱动容量限制在途请求。
+
+批量查询、CAS 写入、删除与分页已下推至三类生产驱动。PG/Mongo 仅读取页内 payload；Redis 页内 MGET 前仍扫描并排序索引，最多 100000 项。批次可能部分提交，不承诺跨后端事务原子性。`LocalDiskDataJournal.appendAll` 每个文件只 force 一次，单项 flush 仍可能逐项 force。
+
+直接 PostgreSQL settings 工厂使用默认最大 8 个连接的 HikariCP，工厂关闭自有池；外部 DataSource 和 IO executor 保留调用方所有权。`DefaultPersistenceManager` 默认最多 16 个独立脏键同时保存，可配置并发预算；逐项成功才清除 dirty，保持新标脏代际和失败保留。对象级脏追踪仍是设计契约。API、关闭顺序及部分提交迁移见[说明](migrations/20261005-performance-issues.zh-CN.md)。
+
+## 2026-10-04 反馈专项边界
+
+Redis cache store 支持显式有界 IO executor；Envelope repository 现强制注入 executor，不再提供通用池兼容入口。生产装配应把 Jedis/Mongo/PG 阻塞调用放入远程 IO 执行域；调用方不得在 Actor、Netty 或 Kafka poll 线程直接使用同步 driver。cache 的旧兼容入口仍需迁移为显式 executor，生产禁止内联 IO。
+
+`LayeredCacheService` 可配置 L2 故障冷却窗口。旧构造器保持 `Duration.ZERO` 的历史 miss 回源行为；显式设置正数窗口后，Redis 读取连续失败会在冷却期快速失败，避免数据库被全量穿透。冷却不是数据一致性保证，必须结合 loader、L1 保留、失败计数和业务降级策略评估容量。
+
+`DirectPersistenceBindingExecutor` 仍要求 snapshot supplier 在对象所属线程绑定域读取不可变快照；它不会替业务把 live mutable 对象安全地复制到 flush 线程。Mongo/PG 直接构造的驱动操作超时仍需应用显式配置。journal 批量 force 已实现，管理器按逐项确认保存时仍未统一使用批量 journal；历史风险见[反馈专项报告](reports/feedback-hardening-20261004.zh-CN.md)。
+
+## 2026-10-03 物理写顺序与 fencing
+
+分层缓存的已接受写入保持物理完成顺序，调用方取消或读超时不提前解除写入屏障。每键最多 1024、实例最多 4096 个未结算写入，超限以 `BACKPRESSURE_REJECTED` 拒绝；内存 loader 落实现有 maxConcurrentLoads。写回观察 Future 取消不阻止内部重试状态归还。
+
+Redis 未版本化值以 cacheVersion 条件覆盖；正实体版本继续按 entityVersion fencing，原存储格式不变。PostgreSQL ownership release 保留 epoch 历史，并发相同提交在取得行锁后重新查幂等收据。内存 fenced state 只允许组合 InMemoryOwnershipStore，验证和写入在同一原子临界区完成；远程场景使用对应事务存储。完整行为收紧和验证见[迁移说明](migrations/20261003-concurrency-async-performance.zh-CN.md)。
+
 ## 2026-09-28 报告核实补充
 
 - `RedisDataEnvelopeStore` 是明确的内存 prototype，不提供重启持久化或多实例共享；生产装配必须使用 `RedisDataAdapter.registerDriverRepository` 注入真实 `RedisClient`。需要本地原型时显式使用 `registerInMemoryZcodeRepository`。
 - PostgreSQL 条件写按 SQLState 区分版本冲突、并发冲突、后端不可用和一般写失败；Mongo 条件写按 DuplicateKey、瞬态和网络异常分类。调用方不得把所有 `WRITE_FAILED` 当成版本冲突重试。
-- Mongo 全量读取有 `maxFindAll` 上限，超过上限返回 `READ_LIMIT_EXCEEDED`；大集合请使用分页/流式 adapter。`saveAll` 仍逐条提交，框架不承诺跨后端事务，`findByIds` 也不承诺批量查询。
+- Mongo 全量读取有 `maxFindAll` 上限，超过上限返回 `READ_LIMIT_EXCEEDED`；大集合请使用分页。三类驱动的 `saveAll/findByIds` 已覆盖批量协议，框架不承诺跨后端事务或批次全有全无。
 - `DefaultPersistenceManager` 的每次 flush 有独立 future，脏对象登记有界；写回失败由 `LayeredCacheService.retryWriteBacks` 提供有界重试。L2 为空是纯本地缓存的显式选择，不等同于分布式一致性。
 
 ## 2026-09-26 并发安全补充
@@ -177,7 +199,7 @@ CacheService / LayeredCacheService
 
 2026-09-26 的专项审查确认三类 driver 均通过统一 envelope 和版本条件写边界工作：MongoDB 使用 namespaced collection 与条件 replace，Redis 使用独立 key namespace 和原子脚本，PostgreSQL 使用参数化 SQL、受校验的表名和版本条件 update。真实验证只覆盖本机单实例 MongoDB 7.0、Redis 7.4 和 PostgreSQL 16；不等同于集群故障转移、跨版本兼容、容量或 SLA 证明。
 
-当前落库路径的容量观察项需要纳入后续 benchmark：`ZeroDataEnvelopeCrudRepository` 的同步方法会把数据库 IO 包在 repository monitor 内；`findByIds`、`saveAll` 仍是逐对象编排；Redis `findAll` 已于 2026-10-01 改为分桶 SSCAN + MGET；分页在 envelope repository 中先读取全量再内存切片；PostgreSQL 默认构造非池化 `PGSimpleDataSource` 连接。上述行为保持现有 API 和一致性语义，本轮未猜测性重构；生产装配应由调用方提供连接池、限流和批量策略，并用真实 workload 单独测量。
+当前容量观察项：Envelope Store IO 已移出调用线程且无仓库级串行锁，三类驱动覆盖分块批量与分页。PG/Mongo 页内读取避免全量反序列化；Redis 仍需有界索引扫描和排序。PostgreSQL settings 默认工厂与 production 均使用 HikariCP。批量 CAS、失败保留和真实连接复用已有专项集成测试，业务吞吐、尾延迟、深 OFFSET、连接池饱和及长稳仍应使用真实 workload 测量。自定义 Store 的默认批量/分页回退仅适合小型数据集。
 
 Redis 数据与缓存 key 的 namespace/collection/cacheName 不得包含 `{`、`}` 或 `:`，避免 hash-tag 边界和分隔符造成跨空间别名；本地 journal 路径片段拒绝控制字符、路径分隔符、点段和 Windows 特殊文件名字符。
 

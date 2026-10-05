@@ -8,21 +8,27 @@ import java.util.Optional;
 
 /** 无外部依赖的 fencing 状态实现，适合单进程原型和契约测试。 */
 public final class InMemoryFencedStateStore<T> implements FencedStateStore<T> {
-    private final OwnershipStore ownershipStore;
+    private final InMemoryOwnershipStore ownershipStore;
     private final Clock clock;
     /** 只保护本地状态与请求幂等表，不跨越 ownership 远程调用。 */
     private final Object stateLock = new Object();
     private final Map<OwnershipResource, StateSnapshot<T>> states = new HashMap<>();
     private final Map<RequestKey, StoredCommit<T>> requests = new HashMap<>();
 
-    /** 创建绑定到 ownership 权威端口的状态存储。 */
+    /** 创建本地原子 fencing 状态存储；远程 ownership 必须使用对应的事务状态实现。
+     * @throws IllegalArgumentException ownership 不是 InMemoryOwnershipStore 时抛出。 */
     public InMemoryFencedStateStore(final OwnershipStore ownershipStore) {
         this(ownershipStore, Clock.systemUTC());
     }
 
-    /** 创建使用指定时钟的状态存储，便于确定性测试。 */
+    /** 创建使用指定时钟的本地状态存储，便于确定性测试。
+     * @throws IllegalArgumentException ownership 不是 InMemoryOwnershipStore 时抛出。 */
     public InMemoryFencedStateStore(final OwnershipStore ownershipStore, final Clock clock) {
-        this.ownershipStore = Objects.requireNonNull(ownershipStore, "ownershipStore");
+        Objects.requireNonNull(ownershipStore, "ownershipStore");
+        if (!(ownershipStore instanceof InMemoryOwnershipStore local)) {
+            throw new IllegalArgumentException("in-memory fenced state requires an in-memory ownership store");
+        }
+        this.ownershipStore = local;
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -47,11 +53,11 @@ public final class InMemoryFencedStateStore<T> implements FencedStateStore<T> {
                 return new CommitResult<>(false, true, previous.result().newVersion(), previous.result().payload());
             }
         }
-        OwnershipLease current = ownershipStore.current(request.resource(), clock.instant())
-                .orElseThrow(() -> new OwnershipException("resource is not currently owned"));
-        if (!sameLease(current, request.lease())) {
-            throw new OwnershipException("stale owner epoch or process incarnation");
-        }
+        return ownershipStore.withCurrent(request.lease(), clock, () -> commitCurrent(request, key));
+    }
+
+    /** ownership 锁先于状态锁获取，使 lease 的释放/接管与本地状态写线性化。 */
+    private CommitResult<T> commitCurrent(final StateCommitRequest<T> request, final RequestKey key) {
         synchronized (stateLock) {
             StoredCommit<T> previous = requests.get(key);
             if (previous != null) {
@@ -73,11 +79,6 @@ public final class InMemoryFencedStateStore<T> implements FencedStateStore<T> {
             requests.put(key, new StoredCommit<>(request.expectedVersion(), request.payload(), result));
             return result;
         }
-    }
-
-    private static boolean sameLease(final OwnershipLease left, final OwnershipLease right) {
-        return left.epoch() == right.epoch() && left.resource().equals(right.resource())
-                && left.owner().equals(right.owner());
     }
 
     private record RequestKey(OwnershipResource resource, String requestId) { }

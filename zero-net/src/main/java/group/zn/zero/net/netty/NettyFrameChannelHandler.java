@@ -11,8 +11,11 @@ import group.zn.zero.security.SecurityContextBridge;
 import group.zn.zero.protocol.ProtocolFrame;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Objects;
+import java.util.Queue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
@@ -58,6 +61,15 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
      * 单连接 production lifecycle 会话。
      */
     private NettyProductionLifecycleSession productionSession;
+
+    /** 仅启用 TCP 顺序模式时使用的单连接待处理帧队列；仅 EventLoop 访问。 */
+    private final Queue<AcceptedFrame> orderedFrames = new ArrayDeque<>();
+
+    /** 是否已有一个顺序帧正在执行业务或等待响应写入完成；仅 EventLoop 访问。 */
+    private boolean orderedFrameActive;
+
+    /** Channel 是否仍处于 active 状态；仅 EventLoop 访问。 */
+    private boolean channelActive;
 
     /**
      * 是否已经向业务监听器发出 onOpen。
@@ -120,6 +132,7 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
      */
     @Override
     public void channelActive(final ChannelHandlerContext context) {
+        channelActive = true;
         connection = new NettyConnection(context.channel().id().asLongText(), context.channel(), codec, options, outboundBudget);
         io.netty.handler.ssl.SslHandler sslHandler = context.pipeline().get(io.netty.handler.ssl.SslHandler.class);
         if (productionLifecycle != null) {
@@ -158,6 +171,9 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
      */
     @Override
     public void channelInactive(final ChannelHandlerContext context) {
+        channelActive = false;
+        orderedFrames.clear();
+        orderedFrameActive = false;
         if (connection != null) {
             if (productionSession != null) {
                 productionSession.onChannelInactive();
@@ -210,41 +226,152 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
     }
 
     private void submitAcceptedFrame(final ChannelHandlerContext context, final ProtocolFrame frame) {
-        SecurityContext admittedIdentity = connection.attributes()
-                .get(group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes.SECURITY_CONTEXT).orElse(null);
+        if (preserveTcpFrameOrder()) {
+            orderedFrames.add(new AcceptedFrame(context, frame, admittedIdentity()));
+            submitNextOrderedFrame();
+            return;
+        }
+        submitConcurrentFrame(context, frame, admittedIdentity());
+    }
+
+    /**
+     * 使用已有并发模型投递单个业务帧。
+     */
+    private void submitConcurrentFrame(
+            final ChannelHandlerContext context,
+            final ProtocolFrame frame,
+            final SecurityContext admittedIdentity) {
         try {
             handlerExecutor.execute(() -> invokeHandler(context, frame, admittedIdentity));
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             completeProductionFrame(context);
             ZeroException wrapped = ZeroException.of(NetErrorCode.HANDLER_FAILED, "submit net handler failed", ex);
             fireException(context, wrapped);
         }
     }
 
+    /**
+     * 启动单连接顺序队列的下一个帧。只有当前 handler 与全部响应写入完成才会推进队列。
+     */
+    private void submitNextOrderedFrame() {
+        if (orderedFrameActive || !contextIsActive()) {
+            return;
+        }
+        AcceptedFrame next = orderedFrames.poll();
+        if (next == null) {
+            return;
+        }
+        orderedFrameActive = true;
+        try {
+            handlerExecutor.execute(() -> invokeOrderedHandler(next));
+        } catch (RuntimeException | Error ex) {
+            failOrderedFrame(next.context(), ex);
+        }
+    }
+
+    /**
+     * 在业务执行器中调用顺序帧 handler，并将后续状态变更切回所属 EventLoop。
+     */
+    private void invokeOrderedHandler(final AcceptedFrame accepted) {
+        try {
+            CompletionStage<List<ProtocolFrame>> stage = invokeHandlerStage(accepted.frame(), accepted.securityContext());
+            stage.whenComplete((responses, cause) -> executeOnEventLoop(
+                    accepted.context(), () -> orderedHandlerCompleted(accepted, responses, cause)));
+        } catch (Throwable ex) {
+            executeOnEventLoop(accepted.context(), () -> failOrderedFrame(accepted.context(), ex));
+        }
+    }
+
+    /**
+     * 在 EventLoop 中写入顺序帧响应。写完成前不允许后续帧开始业务执行。
+     */
+    private void orderedHandlerCompleted(
+            final AcceptedFrame accepted,
+            final List<ProtocolFrame> responses,
+            final Throwable cause) {
+        if (!orderedFrameActive || !contextIsActive()) {
+            return;
+        }
+        if (cause != null) {
+            failOrderedFrame(accepted.context(), asHandlerException(cause));
+            return;
+        }
+        CompletionStage<Void> sent = writeResponses(responses);
+        try {
+            sent.whenComplete((ignored, failure) -> executeOnEventLoop(
+                    accepted.context(), () -> orderedResponseCompleted(accepted.context(), failure)));
+        } catch (RuntimeException | Error ex) {
+            failOrderedFrame(accepted.context(), asHandlerException(ex));
+        }
+    }
+
+    /**
+     * 释放顺序帧预算后推进下一帧，保持同一连接的业务和响应因果顺序。
+     */
+    private void orderedResponseCompleted(final ChannelHandlerContext context, final Throwable cause) {
+        if (!orderedFrameActive) {
+            return;
+        }
+        if (cause != null) {
+            failOrderedFrame(context, asHandlerException(cause));
+            return;
+        }
+        completeProductionFrame(context);
+        orderedFrameActive = false;
+        submitNextOrderedFrame();
+    }
+
+    /**
+     * 终止顺序队列，避免失败连接在 close 回调之前继续执行业务帧。
+     */
+    private void failOrderedFrame(final ChannelHandlerContext context, final Throwable cause) {
+        completeProductionFrame(context);
+        orderedFrames.clear();
+        orderedFrameActive = false;
+        fireException(context, asHandlerException(cause));
+    }
+
     private void invokeHandler(final ChannelHandlerContext context, final ProtocolFrame frame,
             final SecurityContext securityContext) {
         try {
-            if (securityContext != null && (securityContext.expired(java.time.Instant.now())
-                    || securityContext != connection.attributes()
-                    .get(group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes.SECURITY_CONTEXT).orElse(null))) {
-                throw ZeroException.of(NetErrorCode.UNAUTHENTICATED, "frame authentication changed before execution", null);
-            }
-            CompletionStage<List<ProtocolFrame>> stage = securityContext == null
-                    ? Objects.requireNonNull(frameHandler.handle(connection, frame), "handlerStage")
-                    : SecurityContextBridge.with(securityContext,
-                            () -> Objects.requireNonNull(frameHandler.handle(connection, frame), "handlerStage"));
+            CompletionStage<List<ProtocolFrame>> stage = invokeHandlerStage(frame, securityContext);
             stage.whenComplete((responses, cause) -> {
                 completeProductionFrame(context);
                 if (cause != null) {
                     fireException(context, asHandlerException(cause));
                     return;
                 }
-                writeResponses(context, responses);
+                try {
+                    writeResponses(responses).whenComplete((ignored, failure) -> {
+                        if (failure != null) {
+                            fireException(context, asHandlerException(failure));
+                        }
+                    });
+                } catch (RuntimeException | Error ex) {
+                    fireException(context, asHandlerException(ex));
+                }
             });
         } catch (Throwable ex) {
             completeProductionFrame(context);
             fireException(context, asHandlerException(ex));
         }
+    }
+
+    /**
+     * 调用业务 handler 并校验帧捕获时的认证上下文仍然有效。
+     */
+    private CompletionStage<List<ProtocolFrame>> invokeHandlerStage(
+            final ProtocolFrame frame,
+            final SecurityContext securityContext) {
+        if (securityContext != null && (securityContext.expired(java.time.Instant.now())
+                || securityContext != connection.attributes()
+                .get(group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes.SECURITY_CONTEXT).orElse(null))) {
+            throw ZeroException.of(NetErrorCode.UNAUTHENTICATED, "frame authentication changed before execution", null);
+        }
+        return securityContext == null
+                ? Objects.requireNonNull(frameHandler.handle(connection, frame), "handlerStage")
+                : SecurityContextBridge.with(securityContext,
+                        () -> Objects.requireNonNull(frameHandler.handle(connection, frame), "handlerStage"));
     }
 
     private void completeProductionFrame(final ChannelHandlerContext context) {
@@ -254,18 +381,41 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
         context.executor().execute(productionSession::onFrameCompleted);
     }
 
-    private void writeResponses(final ChannelHandlerContext context, final List<ProtocolFrame> responses) {
+    private CompletionStage<Void> writeResponses(final List<ProtocolFrame> responses) {
         try {
             Objects.requireNonNull(responses, "responses");
-            CompletionStage<Void> sent = responses.size() == 1
-                    ? connection.sendFrame(Objects.requireNonNull(responses.getFirst(), "response"))
-                    : connection.sendFrames(List.copyOf(responses));
-            sent.exceptionally(cause -> {
-                fireException(context, asHandlerException(cause));
-                return null;
-            });
-        } catch (RuntimeException ex) {
-            fireException(context, asHandlerException(ex));
+            return Objects.requireNonNull(responses.size() == 1
+                            ? connection.sendFrame(Objects.requireNonNull(responses.getFirst(), "response"))
+                            : connection.sendFrames(List.copyOf(responses)),
+                    "responseWriteStage");
+        } catch (RuntimeException | Error ex) {
+            return CompletableFuture.failedStage(asHandlerException(ex));
+        }
+    }
+
+    /** 返回当前帧接收时的认证身份，避免业务投递期间被后续身份变更替换。 */
+    private SecurityContext admittedIdentity() {
+        return connection.attributes()
+                .get(group.zn.zero.net.lifecycle.ProductionNetworkConnectionAttributes.SECURITY_CONTEXT).orElse(null);
+    }
+
+    /** 当前 server 是否明确启用了单连接 TCP 顺序模式。 */
+    private boolean preserveTcpFrameOrder() {
+        return options.serverType() == group.zn.zero.net.ServerType.TCP
+                && options.tuning().preserveTcpFrameOrder();
+    }
+
+    /** Channel 未关闭时才允许顺序队列继续推进。 */
+    private boolean contextIsActive() {
+        return channelActive && connection != null;
+    }
+
+    /** 将外部 CompletionStage 回调切回当前 Channel EventLoop。 */
+    private void executeOnEventLoop(final ChannelHandlerContext context, final Runnable task) {
+        if (context.executor().inEventLoop()) {
+            task.run();
+        } else {
+            context.executor().execute(task);
         }
     }
 
@@ -277,7 +427,8 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
     }
 
     private void fireException(final ChannelHandlerContext context, final Throwable cause) {
-        context.executor().execute(() -> context.fireExceptionCaught(cause));
+        // context.fireExceptionCaught 从下一个节点开始，会绕过本处理器的监听和关闭逻辑。
+        context.executor().execute(() -> exceptionCaught(context, cause));
     }
 
     private void notifyListenerException(
@@ -332,5 +483,12 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
                     "connection listener exception callback failed",
                     ex);
         }
+    }
+
+    /** 已通过 lifecycle 门控、等待业务执行的单个帧；仅所属 EventLoop 创建和消费。 */
+    private record AcceptedFrame(
+            ChannelHandlerContext context,
+            ProtocolFrame frame,
+            SecurityContext securityContext) {
     }
 }

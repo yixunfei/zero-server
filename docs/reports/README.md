@@ -4,6 +4,11 @@
 
 | 报告 | 用途 |
 | --- | --- |
+| [全仓可靠性复核（2026-10-05）](full-reliability-review-20261005.zh-CN.md) | 61 模块质量与契约门禁、监控故障注入、真实中间件验证及剩余边界 |
+| [数据、同步与 Kafka 性能评估（2026-10-05）](performance-issues-20261005.zh-CN.md) | H1-H8 真实性、设计/安全边界、修复、真实中间件验证与未测容量 |
+| [反馈专项：RPC、网络、数据与边界适配（2026-10-04）](feedback-hardening-20261004.zh-CN.md) | S1-S3、H1-H10 的复现确认、修复证据、验证结果和剩余风险 |
+| [并发与性能复核（2026-10-04）](concurrency-performance-followup-20261004.zh-CN.md) | 现有修复门禁复核、帧同步容量新增缺陷及验证边界 |
+| [并发、异步与性能专项审计（2026-10-03）](concurrency-async-performance-20261003.zh-CN.md) | 并发回归、资源容量、ownership fencing、生命周期关闭及 Room 分配证据 |
 | [线程、缓存与分布式一致性专项审查（2026-09-26）](concurrency-distributed-audit-20260926.zh-CN.md) | 全仓并发、缓存、RPC/发现、Redis 及游戏状态边界的确认缺陷、修复和门禁结果 |
 | [质量基线与阻塞修复（2026-09-26）](quality-baseline-20260926.zh-CN.md) | 当前工作区测试基线、Production 按需装配回归与验证边界 |
 | [源码审计（2026-09-24）](code-audit-20260924.zh-CN.md) | 并发、安全、数据面、游戏域的历史候选；未跑测试，后续已有修复及结论纠正 |

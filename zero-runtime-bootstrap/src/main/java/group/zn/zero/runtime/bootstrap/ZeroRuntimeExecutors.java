@@ -109,6 +109,25 @@ public final class ZeroRuntimeExecutors implements AutoCloseable {
     }
 
     /**
+     * 创建仅托管远程 IO 的执行器装配，供 production 同步驱动使用。
+     *
+     * <p>远程 IO 使用 Java 21 虚拟线程，每任务独立执行；线程在首次提交时创建，关闭由 runtime 管理。
+     * 业务必须按驱动容量控制在途请求；此工厂不提供无界业务并发的背压保证。
+     *
+     * @param threadNamePrefix 受管 IO 线程名前缀；不可为空或空白。
+     * @return 线程安全的执行器装配；不可为空，逻辑、Actor 和后台任务在调用线程执行。
+     * @throws NullPointerException 前缀为空时抛出。
+     * @throws IllegalArgumentException 前缀为空白时抛出。
+     */
+    public static ZeroRuntimeExecutors remoteIo(final String threadNamePrefix) {
+        String prefix = requireText(threadNamePrefix, "threadNamePrefix");
+        ExecutorService remoteIo = Executors.newThreadPerTaskExecutor(
+                Thread.ofVirtual().name(prefix + "-remote-io-", 0).factory());
+        return new ZeroRuntimeExecutors(Runnable::run, Runnable::run, remoteIo, Runnable::run,
+                List.of(remoteIo), DEFAULT_CLOSE_TIMEOUT, false, true);
+    }
+
+    /**
      * 创建 starter 管理的单线程逻辑执行器装配。
      *
      * <p>该工厂用于兼容完整本地 demo：logic 使用单线程执行器，Actor 仍在调用线程内推进，

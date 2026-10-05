@@ -6,6 +6,47 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 全仓可靠性复核（2026-10-05）
+
+- 本地告警在 sink 失败后保持可重试；持续满足条件时下次评估重投整条事件。单次 Prometheus 抓取对同名同标签序列按样本时间只输出最新值，同时间戳取后记录；注册表历史保留。
+- API 符号门禁忽略不属于二进制方法描述符的 `synchronized` 修饰符，线程语义仍需单独审查。迁移与验证边界见[说明](docs/migrations/20261005-full-reliability-review.zh-CN.md)及[报告](docs/reports/full-reliability-review-20261005.zh-CN.md)。
+
+### 数据、同步与 Kafka 性能修复（2026-10-05）
+
+- Envelope CRUD 移除仓库级串行锁，显式注入受管 IO executor；生产便利工厂默认提供虚拟线程 remote IO，生产数据 provider 拒绝内联执行器。
+- 三类数据驱动下推分块批量和分页；直接 PostgreSQL settings 工厂统一使用 HikariCP；持久化 flush 默认跨脏键最多 16 个在途保存，保留逐项确认与失败脏数据。
+- SyncEnvelope 提供深不可变 payload 的一次准备、多观察者复用摘要；KCP Context 复用各方向 Cipher。Kafka production 成功事件改用计数观测，reply topic 配置改为实例独占 topic 的前缀，保留安全日志与请求签名。
+- Kafka consumer 只提交成功终态的实际分区 offset；持久化失败诊断按脏对象代际隔离；帧同步增加可配置远期输入窗口；房间创建与首个命令线性化，保留可注入调度器和同步创建入口。
+- 0.x API、执行域、部分提交及 Kafka ACL/provisioning 迁移见[迁移说明](docs/migrations/20261005-performance-issues.zh-CN.md)；逐项真实问题、设计边界与验证见[专项报告](docs/reports/performance-issues-20261005.zh-CN.md)。
+
+### 反馈专项：RPC、网络、数据与边界适配（2026-10-04）
+
+- Kafka RPC consumer 将业务 listener、反序列化后的用户回调和 response completion 移出 poll 线程；每分区顺序、应用执行器、批次处理预算和 `max.poll.records` 均可配置，默认批次上限为 100，避免慢 handler 长时间占用 poll 线程。
+- 网络生命周期将同一连接的 replay 判定按到达顺序协调，超时任务使用连接执行器；TCP 业务帧顺序保护为 opt-in，业务帧也会刷新心跳活动计数。协议格式未变，当前 replay nonce 仍是连接内接收序列的合成值，真实发送方 nonce/单调序列号仍需后续协议扩展。
+- Redis、Envelope repository、Nacos、runtime、EventBus、GM 幂等、分层缓存、GameActorGateway 和 NPC zone 修复了阻塞调用、锁内外部调用、失败授权锁死、重复 message id、L2 故障穿透和并发容器访问等已确认问题；执行器、冷却窗口和 TCP 顺序策略由装配方决定。
+- 0.x 行为变化、配置示例、验证命令和剩余限制见[反馈专项迁移说明](docs/migrations/20261004-feedback-hardening.zh-CN.md)及[专项报告](docs/reports/feedback-hardening-20261004.zh-CN.md)。
+
+### 帧同步容量复核（2026-10-04）
+
+- `MARK` 缺失输入策略在消费玩家最后一条待处理输入后释放空玩家槽位，避免长运行对局累计不同玩家后永久拒绝新玩家；`REPEAT_LAST` 保留历史的行为不变。非重复上一输入的策略不再逐帧复制无用历史。见[迁移说明](docs/migrations/20261004-frame-sync-capacity.zh-CN.md)和[复核报告](docs/reports/concurrency-performance-followup-20261004.zh-CN.md)。
+
+### 并发、异步与性能专项修复
+
+- 修复 Actor/Player/RPC/KCP/HTTP 的异步异常终结、Scheduler 执行器与 timer 失败资源回收、KCP 锁顺序、UDP 异步发送错误丢失、Redis KCP 低容量连续调用与 Kafka 超时记录滞留。
+- 缓存取消与物理 IO 完成分离，落实加载/写入准入及非递归完成；修复 Redis 未版本化覆盖写、PostgreSQL 并发幂等提交与 release 后 epoch 重用、本地 ownership 原子 fencing。
+- 修复重复 drain、配置 watcher 自等待与提交失败残留、持久化 timer 迟到登记及快照失败悬挂；为 GM 内存去重记录增加容量与到期回收。
+- Room 回滚检查点复用不可变视图以减少热点分配；NPC 零预算直接跳过并在预算耗尽后停止扫描。
+- 同步 API 快照中一处已在 2026-09-30 迁移说明记录的 `RuntimeAssemblyPlan` 构造器变化，恢复符号门禁与当前契约的一致性。
+- 取消、容量、装配及 drain 行为变化见[迁移说明](docs/migrations/20261003-concurrency-async-performance.zh-CN.md)，证据见[专项报告](docs/reports/concurrency-async-performance-20261003.zh-CN.md)。
+
+### 首次运行路径与脚手架入口
+
+- Java Runner、Doctor 和批量脚手架验证优先使用仓库 Maven Wrapper，并支持 `ZERO_MAVEN_CMD` 显式覆盖。
+- 脚手架默认依赖版本统一为 `0.1.2-SNAPSHOT`；`RunLocalPrototype` 的参数错误输出 `RUNNER-INVALID-ARGUMENT`，环境错误输出 `RUNNER-ENVIRONMENT`。
+- `NewLocalGame --help` 不再触发 codegen 构建；正式生成会先检查 Java 21，并给出可执行的环境修复提示。
+- local 生成项目 README 和业务指南收敛为“运行、阅读业务指南、完成第一处业务修改”的三步路径，提供移动坐标修改与测试反馈示例，并澄清 demo 内嵌 BO 和独立异步适配器的区别。
+- 这是 0.x 默认值与开发入口行为变化，详见[脚手架首次运行迁移说明](docs/migrations/20261003-scaffold-onboarding.zh-CN.md)。
+
 ### 可靠性审查修复与显式耐久提交
 
 - 修复 Kafka RPC oneway 处理失败和损坏 envelope 触发 consumer 高速重建；reply topic 改用每个进程独占 consumer group。Redis driver journal 保留最近 1024 条记录，PostgreSQL ownership 断言在单事务内完成。

@@ -21,7 +21,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -76,6 +75,9 @@ final class LocalConfigFileWatcher implements AutoCloseable {
      * 受管执行器中的 watcher 任务。
      */
     private volatile CompletableFuture<Void> task;
+
+    /** 当前监听循环线程；关闭回调不得等待自身完成。 */
+    private volatile Thread loopThread;
 
     private LocalConfigFileWatcher(
             final WatchService watchService,
@@ -139,7 +141,8 @@ final class LocalConfigFileWatcher implements AutoCloseable {
      * @throws ZeroException 当任务被执行器拒绝或 watcher 已启动时抛出。
      */
     synchronized void start(final Executor executor) {
-        if (task != null) {
+        Executor checkedExecutor = Objects.requireNonNull(executor, "executor");
+        if (closed.get() || task != null) {
             throw ZeroException.of(
                     ConfigReloadErrorCode.INVALID_SERVICE_STATE,
                     "config watcher has already started",
@@ -148,9 +151,10 @@ final class LocalConfigFileWatcher implements AutoCloseable {
         CompletableFuture<Void> currentTask = new CompletableFuture<>();
         task = currentTask;
         try {
-            Objects.requireNonNull(executor, "executor").execute(() -> runLoop(currentTask));
-        } catch (RejectedExecutionException ex) {
+            checkedExecutor.execute(() -> runLoop(currentTask));
+        } catch (RuntimeException | Error ex) {
             task = null;
+            currentTask.completeExceptionally(ex);
             throw ZeroException.of(
                     ConfigReloadErrorCode.EXECUTOR_REJECTED,
                     "config watcher task was rejected",
@@ -159,10 +163,12 @@ final class LocalConfigFileWatcher implements AutoCloseable {
     }
 
     private void runLoop(final CompletableFuture<Void> currentTask) {
+        loopThread = Thread.currentThread();
         try {
             while (!closed.get()) {
                 Set<String> tableNames = awaitBatch();
                 for (String tableName : tableNames) {
+                    if (closed.get()) break;
                     reloadHandler.accept(tableName);
                 }
             }
@@ -182,6 +188,8 @@ final class LocalConfigFileWatcher implements AutoCloseable {
             }
         } catch (RuntimeException | Error ex) {
             fail(currentTask, ex);
+        } finally {
+            loopThread = null;
         }
     }
 
@@ -227,31 +235,35 @@ final class LocalConfigFileWatcher implements AutoCloseable {
                         cause);
         try {
             failureHandler.accept(failure);
-        } catch (RuntimeException observerFailure) {
-            failure.addSuppressed(observerFailure);
+        } catch (RuntimeException | Error observerFailure) {
+            if (observerFailure != failure) failure.addSuppressed(observerFailure);
         }
         currentTask.completeExceptionally(failure);
     }
 
     /**
-     * 关闭 WatchService，解除阻塞循环并等待任务退出。
+     * 关闭 WatchService，解除阻塞循环并等待任务退出；监听回调关闭自身时不自等待。
      *
      * @throws ZeroException 当关闭、等待超时或任务异常时抛出。
      */
     @Override
-    public synchronized void close() {
-        if (!closed.compareAndSet(false, true)) {
-            return;
+    public void close() {
+        synchronized (this) {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+            try {
+                watchService.close();
+            } catch (IOException ex) {
+                throw ZeroException.of(
+                        ConfigReloadErrorCode.WATCHER_STOP_FAILED,
+                        "failed to close config watcher",
+                        ex);
+            }
         }
-        try {
-            watchService.close();
-        } catch (IOException ex) {
-            throw ZeroException.of(
-                    ConfigReloadErrorCode.WATCHER_STOP_FAILED,
-                    "failed to close config watcher",
-                    ex);
+        if (Thread.currentThread() != loopThread) {
+            awaitTask();
         }
-        awaitTask();
     }
 
     private void awaitTask() {

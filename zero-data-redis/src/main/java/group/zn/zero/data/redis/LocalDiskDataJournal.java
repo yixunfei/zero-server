@@ -71,30 +71,49 @@ public final class LocalDiskDataJournal {
      * @throws ZeroException 写入失败时抛出，绑定 `DataErrorCode.WRITE_FAILED`。
      */
     public synchronized void append(final RedisDataJournalEntry entry) {
-        RedisDataJournalEntry current = Objects.requireNonNull(entry, "entry");
+        appendAll(List.of(Objects.requireNonNull(entry, "entry")));
+    }
+
+    /**
+     * 按集合批量追加；线程安全，每个文件仅 force 一次，返回前所有完整记录已请求持久化。
+     * 保留各文件内输入顺序；IO 失败可能已部分写入，后续追加仍恢复完整帧边界。
+     *
+     * @param entries 日志记录；不可为空，允许空集合。
+     * @throws ZeroException 写入失败时绑定 WRITE_FAILED。
+     */
+    public synchronized void appendAll(final java.util.Collection<RedisDataJournalEntry> entries) {
         try {
-            Path path = journalPath(current.namespace(), current.collection());
-            Files.createDirectories(path.getParent());
-            byte[] entryBytes = codec.encode(current);
-            ZeroWriter writer = new ZeroWriter(entryBytes.length + 5);
-            writer.writeByteArray(entryBytes);
-            try (FileChannel channel = FileChannel.open(path,
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.WRITE,
-                    StandardOpenOption.READ)) {
-                long boundary = recoverBoundary(path, channel.size());
-                channel.truncate(boundary);
-                channel.position(boundary);
-                byte[] bytes = writer.toByteArray();
+            Map<Path, List<byte[]>> files = new java.util.LinkedHashMap<>();
+            for (RedisDataJournalEntry entry : entries) {
+                Path path = journalPath(entry.namespace(), entry.collection());
+                byte[] entryBytes = codec.encode(entry);
+                ZeroWriter writer = new ZeroWriter(entryBytes.length + 5);
+                writer.writeByteArray(entryBytes);
+                files.computeIfAbsent(path, ignored -> new ArrayList<>()).add(writer.toByteArray());
+            }
+            for (var file : files.entrySet()) appendFrames(file.getKey(), file.getValue());
+        } catch (IOException | RuntimeException ex) {
+            throw ZeroException.of(DataErrorCode.WRITE_FAILED, "append local data journal failed", ex);
+        }
+    }
+
+    private void appendFrames(final Path path, final List<byte[]> frames) throws IOException {
+        Files.createDirectories(path.getParent());
+        try (FileChannel channel = FileChannel.open(path,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE,
+                StandardOpenOption.READ)) {
+            long boundary = recoverBoundary(path, channel.size());
+            channel.truncate(boundary);
+            channel.position(boundary);
+            for (byte[] bytes : frames) {
                 java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(bytes);
                 while (buffer.hasRemaining()) {
                     channel.write(buffer);
                 }
-                channel.force(true);
-                verifiedLengths.put(path, channel.position());
             }
-        } catch (IOException | RuntimeException ex) {
-            throw ZeroException.of(DataErrorCode.WRITE_FAILED, "append local data journal failed", ex);
+            channel.force(true);
+            verifiedLengths.put(path, channel.position());
         }
     }
 

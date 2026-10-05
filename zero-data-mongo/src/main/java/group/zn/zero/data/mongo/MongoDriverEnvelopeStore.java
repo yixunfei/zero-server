@@ -3,20 +3,31 @@ package group.zn.zero.data.mongo;
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.lte;
+import static com.mongodb.client.model.Filters.in;
 
 import com.mongodb.MongoWriteException;
 import com.mongodb.MongoException;
+import com.mongodb.MongoBulkWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.CountOptions;
 import com.mongodb.client.model.ReplaceOptions;
+import com.mongodb.client.model.BulkWriteOptions;
+import com.mongodb.client.model.InsertOneModel;
+import com.mongodb.client.model.ReplaceOneModel;
+import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.WriteModel;
 import com.mongodb.client.result.UpdateResult;
 import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.data.envelope.ZeroDataEnvelope;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeStore;
 import group.zn.zero.data.error.DataErrorCode;
+import group.zn.zero.data.model.PageRequest;
+import group.zn.zero.data.model.PageResult;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 import java.util.List;
@@ -30,6 +41,9 @@ import org.bson.Document;
  * @author zn
  */
 public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
+
+    /** 限制每次 bulk/query 的参数和驱动缓存。 */
+    private static final int BATCH_SIZE = 256;
 
     /**
      * 数据命名空间。
@@ -119,6 +133,101 @@ public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
                 throw zeroException;
             }
             throw ZeroException.of(DataErrorCode.READ_FAILED, "mongo read all failed", ex);
+        }
+    }
+
+    /** $in 批量查询；不可变结果按输入顺序返回，缺失项省略，重复项保留。 */
+    @Override
+    public List<ZeroDataEnvelope> findByIds(final Collection<String> ids) {
+        List<String> current = List.copyOf(ids);
+        var found = new HashMap<String, ZeroDataEnvelope>();
+        try {
+            for (int offset = 0; offset < current.size(); offset += BATCH_SIZE) {
+                var query = and(matchCollection(), in("_id",
+                        current.subList(offset, Math.min(offset + BATCH_SIZE, current.size()))));
+                try (MongoCursor<Document> cursor = mongoCollection.find(query).iterator()) {
+                    while (cursor.hasNext()) {
+                        ZeroDataEnvelope envelope = MongoDataDocument.fromBson(cursor.next()).toEnvelope();
+                        found.put(envelope.id(), envelope);
+                    }
+                }
+            }
+            List<ZeroDataEnvelope> result = new ArrayList<>(current.size());
+            for (String id : current) {
+                if (found.containsKey(id)) result.add(found.get(id));
+            }
+            return List.copyOf(result);
+        } catch (RuntimeException failure) {
+            throw ZeroException.of(DataErrorCode.READ_FAILED, "mongo batch read failed", failure);
+        }
+    }
+
+    /** 服务端 skip/limit 分页；按 _id 排序，计数和 items 在并发写期间弱一致。 */
+    @Override
+    public PageResult<ZeroDataEnvelope> findPage(final PageRequest request) {
+        Objects.requireNonNull(request, "request");
+        try (MongoCursor<Document> cursor = mongoCollection.find(matchCollection()).sort(Sorts.ascending("_id"))
+                .skip(request.offset()).limit(request.limit()).iterator()) {
+            List<ZeroDataEnvelope> items = new ArrayList<>();
+            while (cursor.hasNext()) items.add(MongoDataDocument.fromBson(cursor.next()).toEnvelope());
+            long total = count();
+            long next = (long) request.offset() + items.size();
+            return new PageResult<>(items, !items.isEmpty() && next < total ? String.valueOf(next) : null, total);
+        } catch (RuntimeException failure) {
+            throw ZeroException.of(DataErrorCode.READ_FAILED, "mongo page read failed", failure);
+        }
+    }
+
+    /**
+     * 有界 bulk CAS；成功返回按输入顺序的不可变 true 列表。
+     * 任一冲突抛 VERSION_CONFLICT；Mongo 的聚合结果不能定位未匹配更新，不虚构逐项结果。
+     * 批次不是事务，冲突或驱动错误可能已有部分写入；调用方应重新读取后重试。
+     */
+    @Override
+    public List<Boolean> saveIfVersionBatch(final Collection<ConditionalWrite> writes) {
+        List<ConditionalWrite> current = List.copyOf(writes);
+        for (ConditionalWrite write : current) validateEnvelope(write.envelope());
+        try {
+            for (int offset = 0; offset < current.size(); offset += BATCH_SIZE) {
+                writeBatch(current.subList(offset, Math.min(offset + BATCH_SIZE, current.size())));
+            }
+            return List.copyOf(java.util.Collections.nCopies(current.size(), Boolean.TRUE));
+        } catch (RuntimeException failure) {
+            if (failure instanceof ZeroException zero) throw zero;
+            throw ZeroException.of(classifyWriteFailure(failure), "mongo batch conditional write failed", failure);
+        }
+    }
+
+    private void writeBatch(final List<ConditionalWrite> writes) {
+        List<WriteModel<Document>> operations = new ArrayList<>(writes.size());
+        int updates = 0;
+        for (ConditionalWrite write : writes) {
+            MongoDataDocument document = MongoDataDocument.fromEnvelope(write.envelope());
+            if (write.expectedVersion() == 0L) {
+                operations.add(new InsertOneModel<>(document.toBson()));
+            } else {
+                operations.add(new ReplaceOneModel<>(and(matchId(document.id()), eq("version", write.expectedVersion())),
+                        document.toBson()));
+                updates++;
+            }
+        }
+        var result = mongoCollection.bulkWrite(operations, new BulkWriteOptions().ordered(true));
+        if (result.getMatchedCount() != updates || result.getInsertedCount() != writes.size() - updates) {
+            throw ZeroException.of(DataErrorCode.VERSION_CONFLICT, "mongo batch contains version conflicts; partial writes possible", null);
+        }
+    }
+
+    /** $in 批量删除；有界请求，不承诺跨批次事务原子性。 */
+    @Override
+    public void deleteAll(final Collection<String> ids) {
+        List<String> current = List.copyOf(ids);
+        try {
+            for (int offset = 0; offset < current.size(); offset += BATCH_SIZE) {
+                mongoCollection.deleteMany(and(matchCollection(), in("_id",
+                        current.subList(offset, Math.min(offset + BATCH_SIZE, current.size())))));
+            }
+        } catch (RuntimeException failure) {
+            throw ZeroException.of(DataErrorCode.DELETE_FAILED, "mongo batch delete failed", failure);
         }
     }
 
@@ -248,6 +357,11 @@ public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
     }
 
     private DataErrorCode classifyWriteFailure(final RuntimeException failure) {
+        if (failure instanceof MongoBulkWriteException bulk && bulk.getWriteConcernError() == null
+                && !bulk.getWriteErrors().isEmpty()
+                && bulk.getWriteErrors().stream().allMatch(error -> error.getCode() == 11000)) {
+            return DataErrorCode.VERSION_CONFLICT;
+        }
         if (failure instanceof com.mongodb.DuplicateKeyException) {
             return DataErrorCode.VERSION_CONFLICT;
         }

@@ -1,9 +1,14 @@
 package group.zn.zero.cache;
 
+import group.zn.zero.core.error.ZeroException;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -14,8 +19,16 @@ import java.util.function.Supplier;
  * @author zn
  */
 final class CacheKeyOperations<K> {
+    /** 单键已接受写入上限，包含正在执行的一项。 */
+    private static final int MAX_WRITES_PER_KEY = 1024;
+    /** 全部键的已接受写入上限。 */
+    private static final int MAX_WRITES = 4096;
     /** 只保存有在途操作的键，受本对象锁保护。 */
     private final Map<K, State> states = new HashMap<>();
+    /** 正在执行或等待前序屏障的写入总数，受本对象锁保护。 */
+    private int writes;
+    /** 仅在当前线程完成屏障期间存在，防止同步完成链递归耗尽栈。 */
+    private final ThreadLocal<CompletionDrain> completionDrain = new ThreadLocal<>();
 
     /** 开始读取；调用方必须在异步操作结束后 release。 */
     synchronized Token<K> read(final K key) {
@@ -58,71 +71,97 @@ final class CacheKeyOperations<K> {
         return action.get();
     }
 
-    /** 显式变更立即隔离旧读取，并排在此前同键写入之后；外部 IO 在锁外执行。 */
+    /** 显式变更立即隔离旧读取，并排在此前同键写入之后；取消观察句柄不撤销已接受的 IO。 */
     <T> CompletionStage<T> mutate(final K key, final Function<Token<K>, CompletionStage<T>> action) {
         Token<K> token;
         CompletableFuture<Void> before;
         CompletableFuture<Void> done = new CompletableFuture<>();
         synchronized (this) {
-            State state = states.computeIfAbsent(key, ignored -> new State());
+            State state = states.get(key);
+            if (state == null) state = new State();
+            reserveWrite(state);
+            states.put(key, state);
             state.references++;
             token = new Token<>(key, state, ++state.generation);
             before = state.tail;
             state.tail = done;
         }
-        CompletionStage<T> execution = execute(before, done, () -> action.apply(token));
-        execution.whenComplete((value, failure) -> release(token));
-        return execution;
+        CompletionStage<T> execution = execute(before, done, token, () -> action.apply(token));
+        return execution.toCompletableFuture().copy();
     }
 
-    /** 加载回填仅在原代际有效时进入同键写序列，否则返回当前值而不写后端。 */
+    /** 加载回填仅在原代际有效时进入同键写序列；超时取消观察不能提前释放物理写入屏障。 */
     <T> CompletionStage<T> backfill(final Token<K> token, final Supplier<CompletionStage<T>> action,
             final Supplier<CompletionStage<T>> stale) {
         CompletableFuture<Void> before;
         CompletableFuture<Void> done = new CompletableFuture<>();
         synchronized (this) {
             if (token.generation != token.state.generation) return stale.get();
+            reserveWrite(token.state);
             token.state.references++;
             before = token.state.tail;
             token.state.tail = done;
         }
-        CompletionStage<T> execution = execute(before, done, () -> {
+        CompletionStage<T> execution = execute(before, done, token, () -> {
             boolean current;
             synchronized (this) { current = token.generation == token.state.generation; }
             return current ? action.get() : stale.get();
         });
-        execution.whenComplete((value, failure) -> release(token));
-        return execution;
+        return execution.toCompletableFuture().copy();
     }
 
     private <T> CompletionStage<T> execute(final CompletableFuture<Void> before,
-            final CompletableFuture<Void> done, final Supplier<CompletionStage<T>> action) {
+            final CompletableFuture<Void> done, final Token<K> token, final Supplier<CompletionStage<T>> action) {
         CompletableFuture<T> result = new CompletableFuture<>();
-        java.util.concurrent.atomic.AtomicReference<CompletionStage<T>> actionStage =
-                new java.util.concurrent.atomic.AtomicReference<>();
+        AtomicBoolean settled = new AtomicBoolean();
+        BiConsumer<T, Throwable> completion = (value, failure) -> {
+            if (settled.compareAndSet(false, true)) finish(token, done, result, value, failure);
+        };
         before.whenComplete((ignored, priorFailure) -> {
             try {
                 CompletionStage<T> stage = action.get();
-                actionStage.set(stage);
-                stage.whenComplete((value, failure) -> {
-                    done.complete(null);
-                    if (failure == null) result.complete(value);
-                    else result.completeExceptionally(failure);
-                });
+                stage.whenComplete(completion);
             } catch (RuntimeException | Error failure) {
-                done.complete(null);
-                result.completeExceptionally(failure);
-            }
-        });
-        result.whenComplete((ignored, failure) -> {
-            if (result.isCancelled()) {
-                CompletionStage<T> stage = actionStage.get();
-                if (stage != null) {
-                    stage.toCompletableFuture().cancel(true);
-                }
+                completion.accept(null, failure);
             }
         });
         return result;
+    }
+
+    /** 准入在短锁内完成，拒绝不创建状态引用或改变代际。 */
+    private void reserveWrite(final State state) {
+        if (state.writes >= MAX_WRITES_PER_KEY || writes >= MAX_WRITES) {
+            throw ZeroException.of(CacheErrorCode.BACKPRESSURE_REJECTED, "cache pending write limit exceeded", null);
+        }
+        state.writes++;
+        writes++;
+    }
+
+    /** 先回收准入与键引用，再推进屏障；用户观察回调在全部可运行屏障推进后、trampoline 外执行。 */
+    private <T> void finish(final Token<K> token, final CompletableFuture<Void> done,
+            final CompletableFuture<T> result, final T value, final Throwable failure) {
+        CompletionDrain existing = completionDrain.get();
+        CompletionDrain drain = existing == null ? new CompletionDrain() : existing;
+        drain.barriers.addLast(() -> {
+            synchronized (this) {
+                token.state.writes--;
+                writes--;
+                release(token);
+            }
+            drain.observers.add(() -> {
+                if (failure == null) result.complete(value);
+                else result.completeExceptionally(failure);
+            });
+            done.complete(null);
+        });
+        if (existing != null) return;
+        completionDrain.set(drain);
+        try {
+            while (!drain.barriers.isEmpty()) drain.barriers.removeFirst().run();
+        } finally {
+            completionDrain.remove();
+        }
+        for (Runnable observer : drain.observers) observer.run();
     }
 
     /** 一个在途读取/变更的身份；record 相等性包含键、状态实例和代际。 */
@@ -132,9 +171,19 @@ final class CacheKeyOperations<K> {
     private static final class State {
         /** 存活操作引用。 */
         private int references;
+        /** 已接受且尚未物理结算的写入数量。 */
+        private int writes;
         /** 显式变更代际。 */
         private long generation;
         /** 同键后端写入的完成屏障，无失败传播。 */
         private CompletableFuture<Void> tail = CompletableFuture.completedFuture(null);
+    }
+
+    /** 当前线程的完成推进上下文；不创建线程，也不长期保留 observer。 */
+    private static final class CompletionDrain {
+        /** 待推进的物理完成屏障。 */
+        private final ArrayDeque<Runnable> barriers = new ArrayDeque<>();
+        /** 屏障推进完成后才发布的用户观察结果。 */
+        private final ArrayList<Runnable> observers = new ArrayList<>();
     }
 }

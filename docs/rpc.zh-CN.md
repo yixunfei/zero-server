@@ -1,5 +1,21 @@
 # RPC 设计
 
+## 2026-10-05 独占 reply 与成功计数
+
+production `zero.rpc.kafka.reply-topic` 包括显式配置在内，现为实例 topic 前缀：每次 runtime 添加随机 UUID 后缀。Lifecycle 对 request/response 实际重写 replyTopic 为该实例所属 topic，保留 payload、超时、路由及安全签名字段，oneway 保持原样。多个独占 consumer group 不再订阅同一共享 reply topic。部署需准备前缀 ACL、动态 topic provisioning、retention 与清理；直接 `KafkaRpcAdapter` 仍由调用方负责唯一 replyTopic。
+
+production 遥测在记录创建前省略 STARTED/SUCCESS，使用已有 transport snapshot 计数；失败、超时、拒绝与降级继续同步经过安全日志。没有新增异步 appender。两 runtime 同配置的真实 broker 测试覆盖独占响应路由与失败日志，未测集群容量；见[迁移说明](migrations/20261005-performance-issues.zh-CN.md)和[报告](reports/performance-issues-20261005.zh-CN.md)。
+
+## 2026-10-04 反馈专项边界
+
+Kafka consumer 的 poll 线程现在只负责消费生命周期、解码和投递；业务 listener、用户回调及响应完成在注入的应用执行器中运行。`KafkaRpcConsumerExecution` 可选择是否按 partition 保序，关闭后允许同一分区并发以换取吞吐；开启后只限制该分区，不把整个 topic 串行化。`max.poll.records` 默认 100，`max.poll.interval.ms` 默认 300000，批次完成预算从 poll 间隔预留并可通过 consumer 属性调整。预算超限或失败会放弃提交并重建 consumer，未提交消息按至少一次语义重投。
+
+reply poll 线程不再同步执行反序列化后的用户回调；第三方 `CompletionStage` 通过 `whenComplete` 桥接，避免要求实现暴露 `CompletableFuture`。关闭和重平衡不会等待用户阶段无限完成，但业务必须处理重复投递和未决远程副作用。
+
+Nacos 注册/注销的 SDK 网络调用在生命周期锁外执行，lookup 默认使用 1 秒本地缓存；需要强实时查询时可将 `zero.discovery.nacos.lookup-cache-ttl-millis=0`，代价是每次查询穿透 SDK。详细迁移和验证见[反馈专项迁移说明](migrations/20261004-feedback-hardening.zh-CN.md)。
+
+2026-10-03：Kafka pending 完成、取消、失败及关闭立即回收对应时间轮记录，按登记令牌隔离 correlationId 重用；资源占用不再随已完成请求的历史吞吐积累。RPC 客户端 codec 抛 Error 时也终结独立结果并保留统一错误码，避免等待者永久挂起。协议与 offset 语义保持，见[专项迁移](migrations/20261003-concurrency-async-performance.zh-CN.md)。
+
 ## 2026-09-28 报告核实补充
 
 Kafka RPC 已使用真实 producer/consumer、响应 ack、pending 超时和重启回收；旧版“只有 pending 表”的描述已过时。Kafka 不可用、认证缺失或外部集群未提供时仍 fail-closed，不会退回本地传输。

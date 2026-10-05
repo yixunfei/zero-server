@@ -36,12 +36,15 @@ class PostgresqlDataAdapterExternalIT {
         PostgresqlDataHealthCheck healthCheck = new PostgresqlDataHealthCheck(settings);
         assumeTrue(healthCheck.check(), "PostgreSQL external service is unavailable");
         PostgresqlDataAdapter adapter = new PostgresqlDataAdapter();
+        try (var pool = PostgresqlPool.create(settings, 4, java.time.Duration.ofSeconds(3));
+                var io = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
         ZeroDataEnvelopeCrudRepository<String, PlayerArchive> repository = adapter.registerDriverRepository(
                 "player_external",
-                settings,
+                pool,
+                settings.tableName(),
                 new ZeroDataMappingIntrospector().inspect(PlayerArchive.class),
                 new PlayerArchiveCodec(),
-                1);
+                1, io);
         repository.deleteById("postgresql-player-1").toCompletableFuture().join();
 
         repository.save(new PlayerArchive("postgresql-player-1", 0L, "created")).toCompletableFuture().join();
@@ -59,6 +62,7 @@ class PostgresqlDataAdapterExternalIT {
         assertEquals("updated", updated.name());
         assertEquals(DataErrorCode.VERSION_CONFLICT, ((ZeroException) exception.getCause()).errorCode());
         assertEquals(0L, repository.count().toCompletableFuture().join());
+        }
     }
 
     /**

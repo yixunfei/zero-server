@@ -235,7 +235,17 @@ public final class ZeroLocalDoctor {
      * @return 非空命令文本。
      */
     private static String mavenCommand() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "mvn.cmd" : "mvn";
+        String configured = System.getenv("ZERO_MAVEN_CMD");
+        if (configured != null && !configured.isBlank()) {
+            return configured;
+        }
+        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        Path root = Path.of("").toAbsolutePath().normalize();
+        Path wrapper = root.resolve(windows ? "mvnw.cmd" : "mvnw");
+        if (Files.isRegularFile(wrapper) && (windows || Files.isExecutable(wrapper))) {
+            return wrapper.toString();
+        }
+        return windows ? "mvn.cmd" : "mvn";
     }
 
     /**
@@ -257,7 +267,10 @@ public final class ZeroLocalDoctor {
         System.out.println("  java scripts/ZeroLocalDoctor.java --help");
         System.out.println();
         System.out.println("Checks Java 21+, Maven 3.9+, Git and public repository entry points.");
-        System.out.println("If Java is below 21, set JAVA_HOME and put its bin directory first on PATH.");
+        System.out.println("Maven uses mvnw/mvnw.cmd from the repository when present; "
+                + "ZERO_MAVEN_CMD can override it.");
+        System.out.println("If Java is below 21, set JAVA_HOME to a JDK 21 installation "
+                + "and put its bin directory first on PATH.");
     }
 
     /**

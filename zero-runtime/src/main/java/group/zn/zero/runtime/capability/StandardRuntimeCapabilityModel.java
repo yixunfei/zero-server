@@ -147,7 +147,12 @@ public final class StandardRuntimeCapabilityModel {
                 STANDARD_PROFILES,
                 List.of(MavenCoordinate.zero("zero-runtime-rpc"))));
         provider(model, LOCAL_PERSISTENCE, PERSISTENCE_MANAGER);
-        provider(model, LOCAL_REPOSITORIES, REPOSITORY_SOURCES);
+        model.provider(new RuntimeProviderCapability(
+                LOCAL_REPOSITORIES,
+                List.of(REPOSITORY_SOURCES),
+                List.of(EXECUTORS),
+                STANDARD_PROFILES,
+                List.of(MavenCoordinate.zero("zero-runtime-data"))));
         provider(model, LOCAL_CACHE, CACHE_SERVICE);
         provider(model, LOCAL_MONITOR, MONITOR_RUNTIME);
     }
@@ -162,7 +167,7 @@ public final class StandardRuntimeCapabilityModel {
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_MONGO_DATA,
                 List.of(DATA_SERVICES, REPOSITORY_SOURCES),
-                List.of(),
+                List.of(EXECUTORS),
                 EXTERNAL_PROFILES,
                 List.of(MavenCoordinate.zero("zero-runtime-mongo"))));
         model.provider(new RuntimeProviderCapability(
@@ -186,7 +191,7 @@ public final class StandardRuntimeCapabilityModel {
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_POSTGRESQL_DATA,
                 List.of(DATA_SERVICES, REPOSITORY_SOURCES),
-                List.of(),
+                List.of(EXECUTORS),
                 EXTERNAL_PROFILES,
                 List.of(MavenCoordinate.zero("zero-runtime-postgresql"))));
         model.provider(new RuntimeProviderCapability(
@@ -198,7 +203,7 @@ public final class StandardRuntimeCapabilityModel {
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_REDIS_DATA,
                 List.of(DATA_SERVICES, REPOSITORY_SOURCES),
-                List.of(REDIS_RESOURCE),
+                List.of(REDIS_RESOURCE, EXECUTORS),
                 EXTERNAL_PROFILES,
                 List.of(MavenCoordinate.zero("zero-runtime-redis"))));
         model.provider(new RuntimeProviderCapability(

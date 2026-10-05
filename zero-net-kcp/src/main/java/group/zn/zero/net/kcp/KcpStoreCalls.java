@@ -24,7 +24,7 @@ final class KcpStoreCalls {
                 else try { loop.execute(finish); }
                 catch (RuntimeException rejected) { timeout.cancel(false); result.completeExceptionally(rejected); }
             });
-        } catch (RuntimeException failure) { timeout.cancel(false); result.completeExceptionally(failure); }
+        } catch (RuntimeException | Error failure) { timeout.cancel(false); result.completeExceptionally(failure); }
         return result;
     }
 }

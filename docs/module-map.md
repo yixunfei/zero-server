@@ -1,5 +1,9 @@
 # zeroServer 模块图
 
+2026-10-05 性能入口：`zero-data/envelope` 强制注入 IO executor，Store SPI 增加批量和分页，`persistence` 提供跨键在途预算；生产三驱动覆盖分块协议。`zero-data-postgresql/PostgresqlPool` 统一 HikariCP，依赖由 runtime 下移到数据 Adapter；外部 DataSource 保持调用方所有权。`zero-runtime-bootstrap/ZeroRuntimeExecutors.remoteIo` 提供受管虚拟线程 IO，production 便利工厂默认采用该入口。`zero-state-sync/SyncPayloadHash、PreparedSyncPayload` 支持一次准备共享摘要；`zero-net-kcp/KcpProtectionStrategies` 复用 Context 原语。`zero-runtime-kafka` 负责成功计数和实例独占 reply 路由。core 不引入具体驱动，迁移与风险见[说明](migrations/20261005-performance-issues.zh-CN.md)。
+
+2026-10-03 并发审计：`CacheKeyOperations` 统一同键物理写顺序、写准入与非递归完成；`InMemoryFencedStateStore` 只组合本地 ownership 并原子验证/写入；PostgreSQL Adapter 保留 epoch 历史并在锁后重查幂等收据。`KafkaRpcTimeoutWheel` 按令牌回收记录，`KcpDispatch` 将外部调用移出调度锁。运行时依赖方向不变。`zero-benchmarks` 新增仅用于证据的 `zero-room` 依赖及 `RoomCommandAllocationProbe`，运行时不得反向依赖。常改位置、行为与风险见[迁移说明](migrations/20261003-concurrency-async-performance.zh-CN.md)。
+
 2026-09-30 易用性基础：`zero-core/config/ConfigLookup` 与 `SourcedZeroConfig` 统一候选读取及来源；runtime 的 `RuntimeAssemblyPlan.configuration` 保存同次解析的安全快照，`RuntimeAssemblyDiagnosis` 统一生成入口。`zero-codegen/scaffold/ScaffoldCatalogFile` 显式读取版本化 JSON，并贯通 CLI、生成、升级。依赖方向不变（codegen → runtime → core），核心不引入 JSON/驱动；常改位置为上述类型、ScaffoldAssemblyRenderer 和 templates。来源优先级与公共 API 风险见[迁移说明](migrations/20260930-flexibility-foundation.zh-CN.md)。
 
 2026-09-30 通用 ownership 基础设施：`zero-ownership` 定义资源 generation、进程 incarnation、lease/epoch、fenced state CAS、requestId 幂等、owner 路由、带 checkpoint 元数据的迁移恢复及有界容量契约，并提供仅用于单进程原型/测试的内存实现。`zero-ownership-postgresql` 独立实现 ownership/state/migration/route 存储，复用应用提供的 DataSource 和 payload codec；JDBC 驱动仅由该 Adapter 引入。依赖方向为可选业务/组合根 → ownership API，PostgreSQL Adapter → ownership API；核心、Room、World 不反向绑定具体存储或彼此依赖。常见修改位置是 `zero-ownership`、`zero-ownership-postgresql` 与迁移说明。单实例外部测试已通过；schema migration 生命周期、数据库复制集切换、消息 transport、跨机房及生产容量仍需应用选择并验证，生产就绪为 false。

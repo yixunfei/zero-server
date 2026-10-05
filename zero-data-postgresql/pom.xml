@@ -17,6 +17,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <version>${hikari.version}</version>
+        </dependency>
+        <dependency>
             <groupId>group.zn.zero</groupId>
             <artifactId>zero-data</artifactId>
         </dependency>

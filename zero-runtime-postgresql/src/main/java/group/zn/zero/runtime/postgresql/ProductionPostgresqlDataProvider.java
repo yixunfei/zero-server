@@ -4,6 +4,7 @@ import group.zn.zero.data.postgresql.PostgresqlDataAdapter;
 import group.zn.zero.data.repository.RepositorySource;
 import group.zn.zero.data.postgresql.PostgresqlDriverSettings;
 import group.zn.zero.runtime.api.ComponentId;
+import group.zn.zero.runtime.bootstrap.RuntimeBasics;
 import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
 import group.zn.zero.runtime.config.ConfigKey;
 import group.zn.zero.runtime.config.ConfigSchema;
@@ -79,6 +80,7 @@ final class ProductionPostgresqlDataProvider implements RuntimeComponentProvider
     private final ComponentDescriptor descriptor = ComponentDescriptor.builder(ID)
             .provide(DataRuntime.DATA_SERVICES)
             .provide(DataRuntime.REPOSITORY_SOURCES)
+            .require(RuntimeBasics.EXECUTORS)
             .configSchema(CONFIG_SCHEMA)
             .kind(ComponentKind.EXTERNAL)
             .health(HealthPhase.STARTUP)
@@ -161,11 +163,16 @@ final class ProductionPostgresqlDataProvider implements RuntimeComponentProvider
     public ComponentContribution create(final ComponentCreationContext context) {
         Objects.requireNonNull(context, "context");
         try {
+            var executors = context.require(RuntimeBasics.EXECUTORS);
+            if (executors.remoteIoMayInline()) {
+                throw new IllegalStateException("postgresql repositories require non-inline remote IO execution");
+            }
             PostgresqlDataAdapter createdAdapter = new PostgresqlDataAdapter();
             diagnostic.mark(ZeroProductionAdapterState.CREATED);
             var pool = context.resources().register(PostgresqlConnectionPool.create(
                     settings, maximumConnections, startupBudget.adapterBudget()));
-            var repositories = context.resources().register(createdAdapter.repositoryFactory(pool, settings.tableName()));
+            var repositories = context.resources().register(createdAdapter.repositoryFactory(
+                    pool, settings.tableName(), executors.remoteIoExecutor()));
             return ComponentContribution.builder()
                     .contribute(DataRuntime.DATA_SERVICES, createdAdapter)
                     .contribute(DataRuntime.REPOSITORY_SOURCES, new RepositorySource("postgresql", repositories))

@@ -23,6 +23,10 @@
     <dependencies>
         <dependency>
             <groupId>group.zn.zero</groupId>
+            <artifactId>zero-room</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
             <artifactId>zero-protocol</artifactId>
         </dependency>
         <dependency>

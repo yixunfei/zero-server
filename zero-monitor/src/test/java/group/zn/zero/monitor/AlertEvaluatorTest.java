@@ -1,6 +1,7 @@
 package group.zn.zero.monitor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
@@ -9,6 +10,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -92,5 +94,50 @@ class AlertEvaluatorTest {
         now.set(now.get().plusSeconds(31));
         assertEquals(1, evaluator.evaluate(registry).size());
         assertTrue(evaluator.evaluate(registry).isEmpty());
+    }
+
+    /** A failed sink must not silently suppress the alert on the next evaluation. */
+    @Test
+    void failedPublicationShouldRemainEligibleForRetry() {
+        InMemoryMetricRegistry registry = new InMemoryMetricRegistry();
+        registry.register(new MetricDefinition("zero_test_alert", "test", "count", List.of()));
+        registry.record(new MetricSample("zero_test_alert", 2, Map.of(), Instant.EPOCH));
+        AlertRule rule = new AlertRule("TestAlert", "zero_test_alert", AlertCondition.GREATER_THAN,
+                1, AlertSeverity.WARNING, Map.of(), Duration.ZERO, "test");
+        AtomicInteger attempts = new AtomicInteger();
+        AlertSink sink = event -> {
+            if (attempts.incrementAndGet() == 1) {
+                throw new IllegalStateException("temporary sink failure");
+            }
+        };
+        AlertEvaluator evaluator = new AlertEvaluator(List.of(rule), List.of(sink));
+
+        assertThrows(IllegalStateException.class, () -> evaluator.evaluate(registry));
+        assertEquals(1, evaluator.evaluate(registry).size());
+        assertEquals(2, attempts.get());
+    }
+
+    /** A later sink failure retries the whole event, including sinks that already returned. */
+    @Test
+    void laterSinkFailureShouldRetryWholeEvent() {
+        InMemoryMetricRegistry registry = new InMemoryMetricRegistry();
+        registry.register(new MetricDefinition("zero_test_alert", "test", "count", List.of()));
+        registry.record(new MetricSample("zero_test_alert", 2, Map.of(), Instant.EPOCH));
+        AlertRule rule = new AlertRule("TestAlert", "zero_test_alert", AlertCondition.GREATER_THAN,
+                1, AlertSeverity.WARNING, Map.of(), Duration.ZERO, "test");
+        InMemoryAlertSink first = new InMemoryAlertSink();
+        AtomicInteger laterAttempts = new AtomicInteger();
+        AlertSink later = event -> {
+            if (laterAttempts.incrementAndGet() == 1) {
+                throw new IllegalStateException("temporary sink failure");
+            }
+        };
+        AlertEvaluator evaluator = new AlertEvaluator(List.of(rule), List.of(first, later));
+
+        assertThrows(IllegalStateException.class, () -> evaluator.evaluate(registry));
+        assertEquals(1, evaluator.evaluate(registry).size());
+        assertTrue(evaluator.evaluate(registry).isEmpty());
+        assertEquals(2, first.events().size());
+        assertEquals(2, laterAttempts.get());
     }
 }

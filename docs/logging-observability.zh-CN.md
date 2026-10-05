@@ -1,5 +1,11 @@
 # 日志与可观测性设计
 
+## 2026-10-05 Kafka 成功事件开销
+
+默认 production `KafkaProductionTelemetryObserver` 在创建日志记录前省略 STARTED/SUCCESS，成功调用与 pending 状态由既有 transport snapshot 计数观测。失败、超时、拒绝和降级仍同步进入 LogPipeline，绑定 ErrorCode，不记录业务异常原文或 payload。处理器前后两次安全校验保护不同信任边界，继续保留。
+
+本次没有新增异步批量 sink；失败事件的同步开销仍需控制异常风暴容量。需要逐调用成功日志时显式装配受控 observer，迁移及真实 broker 验证见[说明](migrations/20261005-performance-issues.zh-CN.md)。
+
 ## 2026-09-28 KCP 遥测
 
 可选 zero-runtime-kcp 对接已有 MetricRegistry，每秒在后台执行域采样。zero_kcp_* 覆盖授权/绑定数、数据报、错误、固定关闭/拒绝原因、算法更新/flush 和预算。
@@ -109,7 +115,9 @@ processor 无法绕过终端复验；附加 `SensitiveFieldPolicy` 只能增加�
 
 同名同定义注册幂等；同名不同定义拒绝。全局策略禁止 TraceId、SpanId、玩家/账号/连接/请求/房间/场景/目标/操作者/审批标识、token、IP 和 remote address 类标签，也禁止完整 IPv4/IPv6 标签值。`MetricLabelPolicy` 只能收紧该底线。
 
-`PrometheusExporter` 按定义中的标签顺序输出，显式处理 `NaN / +Inf / -Inf`，不会静默忽略非法样本。`MonitorRuntime.collectOnce()` 返回包含系统探针报告和告警事件的 `MonitorCollectionResult`；单探针失败只保留探针枚举和异常类型名。
+`PrometheusExporter` 按定义中的标签顺序输出，显式处理 `NaN / +Inf / -Inf`，不会静默忽略非法样本。每次抓取对同名、同标签序列只输出样本时间最新的一条；时间相同则以较晚记录为准，本地注册表的有界历史保留。`MonitorRuntime.collectOnce()` 返回包含系统探针报告和告警事件的 `MonitorCollectionResult`；单探针失败只保留探针枚举和异常类型名。
+
+`AlertEvaluator` 仅在整条事件交付给全部 sink 后标记已告警。sink 抛错会使当前评估失败；条件持续满足时，下次评估重试整条事件。已成功的前序 sink 可能收到重复事件，接入方需按告警身份自行处理重复。
 
 推荐本地调用链：
 

@@ -16,6 +16,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import redis.clients.jedis.RedisClient;
 
@@ -114,15 +115,23 @@ public final class RedisKcpSessionStore implements KcpSessionStore {
     private <T> CompletionStage<T> submit(final Supplier<T> action) {
         if (!pending.tryAcquire()) return CompletableFuture.failedFuture(new java.util.concurrent.RejectedExecutionException("Redis KCP queue full"));
         var result = new CompletableFuture<T>(); Thread caller = Thread.currentThread();
+        var submitting = new AtomicBoolean(true);
         try {
             executor.execute(() -> {
+                T value = null;
+                Throwable failure = null;
                 try {
-                    if (Thread.currentThread() == caller) throw new IllegalStateException("Redis executor must not run inline");
-                    result.complete(action.get());
-                } catch (RuntimeException failure) { result.completeExceptionally(failure); }
+                    if (Thread.currentThread() == caller && submitting.get()) {
+                        throw new IllegalStateException("Redis executor must not run inline");
+                    }
+                    value = action.get();
+                } catch (RuntimeException | Error actionFailure) { failure = actionFailure; }
                 finally { pending.release(); }
+                // 完成回调可以立即提交下一步存储操作，必须先归还已经结束的 IO 许可。
+                if (failure == null) result.complete(value); else result.completeExceptionally(failure);
             });
-        } catch (RuntimeException failure) { pending.release(); result.completeExceptionally(failure); }
+        } catch (RuntimeException | Error failure) { pending.release(); result.completeExceptionally(failure); }
+        finally { submitting.set(false); }
         return result.minimalCompletionStage();
     }
     private static boolean success(final Object result) { return result instanceof Number value && value.longValue() == 1; }

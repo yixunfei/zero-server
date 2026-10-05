@@ -17,9 +17,12 @@ class PostgresqlEnvelopeContractExternalIT {
     /** 外部依赖不可用时失败，避免将跳过误认为契约通过。 */
     @Test void realDriverContract() {
         String namespace = "audit" + UUID.randomUUID().toString().replace("-", "");
-        var store = new PostgresqlDriverEnvelopeStore(namespace, "contract", PostgresqlDriverSettings.fromSystemProperties());
-        try { verify(store, namespace); }
-        finally { store.deleteById("p"); }
+        var settings = PostgresqlDriverSettings.fromSystemProperties();
+        try (var pool = PostgresqlPool.create(settings, 4, java.time.Duration.ofSeconds(3))) {
+            var store = new PostgresqlDriverEnvelopeStore(namespace, "contract", settings.tableName(), pool);
+            try { verify(store, namespace); }
+            finally { store.deleteById("p"); }
+        }
     }
 
     /** 同一断言同时校验内存模拟，防止测试环境接受生产不允许的版本回退。 */

@@ -3,6 +3,9 @@ package group.zn.zero.rpc.kafka;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -12,8 +15,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * Kafka RPC pending 请求超时时间轮。
  *
  * <p>该实现使用外部受管计时器按固定 tick 扫描桶位，避免为每个 pending 请求创建
- * {@code ScheduledFuture}。完成或失败的请求不需要从桶内移除，超时回调触发时由 pending 表
- * 自身做幂等删除。</p>
+ * {@code ScheduledFuture}。每个登记返回可取消的桶记录，完成、失败或取消时立即以 O(1)
+ * 移除，避免长超时和高吞吐使已完成记录绕过 pending 容量限制。</p>
  *
  * @author zn
  */
@@ -57,7 +60,7 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
     /**
      * 时间轮桶数组。
      */
-    private final ArrayDeque<TimeoutTask>[] buckets;
+    private final Map<Long, TimeoutTask>[] buckets;
 
     /**
      * 是否正在运行。
@@ -109,9 +112,9 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
         this.tickNanos = Math.max(1L, currentTickDuration.toNanos());
         this.wheelSize = wheelSize;
         this.timeoutHandler = Objects.requireNonNull(timeoutHandler, "timeoutHandler");
-        this.buckets = (ArrayDeque<TimeoutTask>[]) new ArrayDeque<?>[wheelSize];
+        this.buckets = (Map<Long, TimeoutTask>[]) new Map<?, ?>[wheelSize];
         for (int index = 0; index < wheelSize; index++) {
-            buckets[index] = new ArrayDeque<>();
+            buckets[index] = new HashMap<>();
         }
         this.ticking = Objects.requireNonNull(timer, "timer").scheduleWithFixedDelay(
                 this::tick, tickNanos, tickNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
@@ -124,21 +127,48 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
      * @param timeoutAt 超时时间；不可为空。
      * @throws NullPointerException 当关联 ID 或超时时间为空时抛出。
      */
-    void schedule(final String correlationId, final Instant timeoutAt, final long token) {
+    TimeoutTask schedule(final String correlationId, final Instant timeoutAt, final long token) {
         Objects.requireNonNull(correlationId, "correlationId");
         Objects.requireNonNull(timeoutAt, "timeoutAt");
+        TimeoutTask task = new TimeoutTask(correlationId, timeoutAt.toEpochMilli(), token);
+        enqueue(task);
+        return task;
+    }
+
+    /** 同一记录的重排与取消串行；桶扫描不持有记录锁，避免锁顺序反转。 */
+    private void enqueue(final TimeoutTask task) {
+        synchronized (task) {
+            if (task.cancelled) return;
+            enqueueActive(task);
+        }
+    }
+
+    private void enqueueActive(final TimeoutTask task) {
         while (running.get()) {
-            long delayMillis = Math.max(1L, timeoutAt.toEpochMilli() - System.currentTimeMillis());
+            long delayMillis = Math.max(1L, task.deadlineMillis() - System.currentTimeMillis());
             long delayTicks = Math.max(1L, divideCeil(delayMillis, tickMillis)) + 1L;
             long tick = currentTick.get();
             long rounds = (delayTicks - 1L) / wheelSize;
-            ArrayDeque<TimeoutTask> bucket = buckets[bucketIndex(tick + delayTicks)];
+            Map<Long, TimeoutTask> bucket = buckets[bucketIndex(tick + delayTicks)];
             synchronized (bucket) {
                 if (!running.get()) return;
                 // 等待桶锁期间时间轮可能已经扫描目标桶，重新选桶避免多等一轮。
                 if (currentTick.get() != tick) continue;
-                bucket.addLast(new TimeoutTask(correlationId, timeoutAt.toEpochMilli(), rounds, token));
+                task.remainingRounds = rounds;
+                task.bucket = bucket;
+                bucket.put(task.token(), task);
                 return;
+            }
+        }
+    }
+
+    /** 取消指定登记，立即释放桶记录；与重排并发安全，不影响复用 correlationId 的请求。 */
+    void cancel(final TimeoutTask task) {
+        if (task == null) return;
+        synchronized (task) {
+            task.cancelled = true;
+            if (task.bucket != null) {
+                synchronized (task.bucket) { task.bucket.remove(task.token(), task); }
             }
         }
     }
@@ -152,7 +182,7 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
             return;
         }
         ticking.cancel(false);
-        for (ArrayDeque<TimeoutTask> bucket : buckets) {
+        for (Map<Long, TimeoutTask> bucket : buckets) {
             synchronized (bucket) {
                 bucket.clear();
             }
@@ -167,28 +197,27 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
     }
 
     private void expireBucket(final int bucketIndex, final long nowMillis) {
-        ArrayDeque<TimeoutTask> bucket = buckets[bucketIndex];
+        Map<Long, TimeoutTask> bucket = buckets[bucketIndex];
         ArrayDeque<TimeoutTask> dueTasks = new ArrayDeque<>();
-        ArrayDeque<TimeoutTask> postponedTasks = new ArrayDeque<>();
         synchronized (bucket) {
-            int size = bucket.size();
-            for (int index = 0; index < size; index++) {
-                TimeoutTask task = bucket.removeFirst();
+            Iterator<TimeoutTask> iterator = bucket.values().iterator();
+            while (iterator.hasNext()) {
+                TimeoutTask task = iterator.next();
                 if (task.remainingRounds() > 0L) {
                     task.decreaseRemainingRounds();
-                    postponedTasks.addLast(task);
                 } else {
+                    iterator.remove();
                     dueTasks.addLast(task);
                 }
             }
-            bucket.addAll(postponedTasks);
         }
         while (running.get() && !dueTasks.isEmpty()) {
             TimeoutTask task = dueTasks.removeFirst();
+            if (task.cancelled) continue;
             if (nowMillis >= task.deadlineMillis()) {
                 notifyTimeout(task);
             } else {
-                schedule(task.correlationId(), Instant.ofEpochMilli(task.deadlineMillis()), task.token());
+                enqueue(task);
             }
         }
     }
@@ -232,7 +261,13 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
      *
      * @author zn
      */
-    private static final class TimeoutTask {
+    static final class TimeoutTask {
+
+        /** 所属桶；只在记录锁内变更和读取。 */
+        private Map<Long, TimeoutTask> bucket;
+
+        /** 取消在记录锁内写入，桶扫描在锁外读取。 */
+        private volatile boolean cancelled;
 
         /**
          * correlationId。
@@ -259,17 +294,14 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
          *
          * @param correlationId 关联 ID；不可为空。
          * @param deadlineMillis 超时时间戳，单位毫秒。
-         * @param remainingRounds 剩余轮数。
          * @param token pending 内部令牌。
          */
         private TimeoutTask(
                 final String correlationId,
                 final long deadlineMillis,
-                final long remainingRounds,
                 final long token) {
             this.correlationId = Objects.requireNonNull(correlationId, "correlationId");
             this.deadlineMillis = deadlineMillis;
-            this.remainingRounds = remainingRounds;
             this.token = token;
         }
 

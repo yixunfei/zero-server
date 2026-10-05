@@ -78,9 +78,27 @@ public final class RedisDistributedCacheService<K, V> implements CacheService<K,
      */
     public RedisDistributedCacheService(final String backendName, final CachePolicy policy,
             final CacheStore<K, V> redisStore, final boolean cacheLoadedValueOnBackendFailure) {
+        this(backendName, policy, redisStore, cacheLoadedValueOnBackendFailure, Duration.ZERO);
+    }
+
+    /**
+     * 创建带 L2 读取故障冷却窗口的 Redis 门面。
+     *
+     * <p>冷却窗口内 L1 未命中会快速失败，从而避免 Redis 故障把每个请求都穿透到数据库。
+     * 旧构造器保持兼容并使用 {@link Duration#ZERO}；生产装配应显式选择正的窗口时长。
+     *
+     * @param backendName 后端名称；不可为空。
+     * @param policy 缓存策略；不可为空。
+     * @param redisStore Redis 二级缓存；可为空，空时只使用 L1。
+     * @param cacheLoadedValueOnBackendFailure true 允许正负加载结果回填 L1。
+     * @param l2FailureCooldown L2 读失败后的冷却时长；不可为负。
+     */
+    public RedisDistributedCacheService(final String backendName, final CachePolicy policy,
+            final CacheStore<K, V> redisStore, final boolean cacheLoadedValueOnBackendFailure,
+            final Duration l2FailureCooldown) {
         this.backendName = Objects.requireNonNull(backendName, "backendName");
         this.delegate = new LayeredCacheService<>(Objects.requireNonNull(policy, "policy"), redisStore,
-                cacheLoadedValueOnBackendFailure);
+                cacheLoadedValueOnBackendFailure, Objects.requireNonNull(l2FailureCooldown, "l2FailureCooldown"));
     }
 
     /** 重试待回填缓存；须在受管 IO 执行域调用。

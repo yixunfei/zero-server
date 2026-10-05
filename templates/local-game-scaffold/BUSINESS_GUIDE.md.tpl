@@ -11,17 +11,20 @@ Use this project to understand the smallest business loop for:
 - Protocol file: `__PROTOCOL_FILE__`
 - Expected run summary: `__SUMMARY_PREFIX__`
 
-Read these files in order:
+Use this order for the first change:
 
 1. `README.md` for run commands.
-2. `BUSINESS_GUIDE.md` for business editing points.
-3. `COMPONENTS.md` for framework component boundaries.
-4. `NEXT_STEPS.md` for production promotion gaps and high-risk stop points.
-5. `zero-scaffold.json` for machine-readable scaffold metadata.
+2. Edit the handwritten business files below.
+3. Run the checks in `Local Verification` below.
+
+Read `COMPONENTS.md` and `NEXT_STEPS.md` when you need framework boundaries or a promotion checklist.
+`zero-scaffold.json` is machine-readable metadata for tools; it is not required for the first run.
 
 ## 2. Where To Write Business Logic
 
-Start with:
+For the first demo change, start with `__APP_CLASS__.java` and `__TEST_CLASS__.java` (see `First Business Change`). The demo currently registers its own nested `LocalGameBO` fixture.
+
+For reusable asynchronous business handlers, use the separate files:
 
 ~~~text
 src/main/java/__PACKAGE_PATH__/LocalGameBO.java
@@ -30,7 +33,7 @@ src/main/java/__PACKAGE_PATH__/LocalGameFixture.java
 src/main/java/__PACKAGE_PATH__/LocalGameObservation.java
 ~~~
 
-`__APP_CLASS__.java` is the composition root only. `LocalGameBO` adapts generated protocol events to injected asynchronous business ports. Services return `CompletionStage`; handlers must compose stages and must not call `join()` or `get()`.
+The separate `LocalGameBO.java` adapts generated protocol events to injected asynchronous business ports. Services return `CompletionStage`; handlers must compose stages and must not call `join()` or `get()`. Changes to this separate adapter do not automatically change the demo's nested fixture.
 
 The local fixture explicitly selects `MissingPlayerPolicy.CREATE_DEFAULT` to create prototype players. The framework default is `REJECT`. When connecting an account system, register player profiles through your repository before login, use the default rejection policy, and implement authentication and account-to-UID authorization in the business boundary.
 
@@ -43,13 +46,13 @@ __PROTOCOL_FILE__
 src/main/protocol/protoId.txt
 ~~~
 
-After changing protocol files, run:
+After changing protocol files, run from the zeroServer repository root (replace the project path):
 
 ~~~powershell
-mvn -q generate-sources
+./mvnw.cmd -q -f "path/to/__PROJECT_NAME__/pom.xml" generate-sources
 ~~~
 
-Generated sources are written to:
+On Linux/macOS use `./mvnw`. Generated sources are written to:
 
 ~~~text
 target/generated-sources/zero-codegen
@@ -59,21 +62,19 @@ Treat generated files as output. Put business behavior in handwritten code, not 
 
 ## 4. Local Verification
 
-From the generated project directory:
+From the zeroServer repository root, test and run with the bundled Wrapper:
 
 ~~~powershell
-mvn -q clean test
-mvn -q exec:java
+java scripts/RunLocalScaffold.java --projectDir "path/to/__PROJECT_NAME__"
 ~~~
 
-From the zeroServer repository root:
+For a test-only feedback loop from the repository root:
 
 ~~~powershell
-java scripts/InspectLocalScaffold.java --projectDir path/to/__PROJECT_NAME__
-java scripts/RunLocalScaffold.java --projectDir path/to/__PROJECT_NAME__
+./mvnw.cmd -q -f "path/to/__PROJECT_NAME__/pom.xml" test
 ~~~
 
-Open a GitHub Design Proposal before extracting a formal module or changing a public contract.
+On Linux/macOS use `./mvnw`. With Maven 3.9+ on PATH, you may also run `mvn -q test` and `mvn -q exec:java` inside the generated project.
 
 For a fast structure-only check, use:
 
@@ -86,7 +87,7 @@ java scripts/RunLocalScaffold.java --projectDir path/to/__PROJECT_NAME__ --skipT
 Good first changes:
 
 - Add a new request to `__PROTOCOL_FILE__`.
-- Add or extend a handwritten BO handler in `__APP_CLASS__`.
+- Extend a demo handler in `__APP_CLASS__`, or a reusable asynchronous handler in the separate `LocalGameBO.java`.
 - Add assertions to `src/test/java/__PACKAGE_PATH__/__TEST_CLASS__.java`.
 - Add local log or metric samples through existing framework components.
 
@@ -100,15 +101,15 @@ Avoid in this local scaffold:
 
 ## 6. First Business Change
 
-A safe first change for the local RPG-style scaffold is to add one small player action.
+A first change can use the existing move request without adding a protocol:
 
 Suggested path:
 
-1. Add a new request to `__PROTOCOL_FILE__`, for example a `sayHello(uid, message, traceId)` or `collectItem(uid, itemId, traceId)` command.
-2. Reserve a protocol id in `src/main/protocol/protoId.txt`.
-3. Run `mvn -q generate-sources`.
-4. Implement the generated BO method in `__APP_CLASS__`.
-5. Add one assertion to `__TEST_CLASS__` that checks the returned summary, log count or metric count.
+1. In `src/main/java/__PACKAGE_PATH__/__APP_CLASS__.java`, find `moveRequest()` and change `request.x = 3` / `request.y = 5` to `4` / `6`.
+2. Run the test-only command above and observe the position assertions fail.
+3. Update the expected position in `src/test/java/__PACKAGE_PATH__/__TEST_CLASS__.java` to `(4, 6)`, then test and run again. The summary should contain `position=4,6`.
+
+To add a new player action later, add a request to `__PROTOCOL_FILE__`, reserve its protocol id in `src/main/protocol/protoId.txt`, and regenerate sources. Implement its generated event interface in a handwritten handler and register that handler with the generated dispatcher. The demo uses `registerHandlers()` in `__APP_CLASS__.java`; reusable flows use `LocalGameFlow.java`.
 
 Keep the first change local and deterministic. Do not add account authentication, durable online state or external persistence from inside this scaffold.
 

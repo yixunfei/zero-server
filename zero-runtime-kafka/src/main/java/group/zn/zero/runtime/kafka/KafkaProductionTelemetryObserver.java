@@ -17,13 +17,14 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * production Kafka RPC 传输事件安全日志桥。
+ * production Kafka RPC 异常传输事件安全日志桥。
  *
  * <p>该桥只写入固定消息和枚举派生的低基数字段，不读取或复制事件携带的 message、attributes、
  * transportName、correlationId、serviceName、methodName、topic 或 group。TraceId 只取自事件
  * traceId，缺失时使用固定安全值；失败事件优先保留事件绑定的真实 {@link ErrorCode}。</p>
  *
- * <p>该类不创建线程、不修改业务数据；{@link #onEvent(RpcTransportEvent)} 同步调用注入的
+ * <p>开始与成功事件仅由 transport 的计数器观测，不创建日志记录。失败、超时、拒绝和降级事件
+ * 仍保留 ErrorCode 和安全结构化日志。该类不创建线程、不修改业务数据；异常事件同步调用注入的
  * {@link LogAppender}，线程安全性和阻塞特征由该 appender 保证。</p>
  *
  * @author zn
@@ -59,7 +60,7 @@ public final class KafkaProductionTelemetryObserver implements RpcTransportObser
     }
 
     /**
-     * 将单个 RPC 传输事件转换为不含事件原始业务值的结构化日志。
+     * 将异常 RPC 传输事件转换为不含事件原始业务值的结构化日志；忽略成功与开始事件。
      *
      * <p>该方法不修改事件或业务数据。失败型事件缺少 ErrorCode 时，会按事件类型绑定稳定的
      * {@link RpcErrorCode}；成功和开始型事件不复制偶然携带的 ErrorCode。</p>
@@ -73,6 +74,9 @@ public final class KafkaProductionTelemetryObserver implements RpcTransportObser
         RpcTransportEvent current = Objects.requireNonNull(event, "event");
         RpcTransportEventType eventType = current.type();
         LogResult result = logResult(eventType);
+        if (result == LogResult.STARTED || result == LogResult.SUCCESS) {
+            return;
+        }
         ErrorCode errorCode = errorCode(current, result);
         logAppender.append(ZeroLogRecord.create(
                 current.time(),

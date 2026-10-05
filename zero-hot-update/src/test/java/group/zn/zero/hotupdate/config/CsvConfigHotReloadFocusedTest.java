@@ -24,6 +24,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -42,6 +43,20 @@ class CsvConfigHotReloadFocusedTest {
      */
     @TempDir
     private Path tempDirectory;
+
+    /** 生命周期线程等待 IO 时，IO 回调查询配置表目录不得反向等待生命周期锁。 */
+    @Test
+    void tableDirectoryCanBeReadWhileLifecycleMonitorIsHeld() throws Exception {
+        LocalConfigHotReloadService service = service(ConfigReloadObserver.noOp());
+        service.register(definition(tempDirectory.resolve("items.csv")));
+        try (ExecutorService reader = Executors.newSingleThreadExecutor()) {
+            CompletableFuture<Set<String>> result;
+            synchronized (service) {
+                result = CompletableFuture.supplyAsync(service::registeredTableNames, reader);
+                assertEquals(Set.of("items"), result.get(2, TimeUnit.SECONDS));
+            }
+        }
+    }
 
     /**
      * CFHR-01：验证 UTF-8 BOM、RFC 4180 逗号与引号内换行。

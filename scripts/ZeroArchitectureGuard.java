@@ -125,7 +125,7 @@ public final class ZeroArchitectureGuard {
 
     /** benchmark 允许直接依赖的框架运行时模块。 */
     private static final Set<String> BENCHMARK_RUNTIME_MODULES = Set.of(
-            "zero-protocol", "zero-ranking", "zero-actor", "zero-cache", "zero-aoi", "zero-frame-sync", "zero-scene",
+            "zero-protocol", "zero-ranking", "zero-actor", "zero-cache", "zero-aoi", "zero-frame-sync", "zero-scene", "zero-room",
             "zero-log",
             "zero-monitor",
             "zero-net",

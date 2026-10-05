@@ -5,8 +5,13 @@ import group.zn.zero.data.envelope.ZeroDataEnvelope;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeCodec;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeStore;
 import group.zn.zero.data.error.DataErrorCode;
+import group.zn.zero.data.model.PageRequest;
+import group.zn.zero.data.model.PageResult;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -18,6 +23,9 @@ import redis.clients.jedis.RedisClient;
  * @author zn
  */
 public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
+
+    /** 单次 pipeline 的有界操作数。 */
+    private static final int BATCH_SIZE = 256;
 
     /**
      * Redis 条件保存脚本。
@@ -159,8 +167,64 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
      */
     @Override
     public List<ZeroDataEnvelope> findAll() {
+        return findByIds(boundedIds());
+    }
+
+    /** 按桶分组 MGET 并 pipeline；结果不可变，保持输入顺序和重复项，省略缺失项。 */
+    @Override
+    public List<ZeroDataEnvelope> findByIds(final Collection<String> ids) {
+        List<String> current = List.copyOf(ids);
+        var found = new HashMap<String, ZeroDataEnvelope>();
         try {
-            java.util.Map<String, ZeroDataEnvelope> results = new java.util.LinkedHashMap<>();
+            for (int offset = 0; offset < current.size(); offset += BATCH_SIZE) {
+                var buckets = new LinkedHashMap<String, List<String>>();
+                for (String id : current.subList(offset, Math.min(offset + BATCH_SIZE, current.size()))) {
+                    buckets.computeIfAbsent(indexKey(id), ignored -> new ArrayList<>()).add(id);
+                }
+                try (var pipeline = client.pipelined()) {
+                    List<redis.clients.jedis.Response<List<byte[]>>> replies = new ArrayList<>(buckets.size());
+                    for (List<String> bucket : buckets.values()) {
+                        byte[][] keys = bucket.stream().map(id -> bytes(dataKey(id))).toArray(byte[][]::new);
+                        replies.add(pipeline.mget(keys));
+                    }
+                    pipeline.sync();
+                    for (var reply : replies) {
+                        for (byte[] value : reply.get()) {
+                            if (value != null) {
+                                ZeroDataEnvelope envelope = envelopeCodec.decode(value);
+                                found.put(envelope.id(), envelope);
+                            }
+                        }
+                    }
+                }
+            }
+            List<ZeroDataEnvelope> result = new ArrayList<>(current.size());
+            for (String id : current) {
+                if (found.containsKey(id)) result.add(found.get(id));
+            }
+            return List.copyOf(result);
+        } catch (RuntimeException failure) {
+            if (failure instanceof ZeroException zero) throw zero;
+            throw ZeroException.of(DataErrorCode.READ_FAILED, "redis batch read failed", failure);
+        }
+    }
+
+    /**
+     * 按 ID 排序的弱一致分页；有界扫描索引元数据，仅读取当前页 payload。
+     * 索引扫描沿用 100000 预算，超限明确失败；并发删除时本页可能不足 limit。
+     */
+    @Override
+    public PageResult<ZeroDataEnvelope> findPage(final PageRequest request) {
+        Objects.requireNonNull(request, "request");
+        List<String> ids = boundedIds();
+        int from = Math.min(request.offset(), ids.size());
+        int to = (int) Math.min((long) ids.size(), (long) request.offset() + request.limit());
+        return new PageResult<>(findByIds(ids.subList(from, to)), to < ids.size() ? String.valueOf(to) : null, ids.size());
+    }
+
+    private List<String> boundedIds() {
+        try {
+            java.util.Set<String> results = new java.util.TreeSet<>();
             int scanned = 0;
             for (String indexKey : boundedIndexKeys()) {
                 String cursor = "0";
@@ -170,23 +234,13 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
                     List<String> ids = page.getResult();
                     scanned += ids.size();
                     if (scanned > MAX_READ_ENTRIES) throw readLimit();
-                    for (int offset = 0; offset < ids.size(); offset += 256) {
-                        byte[][] keys = ids.subList(offset, Math.min(offset + 256, ids.size())).stream()
-                                .map(id -> bytes(dataKey(id))).toArray(byte[][]::new);
-                        if (keys.length == 0) continue;
-                        for (byte[] value : client.mget(keys)) {
-                            if (value != null) {
-                                ZeroDataEnvelope envelope = envelopeCodec.decode(value);
-                                results.put(envelope.id(), envelope);
-                            }
-                        }
-                    }
+                    results.addAll(ids);
                 } while (!"0".equals(cursor));
             }
-            return List.copyOf(results.values());
+            return List.copyOf(results);
         } catch (RuntimeException ex) {
             if (ex instanceof ZeroException zero) throw zero;
-            throw ZeroException.of(DataErrorCode.READ_FAILED, "redis read all failed", ex);
+            throw ZeroException.of(DataErrorCode.READ_FAILED, "redis index scan failed", ex);
         }
     }
 
@@ -247,6 +301,81 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
         }
         return write(validateEnvelope(envelope), expectedVersion, "cas");
     }
+
+    /** 有界 pipeline CAS；目录登记先成功，逐项结果不可变且有序，成功提交后统一本地刷盘。 */
+    @Override
+    public List<Boolean> saveIfVersionBatch(final Collection<ConditionalWrite> writes) {
+        List<ConditionalWrite> current = List.copyOf(writes);
+        for (ConditionalWrite write : current) validateEnvelope(write.envelope());
+        List<Boolean> result = new ArrayList<>(current.size());
+        try {
+            for (int offset = 0; offset < current.size(); offset += BATCH_SIZE) {
+                List<ScriptWrite> batch = new ArrayList<>();
+                for (ConditionalWrite write : current.subList(offset, Math.min(offset + BATCH_SIZE, current.size()))) {
+                    batch.add(prepareScriptWrite(write.envelope(), write.expectedVersion(), "cas"));
+                }
+                String[] buckets = batch.stream().map(ScriptWrite::indexKey).distinct().toArray(String[]::new);
+                client.sadd(collectionIndexKey(), buckets);
+                try (var pipeline = client.pipelined()) {
+                    List<redis.clients.jedis.Response<Object>> replies = new ArrayList<>(batch.size());
+                    for (ScriptWrite write : batch) replies.add(pipeline.eval(SAVE_IF_VERSION_SCRIPT, write.keys(), write.args()));
+                    pipeline.sync();
+                    result.addAll(finishScripts(replies, batch.stream().map(ScriptWrite::entry).toList(), false));
+                }
+            }
+            return List.copyOf(result);
+        } catch (RuntimeException failure) {
+            if (failure instanceof ZeroException zero) throw zero;
+            throw ZeroException.of(DataErrorCode.WRITE_FAILED, "redis batch conditional write failed", failure);
+        }
+    }
+
+    private ScriptWrite prepareScriptWrite(final ZeroDataEnvelope envelope, final long expected, final String mode) {
+        RedisDataSnapshot snapshot = RedisDataSnapshot.fromEnvelope(envelope, keyStrategy, envelopeCodec);
+        RedisDataJournalEntry entry = RedisDataJournalEntry.put(envelope, envelopeCodec);
+        return new ScriptWrite(snapshot.indexKey(),
+                List.of(bytes(snapshot.dataKey()), bytes(versionKey(snapshot.id())), bytes(snapshot.indexKey()),
+                        bytes(snapshot.journalKey())),
+                List.of(bytes(String.valueOf(expected)), bytes(String.valueOf(envelope.version())), snapshot.envelopeBytes(),
+                        bytes(snapshot.id()), journalEntryCodec.encode(entry), bytes(mode)), entry);
+    }
+
+    /** pipeline 的每项错误均检查，部分成功仍记入本地镜像，再将失败传播给调用方。 */
+    private List<Boolean> finishScripts(final List<redis.clients.jedis.Response<Object>> replies,
+                                       final List<RedisDataJournalEntry> entries, final boolean deleting) {
+        List<Boolean> result = new ArrayList<>(replies.size());
+        List<RedisDataJournalEntry> committed = new ArrayList<>();
+        RuntimeException failure = null;
+        for (int index = 0; index < replies.size(); index++) {
+            try {
+                Object value = replies.get(index).get();
+                if (deleting && value instanceof Number number && number.longValue() == -1L) {
+                    throw ZeroException.of(DataErrorCode.VERSION_CONFLICT, "redis batch delete version conflict", null);
+                }
+                if (!(value instanceof Number number) || number.longValue() < 0L || number.longValue() > 1L) {
+                    throw ZeroException.of(deleting ? DataErrorCode.DELETE_FAILED : DataErrorCode.WRITE_FAILED,
+                            "unexpected redis batch script result", null);
+                }
+                boolean success = ((Number) value).longValue() == 1L;
+                result.add(success);
+                if (success) committed.add(entries.get(index));
+            } catch (RuntimeException ex) {
+                if (failure == null) failure = ex;
+                else failure.addSuppressed(ex);
+            }
+        }
+        try {
+            if (localJournal != null) localJournal.appendAll(committed);
+        } catch (RuntimeException ex) {
+            if (failure == null) failure = ex;
+            else failure.addSuppressed(ex);
+        }
+        if (failure != null) throw failure;
+        return List.copyOf(result);
+    }
+
+    /** 内部已编码脚本项，不暴露可变字节数组。 */
+    private record ScriptWrite(String indexKey, List<byte[]> keys, List<byte[]> args, RedisDataJournalEntry entry) { }
 
     private boolean write(final ZeroDataEnvelope current, final long expectedVersion, final String mode) {
         RedisDataJournalEntry entry = RedisDataJournalEntry.put(current, envelopeCodec);
@@ -323,6 +452,35 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
                 throw zeroException;
             }
             throw ZeroException.of(DataErrorCode.DELETE_FAILED, "redis delete failed", ex);
+        }
+    }
+
+    /** 批量读当前版本后 pipeline 条件删除；不删除读后被更新的对象，成功项统一本地刷盘。 */
+    @Override
+    public void deleteAll(final Collection<String> ids) {
+        List<String> current = List.copyOf(ids);
+        try {
+            for (int offset = 0; offset < current.size(); offset += BATCH_SIZE) {
+                List<ZeroDataEnvelope> envelopes = findByIds(current.subList(offset, Math.min(offset + BATCH_SIZE, current.size())));
+                List<RedisDataJournalEntry> entries = new ArrayList<>(envelopes.size());
+                try (var pipeline = client.pipelined()) {
+                    List<redis.clients.jedis.Response<Object>> replies = new ArrayList<>(envelopes.size());
+                    for (ZeroDataEnvelope envelope : envelopes) {
+                        String id = envelope.id();
+                        RedisDataJournalEntry entry = RedisDataJournalEntry.delete(namespace, collection, id,
+                                envelope.version(), System.currentTimeMillis());
+                        entries.add(entry);
+                        replies.add(pipeline.eval(DELETE_SCRIPT,
+                                List.of(bytes(dataKey(id)), bytes(versionKey(id)), bytes(indexKey(id)), bytes(journalKey(id))),
+                                List.of(bytes(id), journalEntryCodec.encode(entry), bytes(String.valueOf(envelope.version())))));
+                    }
+                    pipeline.sync();
+                    finishScripts(replies, entries, true);
+                }
+            }
+        } catch (RuntimeException failure) {
+            if (failure instanceof ZeroException zero) throw zero;
+            throw ZeroException.of(DataErrorCode.DELETE_FAILED, "redis batch delete failed", failure);
         }
     }
 

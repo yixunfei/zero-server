@@ -36,7 +36,8 @@ class MongoDataAdapterExternalIT {
     void repositoryShouldUseRealMongoDriver() {
         MongoDriverSettings settings = MongoDriverSettings.fromSystemProperties();
         MongoDataAdapter adapter = new MongoDataAdapter();
-        try (MongoClient client = adapter.createClient(settings)) {
+        try (MongoClient client = adapter.createClient(settings);
+                var io = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
             MongoDataHealthCheck healthCheck = new MongoDataHealthCheck(client, settings.databaseName());
             assumeTrue(healthCheck.check(), "MongoDB external service is unavailable");
             ZeroDataEnvelopeCrudRepository<String, PlayerArchive> repository = adapter.registerDriverRepository(
@@ -45,7 +46,7 @@ class MongoDataAdapterExternalIT {
                     settings.databaseName(),
                     new ZeroDataMappingIntrospector().inspect(PlayerArchive.class),
                     new PlayerArchiveCodec(),
-                    1);
+                    1, io);
 
             String id = "mongo-player-" + UUID.randomUUID();
             try {

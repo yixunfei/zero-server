@@ -1,16 +1,15 @@
 # zeroServer 快速上手
 
-适用版本：`0.1.1`。先跑通业务，再选择基础设施。默认原型无外部中间件；当前能力和限制见[能力矩阵](capability-matrix.zh-CN.md)。
+适用版本：`0.1.2-SNAPSHOT`。先跑通业务，再选择基础设施。默认原型无外部中间件；当前能力和限制见[能力矩阵](capability-matrix.zh-CN.md)。
 
 ## 1. 准备环境
 
-需要 JDK 21、Maven 3.9+ 和 Git。以下命令均在仓库根目录执行，单行命令可用于 Bash 或 PowerShell。
+需要 JDK 21 和 Git。仓库 Wrapper 会准备 Maven 3.9.8，无需另装全局 Maven；首次下载 Maven 和依赖需要网络。以下命令均在仓库根目录执行，使用 Wrapper 的命令在 PowerShell 中将 `./mvnw` 换为 `./mvnw.cmd`。
 
 ```bash
 git clone https://github.com/yixunfei/zero-server.git
 cd zero-server
 java -version
-mvn -version
 java scripts/ZeroLocalDoctor.java
 ```
 
@@ -21,7 +20,7 @@ $env:JAVA_HOME='D:\path\to\jdk21'
 $env:Path="$env:JAVA_HOME\bin;$env:Path"
 ```
 
-Doctor 检查环境、模块和公开入口，不修改文件、不连接中间件。成功摘要包含 `zero-local-doctor=ok`。Wrapper 固定 Maven 3.9.8：POSIX 使用 `./mvnw`，PowerShell 使用 `.\mvnw.cmd`；它不会安装或切换 JDK，Java Runner 仍需要 PATH 上可用的 Maven。
+Doctor 检查环境、模块和公开入口，不改项目源码、不连接中间件；Wrapper 首次运行会下载 Maven 到用户缓存。成功摘要包含 `zero-local-doctor=ok`。POSIX 使用 `./mvnw`，PowerShell 使用 `.\mvnw.cmd`；Wrapper 不会安装或切换 JDK。Java Runner 默认优先使用 Wrapper，也可通过 `ZERO_MAVEN_CMD` 覆盖。
 
 <!-- ZeroFrameworkGapLedger evidence: ZeroLocalDoctor -->
 
@@ -49,7 +48,7 @@ Doctor 检查环境、模块和公开入口，不修改文件、不连接中间�
 java scripts/RunLocalPrototype.java --fromKeywords "rpg scene sync" --projectName my-game --packageName group.example.mygame
 ```
 
-Runner 检查环境、安装 SNAPSHOT、生成 `target/generated/my-game`、生成协议、执行测试和业务流程。成功摘要包含 `zero-local-prototype=ok`。默认是一次本地验证，结束后关闭资源。
+Runner 检查环境、安装 SNAPSHOT、生成 `target/generated/my-game`、生成协议、执行测试和业务流程。成功摘要包含 `zero-local-prototype-runner=ok`。默认是一次本地验证，结束后关闭资源。
 
 从生成工程开始写业务：
 
@@ -57,16 +56,18 @@ Runner 检查环境、安装 SNAPSHOT、生成 `target/generated/my-game`、生�
 | --- | --- |
 | `BUSINESS_GUIDE.md` | 第一个业务修改示例和运行步骤 |
 | `src/main/protocol/*.si` | 请求、响应、事件方法；不要复用已有协议 ID |
-| 手写 `XXXEventBOImp` | 业务实现；玩家/场景状态修改投递到所属 Actor |
+| 手写 BO（local 模板为 `LocalGameBO.java`） | 业务实现；玩家/场景状态修改投递到所属 Actor；先按业务指南区分 demo fixture 和独立异步适配器 |
 | `COMPONENTS.md`、`zero-scaffold.json` | 已选组件和生成清单 |
 
 选择指定模板或空白内核时，先安装，再生成：
 
 ```bash
-mvn -B -ntp -DskipTests install
+./mvnw -B -ntp -DskipTests install
 java scripts/NewLocalGame.java --template runtime --components event,actor --projectName my-runtime --outputDir target/my-runtime
-mvn -q -f target/my-runtime/pom.xml clean test exec:java
+./mvnw -q -f target/my-runtime/pom.xml clean test exec:java
 ```
+
+Windows PowerShell 将 `./mvnw` 替换为 `./mvnw.cmd`；`NewLocalGame`、Runner 和 Doctor 会自动优先选择对应 Wrapper。
 
 省略 `--components` 得到空白 runtime；使用 `--template local` 得到玩家/场景原型。七种业务模板、外部组件和参数详见[模板目录](scaffold-templates.zh-CN.md)，完整 Runner 选项见[原型 Runner](guides/local-prototype-runner.zh-CN.md)。
 

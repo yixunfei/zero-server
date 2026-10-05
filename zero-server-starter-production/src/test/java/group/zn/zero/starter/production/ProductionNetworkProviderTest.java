@@ -92,6 +92,7 @@ class ProductionNetworkProviderTest {
                 ProductionAdapterException.class,
                 () -> ZeroProductionRuntimeFactory.externalTestBuilder(config(Map.of(
                                 ZeroProductionRuntimeConfigKeys.NETWORK_LIFECYCLE_ENABLED, "true")))
+                        .executors(ZeroRuntimeExecutors.direct())
                         .networkPolicy((connection, frame) -> NetworkAdmissionDecision.allow())
                         .build());
 

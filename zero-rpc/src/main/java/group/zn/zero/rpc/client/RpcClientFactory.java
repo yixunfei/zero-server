@@ -331,7 +331,7 @@ public final class RpcClientFactory {
                     try {
                         result.complete(failure == null ? responseResult(descriptor, request, value)
                                 : failureResult(descriptor, request, unwrap(failure)));
-                    } catch (RuntimeException ex) {
+                    } catch (RuntimeException | Error ex) {
                         result.complete(failureResult(descriptor, request, ex));
                     }
                 });

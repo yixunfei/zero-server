@@ -23,7 +23,8 @@ GameRuntime runtime = RuntimeBasics.builder()
 MongoDB 装配（配置需显式启用 Adapter 并提供 URI、数据库）：
 
 ```java
-GameRuntime runtime = ProductionAssembly.builder(config)
+GameRuntime runtime = ProductionAssembly.builder(
+        "production", config, ZeroRuntimeExecutors.remoteIo("game"))
         .install(MongoRuntime.module())
         .install(DataRuntime.repositories(Map.of("game", "mongo")))
         .build();
@@ -52,7 +53,7 @@ BalanceService service = new BalanceService(repository);
 - 关闭工厂会等待正在执行的同步 store 操作；不同 store 访问可并行。客户端自身的超时仍需按应用要求配置。
 - 角色缺失、源名称重复、定义冲突不会隐式降级。底层存储异常经统一错误边界处理，避免输出连接信息。
 - 既有 envelope、codec 和 CAS 版本规则保持不变。成功保存推进版本，旧版本写入仍报告 `VERSION_CONFLICT`。
-- 当前工厂创建与 envelope store 调用可能同步阻塞，即使接口返回 `CompletionStage`。真实存储操作应进入受管远程 IO 执行域，不应放在 Actor 热路径。
+- Envelope CRUD 的真实存储操作提交到必填的受管 IO executor，保存快照在所属调用域编码，完成回调修改 Actor 状态前须回投。首次工厂创建仍可能同步初始化 schema，应在管理域预热。
 
 ## 4. 可运行示例
 
@@ -84,7 +85,7 @@ PostgreSQL production provider 要求 URL、用户名、密码和表名全部显
 
 PostgreSQL 集成模块使用 runtime 管理的 HikariCP 连接池，默认最多 8 个物理连接，可通过 `PostgresqlRuntime.module(16)` 调整。选择 provider 后才创建池，首次借连接时才打开物理连接；runtime 先失效 Repository 访问，再关闭池。借连接等待使用 Adapter timeout，JDBC URL 的 `connectTimeout`、`socketTimeout` 仍控制驱动连接和 socket 操作，应用需按运行要求配置。
 
-HikariCP 仅属于 `zero-runtime-postgresql` 的依赖，`zero-data-postgresql` 接收标准 `javax.sql.DataSource`。应用自带连接池时可在自定义 provider 中使用 `PostgresqlDataAdapter.repositoryFactory(dataSource, tableName)`，并由组合根登记、关闭数据源；工厂不接管调用方传入的数据源。借出的连接必须开启自动提交，手动事务连接会在执行语句前被拒绝并归还，不擅自提交调用方事务。仅传 driver settings 的直接 Adapter 入口仍按操作建连，适用于低频工具，不应作为持续请求路径。
+HikariCP 由 `zero-data-postgresql` 依赖，`PostgresqlPool` 统一池装配。应用自带连接池时可使用 `PostgresqlDataAdapter.repositoryFactory(dataSource, tableName, ioExecutor)`，由组合根登记、关闭数据源和执行器；工厂不接管注入资源。`repositoryFactory(settings, ioExecutor)` 默认最大 8 个连接、借用等待 3 秒，工厂拥有并关闭该池。借出的连接必须开启自动提交，手动事务连接会在执行语句前被拒绝并归还，不擅自提交调用方事务。所有同步驱动的 Repository/Adapter 入口现在要求显式 executor，详见[迁移说明](../migrations/20261005-performance-issues.zh-CN.md)。
 
 ## 6. 停启恢复、并发和持续运行
 

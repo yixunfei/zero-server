@@ -10,6 +10,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicLong;
+import java.time.Duration;
 
 /**
  * 本地 L1 与外部 L2 组合的缓存服务。
@@ -50,6 +51,15 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
 
     /** L2 写入失败时是否允许把 loader 结果暂存到 L1；默认关闭以避免错误负缓存。 */
     private final boolean cacheLoadedValueOnBackendFailure;
+
+    /** L2 读取失败后的单调时钟冷却窗口。 */
+    private final long l2FailureCooldownNanos;
+
+    /** 冷却窗口结束时间；0 表示当前未打开。 */
+    private final AtomicLong l2CooldownUntilNanos = new AtomicLong();
+
+    /** 冷却期间拒绝的 L2 读取次数。 */
+    private final AtomicLong l2CircuitRejectedCount = new AtomicLong();
 
     /**
      * 加载协调器。
@@ -149,10 +159,34 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
      */
     public LayeredCacheService(final CachePolicy policy, final CacheStore<K, V> l2Store,
             final boolean cacheLoadedValueOnBackendFailure) {
+        // Preserve the historical miss/fallback behavior for compatibility. Production
+        // assemblies should select a positive cooldown explicitly to prevent L2 outages
+        // from turning every miss into a backend load.
+        this(policy, l2Store, cacheLoadedValueOnBackendFailure, Duration.ZERO);
+    }
+
+    /**
+     * 创建带 L2 故障冷却窗口的分层缓存服务。
+     *
+     * <p>窗口内 L1 未命中读取会快速失败，避免 Redis 故障被放大为数据库穿透；调用方可通过
+     * {@code cacheLoadedValueOnBackendFailure} 显式选择写失败时的本地降级行为。
+     *
+     * @param policy 缓存策略；不可为空。
+     * @param l2Store 二级缓存存储；可为空。
+     * @param cacheLoadedValueOnBackendFailure 是否在 L2 写失败时回填 L1。
+     * @param l2FailureCooldown L2 读失败后的冷却时长；不可为负。
+     */
+    public LayeredCacheService(final CachePolicy policy, final CacheStore<K, V> l2Store,
+            final boolean cacheLoadedValueOnBackendFailure, final Duration l2FailureCooldown) {
         this.policy = Objects.requireNonNull(policy, "policy");
         this.l1Cache = new InMemoryCacheService<>(policy);
         this.l2Store = l2Store;
         this.cacheLoadedValueOnBackendFailure = cacheLoadedValueOnBackendFailure;
+        Duration cooldown = Objects.requireNonNull(l2FailureCooldown, "l2FailureCooldown");
+        if (cooldown.isNegative()) {
+            throw new IllegalArgumentException("l2FailureCooldown must not be negative");
+        }
+        this.l2FailureCooldownNanos = cooldown.toNanos();
         this.loadCoordinator = new CacheLoadCoordinator<>(policy.maxConcurrentLoads(), policy.loadTimeout());
     }
 
@@ -181,7 +215,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
      *
      * @param key 缓存键；不可为空。
      * @param value 缓存值；不可为空。
-     * @return 写入完成信号；不可为空；线程安全。
+     * @return 写入完成信号；不可为空；线程安全；取消只停止观察，已接受的写入仍保持同键顺序。
      */
     @Override
     public CompletionStage<Void> put(final K key, final V value) {
@@ -194,7 +228,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
      * @param key 缓存键；不可为空。
      * @param value 缓存值；不可为空。
      * @param entityVersion 实体版本；必须大于等于 0。
-     * @return 写入完成信号；不可为空；线程安全。
+     * @return 写入完成信号；不可为空；线程安全；取消只停止观察，已接受的写入仍保持同键顺序。
      */
     public CompletionStage<Void> putVersioned(final K key, final V value, final long entityVersion) {
         if (entityVersion < 0L) {
@@ -368,7 +402,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
         for (PendingWrite<K, V> pending : batch) {
             chain = chain.thenCompose(count -> retryWriteBack(pending).thenApply(saved -> count + (saved ? 1 : 0)));
         }
-        return chain.whenComplete((ignored, failure) -> retrying.set(false));
+        return chain.whenComplete((ignored, failure) -> retrying.set(false)).toCompletableFuture().copy();
     }
 
     /**
@@ -409,14 +443,50 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
         return degraded;
     }
 
+    /**
+     * 返回 L2 读取熔断是否处于冷却窗口。
+     *
+     * @return true 表示 L2 未命中读取会快速失败；线程安全。
+     */
+    public boolean l2CircuitOpen() {
+        return l2CooldownUntilNanos.get() > System.nanoTime();
+    }
+
+    /**
+     * 返回冷却期间拒绝的读取数。
+     *
+     * @return 拒绝次数；线程安全。
+     */
+    public long l2CircuitRejectedCount() {
+        return l2CircuitRejectedCount.get();
+    }
+
     private CompletionStage<Optional<CacheStoreEntry<V>>> readL2Entry(final K key,
             final CacheKeyOperations.Token<K> token) {
         if (l2Store == null) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
+        if (l2CircuitOpen()) {
+            l2CircuitRejectedCount.incrementAndGet();
+            return CompletableFuture.failedFuture(ZeroException.of(
+                    CacheErrorCode.BACKEND_UNAVAILABLE,
+                    "cache backend is in cooldown",
+                    null));
+        }
         return backend(() -> l2Store.get(key))
                 .thenApply(entry -> entry.flatMap(current -> storeL1IfCurrent(key, current, token)))
-                .exceptionally(throwable -> Optional.empty());
+                .handle((value, failure) -> {
+                    if (failure == null) {
+                        return CompletableFuture.completedFuture(value);
+                    }
+                    if (l2FailureCooldownNanos == 0L) {
+                        // Compatibility mode retains the established fail-open L2 miss
+                        // behavior. A positive cooldown explicitly changes this into a
+                        // fail-fast boundary so callers cannot amplify an L2 outage.
+                        return CompletableFuture.<Optional<CacheStoreEntry<V>>>completedFuture(Optional.empty());
+                    }
+                    return CompletableFuture.<Optional<CacheStoreEntry<V>>>failedFuture(wrapCompletion(failure));
+                }).thenCompose(stage -> stage);
     }
 
     private Optional<CacheStoreEntry<V>> storeL1IfCurrent(final K key, final CacheStoreEntry<V> entry,
@@ -570,6 +640,16 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
     private void markBackendFailure() {
         degraded = true;
         backendFailureCount.incrementAndGet();
+        if (l2FailureCooldownNanos > 0L) {
+            long until;
+            long now = System.nanoTime();
+            try {
+                until = Math.addExact(now, l2FailureCooldownNanos);
+            } catch (ArithmeticException overflow) {
+                until = Long.MAX_VALUE;
+            }
+            l2CooldownUntilNanos.accumulateAndGet(until, Math::max);
+        }
     }
 
     private RuntimeException wrapCompletion(final Throwable throwable) {

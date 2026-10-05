@@ -30,7 +30,9 @@ class ScaffoldCatalogFileTest {
         assertEquals("example.greeting.v1", manifest.get("catalogId").getAsString());
         assertEquals(1, manifest.get("catalogSchemaVersion").getAsInt());
         assertTrue(manifest.get("selectedProviders").toString().contains("application.greeting"));
-        var request = new ProjectScaffoldRequest("greeting", "group.zn.sample", output, "0.1.1",
+        assertTrue(Files.readString(output.resolve("pom.xml"))
+                .contains("<zero.version>0.1.2-SNAPSHOT</zero.version>"));
+        var request = new ProjectScaffoldRequest("greeting", "group.zn.sample", output, "0.1.2-SNAPSHOT",
                 ScaffoldCatalog.standard().require("runtime"), Path.of("../templates"), "", List.of("greeting"), false);
         var plan = new ScaffoldUpgradeService(ScaffoldCatalogFile.read(catalog)).plan(request);
         assertFalse(plan.hasConflicts());

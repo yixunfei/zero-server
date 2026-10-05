@@ -11,6 +11,7 @@ import group.zn.zero.protocol.codec.ZeroPayloadCodec;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 import redis.clients.jedis.RedisClient;
 
 /**
@@ -49,10 +50,10 @@ public final class RedisDataAdapter extends AbstractRepositoryAdapter {
     }
 
     /** Uses the caller's shared Redis client; repository data and cache remain separate contracts. */
-    public EnvelopeRepositoryFactory repositoryFactory(final RedisClient client) {
+    public EnvelopeRepositoryFactory repositoryFactory(final RedisClient client, final Executor ioExecutor) {
         Objects.requireNonNull(client, "client");
         return new EnvelopeRepositoryFactory(metadata -> new RedisDriverEnvelopeStore(
-                metadata.namespace(), metadata.collection(), client, keyStrategy, null));
+                metadata.namespace(), metadata.collection(), client, keyStrategy, null), ioExecutor);
     }
 
     /**
@@ -137,7 +138,7 @@ public final class RedisDataAdapter extends AbstractRepositoryAdapter {
                     final ZeroDataObjectMetadata metadata,
                     final ZeroPayloadCodec<T> payloadCodec,
                     final int codecVersion,
-                    final LocalDiskDataJournal localJournal) {
+                    final LocalDiskDataJournal localJournal, final Executor ioExecutor) {
         ZeroDataObjectMetadata currentMetadata = Objects.requireNonNull(metadata, "metadata");
         ZeroDataEntityCodec<ID, T> entityCodec = new ZeroDataEntityCodec<>(
                 currentMetadata,
@@ -149,7 +150,7 @@ public final class RedisDataAdapter extends AbstractRepositoryAdapter {
                 keyStrategy,
                 localJournal,
                 new ZeroDataEnvelopeCodec());
-        ZeroDataEnvelopeCrudRepository<ID, T> repository = new ZeroDataEnvelopeCrudRepository<>(entityCodec, store);
+        ZeroDataEnvelopeCrudRepository<ID, T> repository = new ZeroDataEnvelopeCrudRepository<>(entityCodec, store, ioExecutor);
         registerRepository(name, repository);
         return repository;
     }
@@ -170,8 +171,8 @@ public final class RedisDataAdapter extends AbstractRepositoryAdapter {
                     final String name,
                     final ZeroDataObjectMetadata metadata,
                     final ZeroPayloadCodec<T> payloadCodec,
-                    final int codecVersion) {
-        return registerInMemoryZcodeRepository(name, metadata, payloadCodec, codecVersion, null);
+                    final int codecVersion, final Executor ioExecutor) {
+        return registerInMemoryZcodeRepository(name, metadata, payloadCodec, codecVersion, null, ioExecutor);
     }
 
     /**
@@ -193,7 +194,7 @@ public final class RedisDataAdapter extends AbstractRepositoryAdapter {
             final ZeroDataObjectMetadata metadata,
             final ZeroPayloadCodec<T> payloadCodec,
             final int codecVersion,
-            final LocalDiskDataJournal localJournal) {
+            final LocalDiskDataJournal localJournal, final Executor ioExecutor) {
         ZeroDataObjectMetadata currentMetadata = Objects.requireNonNull(metadata, "metadata");
         ZeroDataEntityCodec<ID, T> entityCodec = new ZeroDataEntityCodec<>(
                 currentMetadata,
@@ -205,7 +206,7 @@ public final class RedisDataAdapter extends AbstractRepositoryAdapter {
                 Objects.requireNonNull(client, "client"),
                 keyStrategy,
                 localJournal);
-        ZeroDataEnvelopeCrudRepository<ID, T> repository = new ZeroDataEnvelopeCrudRepository<>(entityCodec, store);
+        ZeroDataEnvelopeCrudRepository<ID, T> repository = new ZeroDataEnvelopeCrudRepository<>(entityCodec, store, ioExecutor);
         registerRepository(name, repository);
         return repository;
     }

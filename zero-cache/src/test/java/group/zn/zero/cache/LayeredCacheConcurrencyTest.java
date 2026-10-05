@@ -87,7 +87,7 @@ class LayeredCacheConcurrencyTest {
         assertEquals(Optional.of("new"), local.get("key").toCompletableFuture().join());
     }
 
-    /** 回填阶段超时后，迟到的可取消写入不得复活 L1 或 L2。 */
+    /** 回填观察超时不能提前取消物理完成屏障；迟到写必须先结算，再执行失效。 */
     @Test
     void timedOutBackfillIsAbandonedBeforeItCanResurrectCache() throws Exception {
         CachePolicy policy = new CachePolicy(Duration.ofMinutes(1), Duration.ofSeconds(1),
@@ -97,12 +97,32 @@ class LayeredCacheConcurrencyTest {
         var loaded = cache.getOrLoad("key", CacheLoader.sync(key -> Optional.of("late"))).toCompletableFuture();
         assertTrue(store.writeStarted.await(2, TimeUnit.SECONDS));
         assertThrows(ExecutionException.class, () -> loaded.get(2, TimeUnit.SECONDS));
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-        while (!store.writeResult.isCancelled() && System.nanoTime() < deadline) {
-            Thread.yield();
-        }
-        assertTrue(store.writeResult.isCancelled());
+        assertFalse(store.writeResult.isCancelled());
+        var invalidation = cache.invalidate("key").toCompletableFuture();
+        assertFalse(invalidation.isDone());
+        store.current = store.pending;
+        store.writeResult.complete(true);
+        invalidation.get(2, TimeUnit.SECONDS);
         assertTrue(cache.get("key").toCompletableFuture().join().isEmpty());
+    }
+
+    /** L2 故障进入冷却窗口时不得把读取降级为 loader miss。 */
+    @Test
+    void l2ReadFailureOpensCooldownAndStopsDatabaseFallback() {
+        Store store = new Store();
+        store.failReads = true;
+        var cache = new LayeredCacheService<String, String>(
+                CachePolicy.defaults(), store, false, Duration.ofSeconds(30));
+
+        assertThrows(ExecutionException.class,
+                () -> cache.getOrLoad("key", CacheLoader.sync(key -> Optional.of("database")))
+                        .toCompletableFuture().get(2, TimeUnit.SECONDS));
+        assertTrue(cache.l2CircuitOpen());
+        assertEquals(0, store.loaderCalls);
+        assertThrows(ExecutionException.class,
+                () -> cache.getOrLoad("key", CacheLoader.sync(key -> Optional.of("database")))
+                        .toCompletableFuture().get(2, TimeUnit.SECONDS));
+        assertEquals(1, cache.l2CircuitRejectedCount());
     }
 
     /** 提供可控失效结果，读取计数用于证明 L1 未丢失。 */
@@ -111,9 +131,14 @@ class LayeredCacheConcurrencyTest {
         private final CompletableFuture<Boolean> invalidation = new CompletableFuture<>();
         /** 后端读取次数。 */
         private int reads;
+        /** 模拟后端读取故障。 */
+        private boolean failReads;
+        /** loader 调用计数。 */
+        private int loaderCalls;
         /** 返回缺失并计数。 */
         @Override public CompletionStage<Optional<CacheStoreEntry<String>>> get(final String key) {
             reads++;
+            if (failReads) return CompletableFuture.failedFuture(new IllegalStateException("redis down"));
             return CompletableFuture.completedFuture(Optional.empty());
         }
         /** 确认测试写入。 */
@@ -134,15 +159,19 @@ class LayeredCacheConcurrencyTest {
         }
     }
 
-    /** 支持取消传播断言的延迟写入存储。 */
+    /** 模拟已发出且不能由观察 future 取消的物理写入。 */
     private static final class DelayedWriteStore implements CacheStore<String, String> {
         /** 写入开始闩锁。 */
         private final CountDownLatch writeStarted = new CountDownLatch(1);
         /** 可取消的后端写入。 */
         private final CompletableFuture<Boolean> writeResult = new CompletableFuture<>();
+        /** 已提交的条目。 */
+        private CacheStoreEntry<String> current;
+        /** 后端尚未确认的条目。 */
+        private CacheStoreEntry<String> pending;
 
         @Override public CompletionStage<Optional<CacheStoreEntry<String>>> get(final String key) {
-            return CompletableFuture.completedFuture(Optional.empty());
+            return CompletableFuture.completedFuture(Optional.ofNullable(current));
         }
 
         @Override public CompletionStage<Void> put(final String key, final CacheStoreEntry<String> entry) {
@@ -151,11 +180,13 @@ class LayeredCacheConcurrencyTest {
 
         @Override public CompletionStage<Boolean> putIfVersion(
                 final String key, final CacheStoreEntry<String> entry) {
+            pending = entry;
             writeStarted.countDown();
             return writeResult;
         }
 
         @Override public CompletionStage<Void> invalidate(final String key) {
+            current = null;
             return CompletableFuture.completedFuture(null);
         }
 

@@ -542,6 +542,91 @@ class ProductionNetworkLifecycleFocusedTest {
         }
     }
 
+    /** 慢 observer 连接的排队事件必须有界，并通过既有异常回调报告拒绝。 */
+    @Test
+    void observerQueueShouldRejectBeyondPerConnectionCapacity() {
+        QueueExecutor observerExecutor = new QueueExecutor();
+        AtomicInteger observerFailures = new AtomicInteger();
+        ProductionNetworkPolicy heartbeatPolicy = new ProductionNetworkPolicy() {
+            @Override
+            public NetworkAdmissionDecision validateHandshake(
+                    final IConnection connection,
+                    final ProtocolFrame handshakeFrame) {
+                return NetworkAdmissionDecision.allow();
+            }
+
+            @Override
+            public boolean isHeartbeat(final IConnection connection, final ProtocolFrame frame) {
+                return true;
+            }
+        };
+        ProductionNetworkLifecycle lifecycle = new ProductionNetworkLifecycle(
+                fastConfig().withHeartbeatEnabled(false),
+                heartbeatPolicy,
+                NetworkRateLimiter.permitAll(),
+                observation -> { },
+                Runnable::run,
+                observerExecutor);
+        EmbeddedChannel channel = new EmbeddedChannel(new NettyFrameChannelHandler(
+                (connection, request) -> CompletableFuture.completedFuture(List.of()),
+                new ConnectionListener() {
+                    @Override
+                    public void onException(final IConnection connection, final Throwable cause) {
+                        observerFailures.incrementAndGet();
+                    }
+                },
+                Runnable::run,
+                lifecycle));
+        try {
+            channel.writeInbound(frame(1, 1, "handshake"));
+            for (int index = 0; index < 1024; index++) {
+                channel.writeInbound(frame(9, 1, "heartbeat"));
+            }
+            channel.runPendingTasks();
+
+            assertEquals(1, observerExecutor.pending());
+            assertTrue(observerFailures.get() > 0);
+            assertTrue(channel.isActive());
+        } finally {
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    /** observer executor 提交抛出 Error 后，调度器必须恢复并允许后续事件重新提交 drain。 */
+    @Test
+    void observerExecutorErrorShouldResetDrainState() {
+        FailingOnceExecutor observerExecutor = new FailingOnceExecutor();
+        AtomicInteger observerFailures = new AtomicInteger();
+        ProductionNetworkLifecycle lifecycle = new ProductionNetworkLifecycle(
+                fastConfig(),
+                acceptingPolicy(),
+                NetworkRateLimiter.permitAll(),
+                observation -> { },
+                Runnable::run,
+                observerExecutor);
+        EmbeddedChannel channel = new EmbeddedChannel(new NettyFrameChannelHandler(
+                (connection, request) -> CompletableFuture.completedFuture(List.of()),
+                new ConnectionListener() {
+                    @Override
+                    public void onException(final IConnection connection, final Throwable cause) {
+                        observerFailures.incrementAndGet();
+                    }
+                },
+                Runnable::run,
+                lifecycle));
+        try {
+            channel.runPendingTasks();
+            channel.close();
+
+            assertEquals(2, observerExecutor.submissions());
+            assertTrue(observerExecutor.pending() > 0);
+            assertTrue(observerFailures.get() > 0);
+            assertFalse(channel.isActive());
+        } finally {
+            channel.finishAndReleaseAll();
+        }
+    }
+
     /** 默认 no-op observer 不应创建观测任务或依赖 observer executor。 */
     @Test
     void noOpObserverShouldAvoidExecutorSubmission() {
@@ -791,6 +876,31 @@ class ProductionNetworkLifecycleFocusedTest {
             thread.start();
             thread.join(Duration.ofSeconds(3).toMillis());
             assertFalse(thread.isAlive());
+        }
+    }
+
+    /** 首次提交抛出 Error、后续提交正常排队的 observer 执行器替身。 */
+    private static final class FailingOnceExecutor implements Executor {
+
+        /** 已提交任务。 */
+        private final Queue<Runnable> tasks = new ConcurrentLinkedQueue<>();
+        /** 提交次数。 */
+        private final AtomicInteger submissions = new AtomicInteger();
+
+        @Override
+        public void execute(final Runnable command) {
+            if (submissions.incrementAndGet() == 1) {
+                throw new AssertionError("observer executor unavailable");
+            }
+            tasks.add(command);
+        }
+
+        private int submissions() {
+            return submissions.get();
+        }
+
+        private int pending() {
+            return tasks.size();
         }
     }
 }

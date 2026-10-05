@@ -111,11 +111,7 @@ public final class GameActorGateway {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(laneKey, "laneKey");
         Objects.requireNonNull(command, "command");
-        ActorMessage message = new ActorMessage(
-                messageId(command),
-                laneKey,
-                context.traceId(),
-                command);
+        ActorMessage message = new ActorMessage(laneKey, context.traceId(), command);
         ActorRoute route = Objects.requireNonNull(routeResolver.resolve(message), "actor route");
         validateRoute(message, route);
         if (route.kind() == ActorRouteKind.LOCAL) {
@@ -140,10 +136,6 @@ public final class GameActorGateway {
      */
     public ActorRouteResolver routeResolver() {
         return routeResolver;
-    }
-
-    private String messageId(final Object command) {
-        return "game-" + command.getClass().getSimpleName();
     }
 
     private void validateRoute(final ActorMessage message, final ActorRoute route) {

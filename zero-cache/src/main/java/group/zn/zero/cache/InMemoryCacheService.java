@@ -11,7 +11,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
@@ -50,6 +52,9 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
      * 缓存策略。
      */
     private final CachePolicy policy;
+
+    /** 在途加载许可，独立于因显式更新而脱离单飞表的旧加载。 */
+    private final Semaphore loadPermits;
 
     /**
      * 命中次数。
@@ -109,6 +114,7 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
      */
     public InMemoryCacheService(final CachePolicy policy) {
         this.policy = Objects.requireNonNull(policy, "policy");
+        this.loadPermits = new Semaphore(policy.maxConcurrentLoads());
     }
 
     /**
@@ -172,14 +178,29 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
             return CompletableFuture.completedFuture(entry.optionalValue());
         }
         missCount.increment();
-        CompletableFuture<Optional<V>> future = new CompletableFuture<>();
-        CompletableFuture<Optional<V>> existing = loading.putIfAbsent(key, future);
+        CompletableFuture<Optional<V>> existing = loading.get(key);
         if (existing != null) {
             return existing;
         }
+        if (!loadPermits.tryAcquire()) {
+            existing = loading.get(key);
+            if (existing != null) {
+                return existing;
+            }
+            throw ZeroException.of(CacheErrorCode.BACKPRESSURE_REJECTED,
+                    "cache loader rejected by maxConcurrentLoads", null);
+        }
+        CompletableFuture<Optional<V>> future = new CompletableFuture<>();
+        existing = loading.putIfAbsent(key, future);
+        if (existing != null) {
+            loadPermits.release();
+            return existing;
+        }
         CompletableFuture<Optional<V>> boundedLoad = new CompletableFuture<>();
+        AtomicBoolean permitReleased = new AtomicBoolean();
         future.whenComplete((ignored, failure) -> {
             if (future.isCancelled()) {
+                releaseLoadPermit(permitReleased);
                 loading.remove(key, future);
                 boundedLoad.cancel(false);
             }
@@ -189,16 +210,17 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
                     .whenComplete((loaded, throwable) -> {
                 try {
                     if (throwable != null) {
-                        completeLoadFailure(future, key, throwable);
+                        completeLoadFailure(future, key, throwable, permitReleased);
                         return;
                     }
                     Optional<V> value = Objects.requireNonNull(loaded, "loaded");
                     storeLoadedValue(key, value, future);
                     loadCount.increment();
                     loading.remove(key, future);
+                    releaseLoadPermit(permitReleased);
                     future.complete(value);
                 } catch (RuntimeException | Error ex) {
-                    completeLoadFailure(future, key, ex);
+                    completeLoadFailure(future, key, ex, permitReleased);
                 }
             });
             loader.load(key).whenComplete((loaded, failure) -> {
@@ -390,13 +412,20 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
         }
     }
 
-    private void completeLoadFailure(final CompletableFuture<Optional<V>> loadFuture, final K key, final Throwable throwable) {
+    private void completeLoadFailure(final CompletableFuture<Optional<V>> loadFuture, final K key,
+            final Throwable throwable, final AtomicBoolean permitReleased) {
         loading.remove(key, loadFuture);
         loadFailureCount.increment();
+        releaseLoadPermit(permitReleased);
         loadFuture.completeExceptionally(ZeroException.of(
                 CacheErrorCode.LOADER_FAILED,
                 "cache loader failed for key=" + key,
                 throwable));
+    }
+
+    /** 在发布结果前回收许可，完成回调发起的下一次加载不会被已经结束的工作拒绝。 */
+    private void releaseLoadPermit(final AtomicBoolean released) {
+        if (released.compareAndSet(false, true)) loadPermits.release();
     }
 
     private long nextVersion(final CacheEntry<V> previous) {

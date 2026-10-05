@@ -51,7 +51,7 @@ public final class RunLocalPrototype {
     /**
      * 默认 zeroServer 版本。
      */
-    private static final String DEFAULT_ZERO_VERSION = "0.1.1";
+    private static final String DEFAULT_ZERO_VERSION = "0.1.2-SNAPSHOT";
 
     /**
      * 默认模板。
@@ -90,8 +90,22 @@ public final class RunLocalPrototype {
             printHelp();
             return;
         }
-        Options options = Options.parse(args);
-        verifyEnvironment();
+        Options options;
+        try {
+            options = Options.parse(args);
+        } catch (IllegalArgumentException exception) {
+            printError("RUNNER-INVALID-ARGUMENT", exception.getMessage());
+            printHelp();
+            System.exit(2);
+            return;
+        }
+        try {
+            verifyEnvironment();
+        } catch (IllegalStateException exception) {
+            printError("RUNNER-ENVIRONMENT", exception.getMessage());
+            System.exit(1);
+            return;
+        }
         Path projectDir = options.outputDir().toAbsolutePath().normalize();
 
         System.out.println("zeroServer local prototype runner");
@@ -134,7 +148,8 @@ public final class RunLocalPrototype {
         int javaFeature = Runtime.version().feature();
         if (javaFeature < MINIMUM_JAVA_FEATURE) {
             throw new IllegalStateException("Java " + MINIMUM_JAVA_FEATURE
-                    + "+ is required, current feature version is " + javaFeature);
+                    + "+ is required, current feature version is " + javaFeature
+                    + ". Set JAVA_HOME to a JDK 21 installation and put its bin directory first on PATH.");
         }
         if (!isRepositoryRoot(Path.of("").toAbsolutePath().normalize())) {
             throw new IllegalStateException("Run this command from the zeroServer repository root.");
@@ -144,7 +159,8 @@ public final class RunLocalPrototype {
             result = runCommand(List.of(mavenCommand(), "--version"));
         } catch (IOException ex) {
             throw new IllegalStateException(
-                    "Maven 3.9+ is required and mvn must be available on PATH.", ex);
+                    "Could not start Maven: " + mavenCommand()
+                            + ". Restore mvnw/mvnw.cmd or set ZERO_MAVEN_CMD to a Maven 3.9+ executable.", ex);
         }
         String mavenVersion = parseMavenVersion(result.output());
         if (mavenVersion.isBlank()) {
@@ -258,10 +274,12 @@ public final class RunLocalPrototype {
         if (configured != null && !configured.isBlank()) {
             return configured;
         }
-        if (isWindows()) {
-            return "mvn.cmd";
+        Path root = Path.of("").toAbsolutePath().normalize();
+        Path wrapper = root.resolve(isWindows() ? "mvnw.cmd" : "mvnw");
+        if (Files.isRegularFile(wrapper) && (isWindows() || Files.isExecutable(wrapper))) {
+            return wrapper.toString();
         }
-        return Files.isExecutable(Path.of("mvnw")) ? "./mvnw" : "mvn";
+        return isWindows() ? "mvn.cmd" : "mvn";
     }
 
     private static Charset processOutputCharset() {
@@ -365,13 +383,21 @@ public final class RunLocalPrototype {
         System.out.println("  --outputDir <path>        Output directory. Default: target/generated/<projectName>.");
         System.out.println("  --zeroVersion <version>   zeroServer dependency version. Default: " + DEFAULT_ZERO_VERSION);
         System.out.println("  --force                   Overwrite known scaffold files in outputDir.");
-        System.out.println("  --skipInstall             Skip root `mvn -q -DskipTests install`.");
+        System.out.println("  --skipInstall             Skip installing the framework into the local Maven repository.");
         System.out.println("  --skipTests               Skip generated project Maven clean test.");
         System.out.println("  --skipRun                 Skip generated project Maven exec:java.");
         System.out.println("  --help, -h                Print this help.");
         System.out.println();
         System.out.println("On success, read generated BUSINESS_GUIDE.md and follow `First Business Change`.");
-        System.out.println("This tool writes a local/prototype scaffold and may run Maven. It is not production readiness.");
+        System.out.println("This tool writes a local/prototype scaffold and may run Maven. "
+                + "It is not production readiness.");
+        System.out.println("Maven uses mvnw/mvnw.cmd from the repository when present; "
+                + "ZERO_MAVEN_CMD can override it.");
+    }
+
+    private static void printError(final String code, final String message) {
+        System.err.println(code + "|" + (message == null ? "" : message));
+        System.err.println("Hint: run `java scripts/RunLocalPrototype.java --help` for the supported options.");
     }
 
     /**
@@ -427,10 +453,15 @@ public final class RunLocalPrototype {
                 if (!key.startsWith("--")) {
                     throw new IllegalArgumentException("unsupported argument: " + key);
                 }
+                String normalizedKey = key.toLowerCase(Locale.ROOT);
+                if (!List.of("--fromkeywords", "--from-keywords", "--template", "--projectname",
+                        "--packagename", "--outputdir", "--zeroversion").contains(normalizedKey)) {
+                    throw new IllegalArgumentException("unsupported argument: " + key);
+                }
                 if (index + 1 >= args.length || args[index + 1].startsWith("--")) {
                     throw new IllegalArgumentException("missing value for argument: " + key);
                 }
-                values.put(key.toLowerCase(Locale.ROOT), args[++index]);
+                values.put(normalizedKey, args[++index]);
             }
             String projectName = values.getOrDefault("--projectname", DEFAULT_PROJECT_NAME);
             String packageName = values.getOrDefault("--packagename", DEFAULT_PACKAGE_NAME);

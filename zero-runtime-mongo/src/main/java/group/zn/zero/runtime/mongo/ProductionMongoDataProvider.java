@@ -5,6 +5,7 @@ import group.zn.zero.data.mongo.MongoDataAdapter;
 import group.zn.zero.data.mongo.MongoDriverSettings;
 import group.zn.zero.data.repository.RepositorySource;
 import group.zn.zero.runtime.api.ComponentId;
+import group.zn.zero.runtime.bootstrap.RuntimeBasics;
 import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
 import group.zn.zero.runtime.config.ComponentConfig;
 import group.zn.zero.runtime.config.ConfigKey;
@@ -59,6 +60,7 @@ final class ProductionMongoDataProvider implements RuntimeComponentProvider {
     private final ComponentDescriptor descriptor = ComponentDescriptor.builder(ID)
             .provide(DataRuntime.DATA_SERVICES)
             .provide(DataRuntime.REPOSITORY_SOURCES)
+            .require(RuntimeBasics.EXECUTORS)
             .configSchema(CONFIG_SCHEMA)
             .kind(ComponentKind.EXTERNAL)
             .health(HealthPhase.STARTUP)
@@ -116,13 +118,18 @@ final class ProductionMongoDataProvider implements RuntimeComponentProvider {
     public ComponentContribution create(final ComponentCreationContext context) {
         ComponentCreationContext checked = Objects.requireNonNull(context, "context");
         try {
+            var executors = checked.require(RuntimeBasics.EXECUTORS);
+            if (executors.remoteIoMayInline()) {
+                throw new IllegalStateException("mongo repositories require non-inline remote IO execution");
+            }
             MongoDriverSettings settings = settings(checked.config());
             MongoDataAdapter createdAdapter = new MongoDataAdapter();
             MongoClient createdClient = checked.resources().register(createdAdapter.createClient(
                     settings,
                     startupBudget.adapterBudget()));
             diagnostic.mark(ZeroProductionAdapterState.CREATED);
-            var repositories = checked.resources().register(createdAdapter.repositoryFactory(createdClient, settings.databaseName()));
+            var repositories = checked.resources().register(createdAdapter.repositoryFactory(
+                    createdClient, settings.databaseName(), executors.remoteIoExecutor()));
             return ComponentContribution.builder()
                     .contribute(DataRuntime.DATA_SERVICES, createdAdapter)
                     .contribute(DataRuntime.REPOSITORY_SOURCES, new RepositorySource("mongo", repositories))

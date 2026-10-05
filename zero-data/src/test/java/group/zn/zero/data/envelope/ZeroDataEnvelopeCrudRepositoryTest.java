@@ -1,8 +1,11 @@
 package group.zn.zero.data.envelope;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.data.error.DataErrorCode;
@@ -23,11 +26,20 @@ import group.zn.zero.protocol.buffer.ZeroReader;
 import group.zn.zero.protocol.buffer.ZeroWriter;
 import group.zn.zero.protocol.codec.ZeroPayloadCodec;
 import java.util.LinkedHashMap;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.lang.reflect.Proxy;
+import java.lang.reflect.InvocationHandler;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -36,6 +48,163 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class ZeroDataEnvelopeCrudRepositoryTest {
+
+    /** 阻塞驱动不能占用调用线程，也不能让同一 Repository 的两个读取相互串行。 */
+    @Test
+    void blockedReadsRunConcurrentlyInInjectedIoExecutor() throws Exception {
+        CountDownLatch entered = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        Thread caller = Thread.currentThread();
+        ZeroDataEnvelopeStore store = proxyStore((proxy, method, args) -> {
+            assertEquals("findById", method.getName());
+            assertFalse(Thread.currentThread() == caller);
+            entered.countDown();
+            assertTrue(release.await(5, TimeUnit.SECONDS));
+            return Optional.empty();
+        });
+        try (var io = Executors.newFixedThreadPool(2)) {
+            var repository = new ZeroDataEnvelopeCrudRepository<>(newEntityCodec(), store, io);
+            var first = repository.findById("p1").toCompletableFuture();
+            var second = repository.findById("p2").toCompletableFuture();
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS));
+                assertFalse(first.isDone());
+                assertFalse(second.isDone());
+            } finally {
+                release.countDown();
+            }
+            assertTrue(first.get(5, TimeUnit.SECONDS).isEmpty());
+            assertTrue(second.get(5, TimeUnit.SECONDS).isEmpty());
+        }
+    }
+
+    /** 批量/分页必须调用 Store 扩展，不得退化为单条查询或全量读取。 */
+    @Test
+    void batchAndPageOperationsArePushedDownAndInputsAreSnapshotted() {
+        ArrayDeque<Runnable> pending = new ArrayDeque<>();
+        ZeroDataEntityCodec<String, PlayerArchive> codec = newEntityCodec();
+        var first = codec.encode(new PlayerArchive("p1", 1, "one"));
+        var second = codec.encode(new PlayerArchive("p2", 1, "two"));
+        List<String> ids = new ArrayList<>(List.of("p2", "missing", "p1", "p2"));
+        var store = proxyStore((proxy, method, args) -> switch (method.getName()) {
+            case "findByIds" -> {
+                assertEquals(List.of(codec.encodeId("p2"), codec.encodeId("missing"),
+                        codec.encodeId("p1"), codec.encodeId("p2")), args[0]);
+                yield List.of(first, second);
+            }
+            case "findPage" -> new PageResult<>(List.of(second), "2", 999);
+            case "saveIfVersionBatch" -> {
+                var writes = (List<?>) args[0];
+                assertEquals(2, writes.size());
+                assertEquals(first.id(), ((ZeroDataEnvelopeStore.ConditionalWrite) writes.getFirst()).envelope().id());
+                yield List.of(true, true);
+            }
+            case "deleteAll" -> {
+                assertEquals(List.of(codec.encodeId("p1"), codec.encodeId("p2")), args[0]);
+                yield null;
+            }
+            default -> throw new AssertionError("unexpected fallback: " + method.getName());
+        });
+        var repository = new ZeroDataEnvelopeCrudRepository<>(codec, store, pending::add);
+        var found = repository.findByIds(ids).toCompletableFuture();
+        ids.clear();
+        pending.remove().run();
+        assertEquals(List.of("p2", "p1", "p2"), found.join().stream().map(PlayerArchive::id).toList());
+        var page = repository.findPage(new PageRequest(1, 1)).toCompletableFuture();
+        pending.remove().run();
+        assertEquals(999, page.join().total());
+        assertEquals("2", page.join().nextCursor());
+        Collection<PlayerArchive> entities = new ArrayList<>(List.of(
+                new PlayerArchive("p1", 0, "one"), new PlayerArchive("p2", 0, "two")));
+        var saved = repository.saveAll(entities).toCompletableFuture();
+        entities.clear();
+        pending.remove().run();
+        saved.join();
+        ids.addAll(List.of("p1", "p2"));
+        var deleted = repository.deleteAll(ids).toCompletableFuture();
+        ids.clear();
+        pending.remove().run();
+        deleted.join();
+    }
+
+    /** 可变 Actor 数据必须在调用执行域编码；提交后变更不能影响将要写入的 payload。 */
+    @Test
+    void mutableEntityPayloadIsEncodedBeforeIoSubmission() {
+        List<String> values = new ArrayList<>(List.of("before"));
+        ArrayDeque<Runnable> pending = new ArrayDeque<>();
+        var codec = new ZeroDataEntityCodec<String, MutableArchive>(
+                new ZeroDataMappingIntrospector().inspect(MutableArchive.class), new MutableArchiveCodec(), 1);
+        var store = new TestEnvelopeStore();
+        var repository = new ZeroDataEnvelopeCrudRepository<>(codec, store, pending::add);
+        var saved = repository.save(new MutableArchive("p", 0, values)).toCompletableFuture();
+        assertFalse(saved.isDone());
+        assertEquals(0, store.count());
+        values.set(0, "after");
+        pending.remove().run();
+        saved.join();
+        assertEquals(List.of("before"), codec.decode(store.findById(codec.encodeId("p")).orElseThrow()).values());
+    }
+
+    /** 执行器拒绝和驱动 Error 都必须完成异步收据，不能把调用挂起。 */
+    @Test
+    void executorRejectionAndDriverErrorsCompleteTheReturnedFuture() {
+        RejectedExecutionException rejected = new RejectedExecutionException("full");
+        var repository = new ZeroDataEnvelopeCrudRepository<>(newEntityCodec(), new TestEnvelopeStore(),
+                task -> { throw rejected; });
+        var failure = assertThrows(CompletionException.class, () -> repository.count().toCompletableFuture().join());
+        assertEquals(DataErrorCode.READ_FAILED, ((ZeroException) failure.getCause()).errorCode());
+        assertSame(rejected, failure.getCause().getCause());
+        ArrayDeque<Runnable> pending = new ArrayDeque<>();
+        AssertionError error = new AssertionError("driver error");
+        var failedStore = proxyStore((proxy, method, args) -> { throw error; });
+        var errorRepository = new ZeroDataEnvelopeCrudRepository<>(newEntityCodec(), failedStore, pending::add);
+        var result = errorRepository.count().toCompletableFuture();
+        pending.remove().run();
+        var errorFailure = assertThrows(CompletionException.class, result::join);
+        assertSame(error, errorFailure.getCause().getCause());
+    }
+
+    /** 版本溢出必须在任何后端写入前拒绝。 */
+    @Test
+    void invalidVersionsFailBeforeSubmittingIo() {
+        var repository = new ZeroDataEnvelopeCrudRepository<>(newEntityCodec(), new TestEnvelopeStore(),
+                task -> { throw new AssertionError("must not submit invalid write"); });
+        for (long version : new long[] {-1, Long.MAX_VALUE}) {
+            var failure = assertThrows(CompletionException.class,
+                    () -> repository.save(new PlayerArchive("p", version, "bad")).toCompletableFuture().join());
+            assertEquals(DataErrorCode.INVALID_ENTITY, ((ZeroException) failure.getCause()).errorCode());
+        }
+    }
+
+    /** 构建严格记录 SPI 调用的测试 Store，未预期的退化路径直接失败。 */
+    private ZeroDataEnvelopeStore proxyStore(final InvocationHandler handler) {
+        return (ZeroDataEnvelopeStore) Proxy.newProxyInstance(getClass().getClassLoader(),
+                new Class<?>[] {ZeroDataEnvelopeStore.class}, handler);
+    }
+
+    /** 模拟在 Actor 内持有可变集合的实体。 @author zn */
+    @ZeroDataObject(namespace = "game", collection = "mutable", schemaVersion = 1)
+    private record MutableArchive(@ZeroDataId String id, @ZeroDataVersion long version,
+            @ZeroDataField(order = 1) List<String> values) implements VersionedEntity<String> {
+        /** 返回版本副本，集合仍由 Actor 持有，编码阶段必须快照。 */
+        @Override public MutableArchive withVersion(final long value) { return new MutableArchive(id, value, values); }
+    }
+
+    /** 仅编码一个可变字段的测试 codec，无共享可变状态。 @author zn */
+    private static final class MutableArchiveCodec implements ZeroPayloadCodec<MutableArchive> {
+        /** @return codec 名称；不可空。 */
+        @Override public String name() { return "mutable-test"; }
+        /** @return 实体类型；不可空。 */
+        @Override public Class<MutableArchive> messageType() { return MutableArchive.class; }
+        /** 编码调用时字段内容；调用方负责 Actor 线程绑定。 */
+        @Override public void write(final ZeroWriter writer, final MutableArchive entity) {
+            writer.writeString(entity.id()); writer.writeLong(entity.version()); writer.writeString(entity.values().getFirst());
+        }
+        /** @return 新实体；不可空，集合不可变。 */
+        @Override public MutableArchive read(final ZeroReader reader) {
+            return new MutableArchive(reader.readString(), reader.readLong(), List.of(reader.readString()));
+        }
+    }
 
     /**
      * 验证 Repository 使用 zcode payload 保存对象并保持版本语义。
@@ -89,7 +258,7 @@ class ZeroDataEnvelopeCrudRepositoryTest {
         ZeroDataEnvelopeCrudRepository<PlayerItemKey, PlayerItemArchive> repository =
                 new ZeroDataEnvelopeCrudRepository<>(
                         new ZeroDataEntityCodec<>(metadata, new PlayerItemArchiveCodec(), 1),
-                        new TestEnvelopeStore());
+                        new TestEnvelopeStore(), Runnable::run);
 
         repository.save(new PlayerItemArchive("p1", 7L, 0L, "bag")).toCompletableFuture().join();
         PlayerItemArchive saved = repository.findById(new PlayerItemKey("p1", 7L))
@@ -109,7 +278,7 @@ class ZeroDataEnvelopeCrudRepositoryTest {
         ZeroDataObjectMetadata metadata = new ZeroDataMappingIntrospector().inspect(GeneratedArchive.class);
         ZeroDataEnvelopeCrudRepository<String, GeneratedArchive> repository = new ZeroDataEnvelopeCrudRepository<>(
                 new ZeroDataEntityCodec<>(metadata, new GeneratedArchiveCodec(), 1),
-                new TestEnvelopeStore());
+                new TestEnvelopeStore(), Runnable::run);
 
         repository.save(new GeneratedArchive(null, 0L, "created")).toCompletableFuture().join();
         GeneratedArchive saved = repository.findById("generated-id").toCompletableFuture().join().orElseThrow();
@@ -136,7 +305,7 @@ class ZeroDataEnvelopeCrudRepositoryTest {
     }
 
     private ZeroDataEnvelopeCrudRepository<String, PlayerArchive> newRepository(final ZeroDataEnvelopeStore store) {
-        return new ZeroDataEnvelopeCrudRepository<>(newEntityCodec(), store);
+        return new ZeroDataEnvelopeCrudRepository<>(newEntityCodec(), store, Runnable::run);
     }
 
     private ZeroDataEntityCodec<String, PlayerArchive> newEntityCodec() {

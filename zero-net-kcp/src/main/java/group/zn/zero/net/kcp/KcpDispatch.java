@@ -6,6 +6,7 @@ import group.zn.zero.protocol.ProtocolFrame;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
+import java.util.Objects;
 import java.util.concurrent.CompletionStage;
 
 /** 单连接串行业务调度；短锁保护队列，回调由显式执行器执行，关闭后仍能完成通知。 @author zn */
@@ -29,46 +30,55 @@ final class KcpDispatch {
         this.session = session;
         if (!session.reserveInbound(512)) throw KcpServer.error(NetErrorCode.INBOUND_OVERFLOW, null);
     }
-    synchronized void open() { dispatch(); }
+    void open() { dispatch(); }
     synchronized boolean idle() { return !busy && frames.isEmpty() && active == null; }
-    synchronized void receive(final ProtocolFrame frame) {
-        if (closed) return;
-        long charge = (long) frame.payloadLength() + frame.extensionLength() + 512;
-        if (frames.size() + (active == null ? 0 : 1) >= session.options().maxQueuedFrames()
-                || !session.reserveInbound(charge)) {
-            abort(NetErrorCode.INBOUND_OVERFLOW, null);
-            return;
+    void receive(final ProtocolFrame frame) {
+        boolean overflow;
+        synchronized (this) {
+            if (closed) return;
+            long charge = (long) frame.payloadLength() + frame.extensionLength() + 512;
+            overflow = frames.size() + (active == null ? 0 : 1) >= session.options().maxQueuedFrames()
+                    || !session.reserveInbound(charge);
+            if (overflow) { closed = true; discardPending(); }
+            else frames.add(new Pending(frame, charge));
         }
-        frames.add(new Pending(frame, charge));
+        if (overflow) session.closeWithFailure(NetErrorCode.INBOUND_OVERFLOW, null);
         dispatch();
     }
-    synchronized void close() {
-        closed = true;
-        discardPending();
+    void close() {
+        synchronized (this) { closed = true; discardPending(); }
         dispatch();
     }
     private void dispatch() {
-        if (busy) return;
-        boolean opening = !opened && !closed;
-        boolean closing = closed && opened;
-        if (!opening && !closing && (closed || frames.isEmpty())) {
-            if (closed) releaseLifecycle();
-            return;
+        boolean opening;
+        boolean closing;
+        ProtocolFrame frame;
+        synchronized (this) {
+            if (busy) return;
+            opening = !opened && !closed;
+            closing = closed && opened;
+            if (!opening && !closing && (closed || frames.isEmpty())) {
+                if (closed) releaseLifecycle();
+                return;
+            }
+            if (!opening && !closing) active = frames.remove();
+            frame = active == null ? null : active.frame();
+            busy = true;
+            if (opening) opened = true;
+            if (closing) opened = false;
         }
-        if (!opening && !closing) active = frames.remove();
-        ProtocolFrame frame = active == null ? null : active.frame();
-        busy = true;
-        if (opening) opened = true;
-        if (closing) opened = false;
+        // 执行器、响应发送与关闭均可能取得客户端生命周期锁，不得在调度锁内调用。
         try {
             session.executor().execute(() -> invoke(opening, closing, frame));
-        } catch (RuntimeException failure) {
-            busy = false;
-            closed = true;
-            opened = false;
-            discardPending();
-            releaseActive();
-            releaseLifecycle();
+        } catch (RuntimeException | Error failure) {
+            synchronized (this) {
+                busy = false;
+                closed = true;
+                opened = false;
+                discardPending();
+                releaseActive();
+                releaseLifecycle();
+            }
             session.closeWithFailure(NetErrorCode.HANDLER_FAILED, failure);
         }
     }
@@ -86,38 +96,45 @@ final class KcpDispatch {
                     completed(true, null, KcpServer.error(NetErrorCode.AUTHENTICATION_EXPIRED, null));
                     return;
                 }
-                CompletionStage<List<ProtocolFrame>> result = session.handler().handle(session.connection(), frame);
+                CompletionStage<List<ProtocolFrame>> result = Objects.requireNonNull(
+                        session.handler().handle(session.connection(), frame), "handlerStage");
                 result.whenComplete((responses, cause) -> completed(true, responses, cause));
                 return;
             }
             completed(false, List.of(), null);
-        } catch (RuntimeException failure) {
+        } catch (RuntimeException | Error failure) {
             completed(!opening && !closing, null, failure);
         }
     }
-    private synchronized void completed(final boolean handled, final List<ProtocolFrame> responses, final Throwable failure) {
-        busy = false;
-        if (handled) releaseActive();
-        if (failure != null) {
-            abort(NetErrorCode.HANDLER_FAILED, failure);
-        } else if (!closed) sendResponses(responses);
-        dispatch();
+    private void completed(final boolean handled, final List<ProtocolFrame> responses, final Throwable failure) {
+        boolean respond;
+        synchronized (this) {
+            if (handled) releaseActive();
+            respond = !closed && failure == null;
+        }
+        Throwable terminalFailure = failure;
+        try {
+            if (respond) sendResponses(responses);
+        } catch (RuntimeException | Error sendFailure) {
+            terminalFailure = sendFailure;
+        }
+        synchronized (this) {
+            busy = false;
+            if (terminalFailure != null) { closed = true; discardPending(); }
+        }
+        try {
+            if (terminalFailure != null) session.closeWithFailure(NetErrorCode.HANDLER_FAILED, terminalFailure);
+        } finally { dispatch(); }
     }
     private void sendResponses(final List<ProtocolFrame> responses) {
         if (responses == null || responses.size() > session.options().maxQueuedFrames()) {
-            abort(NetErrorCode.HANDLER_FAILED, null);
-            return;
+            throw KcpServer.error(NetErrorCode.HANDLER_FAILED, null);
         }
         for (ProtocolFrame frame : responses) {
             session.respond(frame).whenComplete((ignored, failure) -> {
                 if (failure != null) session.closeWithFailure(NetErrorCode.SEND_FAILED, failure);
             });
         }
-    }
-    private void abort(final NetErrorCode code, final Throwable failure) {
-        closed = true;
-        discardPending();
-        session.closeWithFailure(code, failure);
     }
     private void discardPending() {
         Pending frame;

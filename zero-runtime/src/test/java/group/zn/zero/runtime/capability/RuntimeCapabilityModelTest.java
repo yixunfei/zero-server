@@ -130,7 +130,7 @@ class RuntimeCapabilityModelTest {
                         .orElseThrow()
                         .requires());
         assertEquals(
-                List.of(StandardRuntimeCapabilityModel.REDIS_RESOURCE),
+                List.of(StandardRuntimeCapabilityModel.REDIS_RESOURCE, StandardRuntimeCapabilityModel.EXECUTORS),
                 model.provider(StandardRuntimeCapabilityModel.PRODUCTION_REDIS_DATA)
                         .orElseThrow()
                         .requires());

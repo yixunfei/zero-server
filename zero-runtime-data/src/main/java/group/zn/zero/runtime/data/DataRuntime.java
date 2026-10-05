@@ -7,6 +7,7 @@ import group.zn.zero.data.envelope.EnvelopeRepositoryFactory;
 import group.zn.zero.data.repository.RepositoryCatalog;
 import group.zn.zero.data.repository.RepositorySource;
 import group.zn.zero.runtime.api.ComponentId;
+import group.zn.zero.runtime.bootstrap.RuntimeBasics;
 import group.zn.zero.runtime.api.ComponentKey;
 import group.zn.zero.runtime.api.ComponentSetKey;
 import group.zn.zero.runtime.api.RuntimeLifecycleCapabilities;
@@ -57,8 +58,9 @@ public final class DataRuntime {
                     return ComponentContribution.builder().bind(PERSISTENCE_MANAGER, persistence)
                             .lifecycle(persistence).build();
                 }), RuntimeProviders.create(ComponentDescriptor.builder(StandardRuntimeCapabilityModel.LOCAL_REPOSITORIES)
-                .provide(REPOSITORY_SOURCES).kind(ComponentKind.LOCAL).build(), context -> {
-                    var factory = context.resources().register(EnvelopeRepositoryFactory.inMemory());
+                .provide(REPOSITORY_SOURCES).require(RuntimeBasics.EXECUTORS).kind(ComponentKind.LOCAL).build(), context -> {
+                    var factory = context.resources().register(EnvelopeRepositoryFactory.inMemory(
+                            context.require(RuntimeBasics.EXECUTORS).remoteIoExecutor()));
                     return ComponentContribution.builder()
                             .contribute(REPOSITORY_SOURCES, new RepositorySource("local", factory)).build();
                 }));

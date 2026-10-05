@@ -48,7 +48,8 @@ class OrderedFrameModelTest {
             }
         }
         for (int i = 0; i < actualBatches.size(); i++) assertEquals(expectedBatches.get(i), actualBatches.get(i).inputs());
-        runtime.submit(new FrameInput("far", 1, Long.MAX_VALUE, 0, new byte[0], "trace")).toCompletableFuture().join();
+        assertThrows(CompletionException.class, () -> runtime.submit(
+                new FrameInput("far", 1, Long.MAX_VALUE, 0, new byte[0], "trace")).toCompletableFuture().join());
         runtime.close();
         assertThrows(CompletionException.class, () -> runtime.tick().toCompletableFuture().join());
     }

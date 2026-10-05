@@ -12,7 +12,7 @@ java scripts/VerifyPublicApiCompatibility.java --check
 java scripts/VerifyApiCompatibilityConsumer.java
 ```
 
-第一步编译并安装保护模块；第二步比较公共符号；第三步编译独立消费者。GitHub Actions 的 `compatibility-gate` 执行同类检查。基线存放在[api-baseline](../api-baseline/README.md)，不依赖本地 `target/` 文件作为长期基线。
+第一步编译并安装保护模块；第二步比较公共符号；第三步编译独立消费者。GitHub Actions 的 `compatibility-gate` 执行同类检查。基线存放在[api-baseline](../api-baseline/README.md)，不依赖本地 `target/` 文件作为长期基线。符号比较忽略 `javap` 输出中的方法级 `synchronized` 修饰符；锁行为变化仍须按线程契约审查，但它不改变 Java 二进制方法描述符。
 
 ## 稳定性与 0.x 变更
 

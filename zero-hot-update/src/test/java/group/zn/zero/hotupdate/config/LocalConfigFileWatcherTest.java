@@ -2,8 +2,11 @@ package group.zn.zero.hotupdate.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.core.lifecycle.LifecycleState;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -21,6 +24,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -92,6 +98,71 @@ class LocalConfigFileWatcherTest {
             service.stop();
             assertEquals(LifecycleState.STOPPED, service.state());
             assertFalse(service.watcherFailure().isPresent());
+        }
+    }
+
+    /** 文件重载回调可以关闭自己的 watcher，不能等待当前循环自己退出。 */
+    @Test
+    void shouldAllowCloseFromReloadCallback() throws Exception {
+        Path source = tempDirectory.resolve("self-close.csv");
+        write(source, "id,name\n1,initial\n");
+        CompletableFuture<Void> closed = new CompletableFuture<>();
+        LocalConfigFileWatcher[] holder = new LocalConfigFileWatcher[1];
+        holder[0] = LocalConfigFileWatcher.prepare(
+                List.of(new ConfigTable<>(definition(source))),
+                new ConfigHotReloadOptions(true, Duration.ofMillis(1), Duration.ofMillis(100)),
+                ignored -> {
+                    try {
+                        holder[0].close();
+                        closed.complete(null);
+                    } catch (Throwable failure) {
+                        closed.completeExceptionally(failure);
+                    }
+                }, closed::completeExceptionally);
+        try (ExecutorService worker = Executors.newSingleThreadExecutor(); var watcher = holder[0]) {
+            watcher.start(worker);
+            write(source, "id,name\n1,updated\n");
+            closed.get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    /** 故障回调重抛原异常时，监听任务仍须完成，关闭不能误报等待超时。 */
+    @Test
+    void rethrownFailureStillCompletesWatcherTask() throws Exception {
+        Path source = tempDirectory.resolve("failure.csv");
+        write(source, "id,name\n1,initial\n");
+        AtomicReference<CompletableFuture<Void>> loop = new AtomicReference<>();
+        try (ExecutorService worker = Executors.newSingleThreadExecutor()) {
+            LocalConfigFileWatcher watcher = LocalConfigFileWatcher.prepare(
+                    List.of(new ConfigTable<>(definition(source))),
+                    new ConfigHotReloadOptions(true, Duration.ofMillis(1), Duration.ofMillis(100)),
+                    ignored -> { throw new IllegalStateException("reload failed"); },
+                    failure -> { throw (ZeroException) failure; });
+            watcher.start(command -> loop.set(CompletableFuture.runAsync(command, worker)));
+            try {
+                write(source, "id,name\n1,updated\n");
+                loop.get().get(5, TimeUnit.SECONDS);
+            } finally {
+                ZeroException failure = assertThrows(ZeroException.class, watcher::close);
+                assertEquals("config watcher task failed", failure.getMessage());
+            }
+        }
+    }
+
+    /** 执行器在提交前失败时不能保留永不执行的任务，随后关闭不应等待超时。 */
+    @Test
+    void executorErrorDoesNotLeaveUnfinishedWatcherTask() throws Exception {
+        Path source = tempDirectory.resolve("submission-error.csv");
+        write(source, "id,name\n1,initial\n");
+        AssertionError cause = new AssertionError("executor unavailable");
+        try (LocalConfigFileWatcher watcher = LocalConfigFileWatcher.prepare(
+                List.of(new ConfigTable<>(definition(source))),
+                new ConfigHotReloadOptions(true, Duration.ofMillis(1), Duration.ofMillis(100)),
+                ignored -> { }, ignored -> { })) {
+            ZeroException failure = assertThrows(ZeroException.class,
+                    () -> watcher.start(command -> { throw cause; }));
+            assertSame(cause, failure.getCause());
+            assertEquals(ConfigReloadErrorCode.EXECUTOR_REJECTED, failure.errorCode());
         }
     }
 

@@ -73,6 +73,8 @@ public final class AlertEvaluator {
         MetricRegistry current = Objects.requireNonNull(registry, "registry");
         List<MetricSample> samples = current.samples();
         List<AlertEvent> events = new ArrayList<>();
+        List<AlertKey> eventKeys = new ArrayList<>();
+        Set<AlertKey> scheduled = new HashSet<>();
         for (AlertRule rule : rules) {
             AlertKey key = new AlertKey(rule.name(), rule.metricName(), rule.labels());
             MetricSample sample = latestSample(rule, samples);
@@ -87,14 +89,18 @@ public final class AlertEvaluator {
                 activeSince.put(key, since);
             }
             Instant now = Instant.now(clock);
-            if (!now.isBefore(since.plus(rule.holdFor())) && alerted.add(key)) {
+            if (!now.isBefore(since.plus(rule.holdFor()))
+                    && !alerted.contains(key) && scheduled.add(key)) {
                 events.add(event(rule, sample, now));
+                eventKeys.add(key);
             }
         }
-        for (AlertEvent event : events) {
+        for (int index = 0; index < events.size(); index++) {
+            AlertEvent event = events.get(index);
             for (AlertSink sink : sinks) {
                 sink.publish(event);
             }
+            alerted.add(eventKeys.get(index));
         }
         return events;
     }

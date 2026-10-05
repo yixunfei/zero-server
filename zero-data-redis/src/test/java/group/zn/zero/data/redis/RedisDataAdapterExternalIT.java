@@ -44,7 +44,8 @@ class RedisDataAdapterExternalIT {
         RedisDriverSettings settings = RedisDriverSettings.fromSystemProperties();
         DefaultRedisDataKeyStrategy keyStrategy = new DefaultRedisDataKeyStrategy(16);
         RedisDataAdapter adapter = new RedisDataAdapter(keyStrategy);
-        try (RedisClient client = adapter.createClient(settings)) {
+        try (RedisClient client = adapter.createClient(settings);
+                var io = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
             RedisDataHealthCheck healthCheck = new RedisDataHealthCheck(client);
             assertTrue(healthCheck.check(), "Redis external service is unavailable");
             client.flushDB();
@@ -55,7 +56,7 @@ class RedisDataAdapterExternalIT {
                     new ZeroDataMappingIntrospector().inspect(PlayerArchive.class),
                     new PlayerArchiveCodec(),
                     1,
-                    localJournal);
+                    localJournal, io);
 
             repository.save(new PlayerArchive("redis-player-1", 0L, "created")).toCompletableFuture().join();
             PlayerArchive saved = repository.findById("redis-player-1").toCompletableFuture().join().orElseThrow();

@@ -14,6 +14,7 @@ import group.zn.zero.data.model.VersionedEntity;
 import group.zn.zero.protocol.codec.ZeroPayloadCodec;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -31,11 +32,12 @@ public final class MongoDataAdapter extends AbstractRepositoryAdapter {
     }
 
     /** The caller owns the client and must close this factory before releasing that client. */
-    public EnvelopeRepositoryFactory repositoryFactory(final MongoClient client, final String databaseName) {
+    public EnvelopeRepositoryFactory repositoryFactory(
+            final MongoClient client, final String databaseName, final Executor ioExecutor) {
         Objects.requireNonNull(client, "client");
         Objects.requireNonNull(databaseName, "databaseName");
         return new EnvelopeRepositoryFactory(metadata -> new MongoDriverEnvelopeStore(
-                client.getDatabase(databaseName), metadata.namespace(), metadata.collection()));
+                client.getDatabase(databaseName), metadata.namespace(), metadata.collection()), ioExecutor);
     }
 
     /**
@@ -53,13 +55,13 @@ public final class MongoDataAdapter extends AbstractRepositoryAdapter {
             final String name,
             final ZeroDataObjectMetadata metadata,
             final ZeroPayloadCodec<T> payloadCodec,
-            final int codecVersion) {
+            final int codecVersion, final Executor ioExecutor) {
         ZeroDataEntityCodec<ID, T> entityCodec = new ZeroDataEntityCodec<>(
                 Objects.requireNonNull(metadata, "metadata"),
                 Objects.requireNonNull(payloadCodec, "payloadCodec"),
                 codecVersion);
         ZeroDataEnvelopeCrudRepository<ID, T> repository =
-                new ZeroDataEnvelopeCrudRepository<>(entityCodec, new MongoDataEnvelopeStore());
+                new ZeroDataEnvelopeCrudRepository<>(entityCodec, new MongoDataEnvelopeStore(), ioExecutor);
         registerRepository(name, repository);
         return repository;
     }
@@ -83,7 +85,7 @@ public final class MongoDataAdapter extends AbstractRepositoryAdapter {
             final String databaseName,
             final ZeroDataObjectMetadata metadata,
             final ZeroPayloadCodec<T> payloadCodec,
-            final int codecVersion) {
+            final int codecVersion, final Executor ioExecutor) {
         ZeroDataObjectMetadata currentMetadata = Objects.requireNonNull(metadata, "metadata");
         MongoDatabase database = Objects.requireNonNull(client, "client")
                 .getDatabase(Objects.requireNonNull(databaseName, "databaseName"));
@@ -93,7 +95,7 @@ public final class MongoDataAdapter extends AbstractRepositoryAdapter {
                 codecVersion);
         ZeroDataEnvelopeCrudRepository<ID, T> repository = new ZeroDataEnvelopeCrudRepository<>(
                 entityCodec,
-                new MongoDriverEnvelopeStore(database, currentMetadata.namespace(), currentMetadata.collection()));
+                new MongoDriverEnvelopeStore(database, currentMetadata.namespace(), currentMetadata.collection()), ioExecutor);
         registerRepository(name, repository);
         return repository;
     }

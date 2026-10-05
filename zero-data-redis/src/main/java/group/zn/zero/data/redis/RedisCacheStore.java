@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ForkJoinPool;
 import java.util.function.Function;
 import redis.clients.jedis.RedisClient;
 
@@ -44,8 +45,13 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
      */
     private static final byte[] PUT_IF_VERSION_SCRIPT = """
             local current = redis.call('GET', KEYS[2])
-            if current and (#current > #ARGV[1] or (#current == #ARGV[1] and current >= ARGV[1])) then
-              return 0
+            if current == '0' and ARGV[1] == '0' then
+              local previous = redis.call('GET', KEYS[1])
+              if previous and string.sub(previous, 1, 8) >= string.sub(ARGV[3], 1, 8) then
+                return 0
+              end
+            elseif current and (#current > #ARGV[1] or (#current == #ARGV[1] and current >= ARGV[1])) then
+                return 0
             end
             redis.call('PSETEX', KEYS[1], ARGV[2], ARGV[3])
             redis.call('PSETEX', KEYS[2], ARGV[2], ARGV[1])
@@ -108,89 +114,41 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
     /** Redis 同步驱动的受管执行域。 */
     private final Executor ioExecutor;
 
-    /**
-     * 创建 Redis 二级缓存存储。
-     *
-     * @param client Redis client；不可为空。
-     * @param namespace 命名空间；不可为空。
-     * @param cacheName 缓存名称；不可为空。
-     * @param valueCodec value codec；不可为空。
-     */
-    public RedisCacheStore(
-            final RedisClient client,
-            final String namespace,
-            final String cacheName,
+    /** 兼容旧调用方的异步执行器；生产装配应显式传入 starter 执行域。 */
+    private static final Executor COMPATIBILITY_EXECUTOR = ForkJoinPool.commonPool();
+
+    /** 兼容旧构造路径，使用公共异步执行器避免调用线程阻塞。 */
+    @Deprecated
+    public RedisCacheStore(final RedisClient client, final String namespace, final String cacheName,
             final CacheValueCodec<V> valueCodec) {
-        this(
-                client,
-                namespace,
-                cacheName,
-                1,
-                new DefaultRedisCacheKeyStrategy(),
-                CacheKeyCodecs.defaults(),
-                valueCodec,
-                new RedisCacheEnvelopeCodec(),
-                Runnable::run);
+        this(client, namespace, cacheName, 1, new DefaultRedisCacheKeyStrategy(), CacheKeyCodecs.defaults(),
+                valueCodec, new RedisCacheEnvelopeCodec(), COMPATIBILITY_EXECUTOR);
     }
 
-    /**
-     * 创建 Redis 二级缓存存储。
-     *
-     * @param client Redis client；不可为空。
-     * @param namespace 命名空间；不可为空。
-     * @param cacheName 缓存名称；不可为空。
-     * @param keyCodec key codec；不可为空。
-     * @param valueCodec value codec；不可为空。
-     */
-    public RedisCacheStore(
-            final RedisClient client,
-            final String namespace,
-            final String cacheName,
-            final CacheKeyCodec<K> keyCodec,
-            final CacheValueCodec<V> valueCodec) {
-        this(
-                client,
-                namespace,
-                cacheName,
-                1,
-                new DefaultRedisCacheKeyStrategy(),
-                keyCodec,
-                valueCodec,
-                new RedisCacheEnvelopeCodec(),
-                Runnable::run);
+    /** 兼容旧构造路径，使用公共异步执行器避免调用线程阻塞。 */
+    @Deprecated
+    public RedisCacheStore(final RedisClient client, final String namespace, final String cacheName,
+            final CacheKeyCodec<K> keyCodec, final CacheValueCodec<V> valueCodec) {
+        this(client, namespace, cacheName, 1, new DefaultRedisCacheKeyStrategy(), keyCodec, valueCodec,
+                new RedisCacheEnvelopeCodec(), COMPATIBILITY_EXECUTOR);
     }
 
-    /**
-     * 创建 Redis 二级缓存存储。
-     *
-     * @param client Redis client；不可为空。
-     * @param namespace 命名空间；不可为空。
-     * @param cacheName 缓存名称；不可为空。
-     * @param schemaVersion schema 版本；必须大于 0。
-     * @param keyStrategy key 策略；不可为空。
-     * @param keyCodec 业务 key codec；不可为空。
-     * @param valueCodec value codec；不可为空。
-     * @param envelopeCodec envelope codec；不可为空。
-     */
-    public RedisCacheStore(
-            final RedisClient client,
-            final String namespace,
-            final String cacheName,
-            final int schemaVersion,
-            final RedisCacheKeyStrategy keyStrategy,
-            final CacheKeyCodec<K> keyCodec,
-            final CacheValueCodec<V> valueCodec,
-            final RedisCacheEnvelopeCodec envelopeCodec) {
-        this(
-                client,
-                namespace,
-                cacheName,
-                schemaVersion,
-                keyStrategy,
-                Objects.requireNonNull(keyCodec, "keyCodec")::encode,
-                valueCodec,
-                envelopeCodec,
-                Runnable::run);
+    /** 兼容旧构造路径，使用公共异步执行器避免调用线程阻塞。 */
+    @Deprecated
+    public RedisCacheStore(final RedisClient client, final String namespace, final String cacheName,
+            final int schemaVersion, final RedisCacheKeyStrategy keyStrategy, final CacheKeyCodec<K> keyCodec,
+            final CacheValueCodec<V> valueCodec, final RedisCacheEnvelopeCodec envelopeCodec) {
+        this(client, namespace, cacheName, schemaVersion, keyStrategy, keyCodec, valueCodec, envelopeCodec,
+                COMPATIBILITY_EXECUTOR);
+    }
+
+    /** 兼容底层 key 编码器构造路径，使用公共异步执行器。 */
+    @Deprecated
+    public RedisCacheStore(final RedisClient client, final String namespace, final String cacheName,
+            final int schemaVersion, final RedisCacheKeyStrategy keyStrategy, final Function<K, String> keyEncoder,
+            final CacheValueCodec<V> valueCodec, final RedisCacheEnvelopeCodec envelopeCodec) {
+        this(client, namespace, cacheName, schemaVersion, keyStrategy, keyEncoder, valueCodec, envelopeCodec,
+                COMPATIBILITY_EXECUTOR);
     }
 
     /** 使用指定受管执行域创建 Redis cache store。 */
@@ -214,39 +172,6 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
                 valueCodec,
                 envelopeCodec,
                 ioExecutor);
-    }
-
-    /**
-     * 创建 Redis 二级缓存存储。
-     *
-     * @param client Redis client；不可为空。
-     * @param namespace 命名空间；不可为空。
-     * @param cacheName 缓存名称；不可为空。
-     * @param schemaVersion schema 版本；必须大于 0。
-     * @param keyStrategy key 策略；不可为空。
-     * @param keyEncoder 低层业务 key 编码器；不可为空。推荐优先使用 `CacheKeyCodec` 构造器。
-     * @param valueCodec value codec；不可为空。
-     * @param envelopeCodec envelope codec；不可为空。
-     */
-    public RedisCacheStore(
-            final RedisClient client,
-            final String namespace,
-            final String cacheName,
-            final int schemaVersion,
-            final RedisCacheKeyStrategy keyStrategy,
-            final Function<K, String> keyEncoder,
-            final CacheValueCodec<V> valueCodec,
-            final RedisCacheEnvelopeCodec envelopeCodec) {
-        this(
-                client,
-                namespace,
-                cacheName,
-                schemaVersion,
-                keyStrategy,
-                keyEncoder,
-                valueCodec,
-                envelopeCodec,
-                Runnable::run);
     }
 
     /** 使用指定受管执行域创建 Redis cache store。 */

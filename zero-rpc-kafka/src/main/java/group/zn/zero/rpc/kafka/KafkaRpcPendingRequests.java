@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Kafka RPC pending 请求表。
@@ -192,7 +193,7 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
                 current.serviceName(),
                 current.methodName(),
                 future,
-                pendingTokens.incrementAndGet());
+                pendingTokens.incrementAndGet(), new AtomicReference<>());
         PendingRequest previous = pendingRequests.putIfAbsent(current.correlationId(), pending);
         if (previous != null) {
             permits.release();
@@ -212,7 +213,11 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
             }
             return future;
         }
-        timeoutWheel.schedule(current.correlationId(), current.timeoutAt(), pending.token());
+        KafkaRpcTimeoutWheel.TimeoutTask timeoutTask = timeoutWheel.schedule(
+                current.correlationId(), current.timeoutAt(), pending.token());
+        pending.timeoutTask().set(timeoutTask);
+        // 响应/关闭可以先于记录发布；双方都检查，保证迟到登记不残留在时间轮。
+        if (pendingRequests.get(current.correlationId()) != pending) timeoutWheel.cancel(timeoutTask);
         registeredCount.incrementAndGet();
         future.whenComplete((response, failure) -> {
             if (pendingRequests.remove(current.correlationId(), pending)) finish(pending);
@@ -414,6 +419,7 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
     }
 
     private void finish(final PendingRequest pending) {
+        timeoutWheel.cancel(pending.timeoutTask().get());
         permits.release();
     }
 
@@ -519,6 +525,7 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
      * @param methodName 方法名。
      * @param future 响应 future。
      * @param token pending 内部令牌。
+     * @param timeoutTask 可取消的超时记录，支持与登记发布并发完成。
      */
     private record PendingRequest(
             Instant timeoutAt,
@@ -526,6 +533,7 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
             String serviceName,
             String methodName,
             CompletableFuture<RpcResponse> future,
-            long token) {
+            long token,
+            AtomicReference<KafkaRpcTimeoutWheel.TimeoutTask> timeoutTask) {
     }
 }

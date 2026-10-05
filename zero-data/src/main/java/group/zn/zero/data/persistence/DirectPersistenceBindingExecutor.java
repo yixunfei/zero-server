@@ -39,7 +39,7 @@ public final class DirectPersistenceBindingExecutor implements PersistenceBindin
         Objects.requireNonNull(snapshotSupplier, "snapshotSupplier");
         try {
             return CompletableFuture.completedFuture(snapshotSupplier.get());
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             CompletableFuture<T> future = new CompletableFuture<>();
             future.completeExceptionally(ZeroException.of(
                     DataErrorCode.PERSISTENCE_FLUSH_FAILED,

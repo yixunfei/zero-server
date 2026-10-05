@@ -3,13 +3,30 @@ package group.zn.zero.gm;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeMap;
 
 /** Bounded in-memory idempotency reference implementation for local/tests. */
 public final class InMemoryGmIdempotencyStore implements GmIdempotencyStore {
+    /** 本地参考实现的最大存活记录数；满时拒绝新 claim，不淘汰在途操作。 */
+    private static final int CAPACITY = 4096;
+    /** 请求键与当前记录，由实例锁保护。 */
     private final Map<String, Entry> entries = new HashMap<>();
+    /** 每条记录只有一个到期索引，避免扫描所有键或累积失效节点。 */
+    private final TreeMap<Instant, Set<String>> expirations = new TreeMap<>();
 
+    /**
+     * 原子认领请求并回收已过期记录；线程安全，保留既有 TTL 重用语义。
+     * @param key 请求键；非空、无控制字符，最多 256 字符。
+     * @param fingerprint 请求指纹；约束同 key。
+     * @param now 当前时间；不可为空。
+     * @param ttl 存活时间；必须为正。
+     * @return 认领结果；容量已满时新键返回 FAILED，重复键继续返回原状态。
+     * @throws IllegalArgumentException 参数无效时抛出。
+     */
     @Override
     public synchronized Claim claim(
             final String key,
@@ -20,13 +37,13 @@ public final class InMemoryGmIdempotencyStore implements GmIdempotencyStore {
         require(fingerprint, "fingerprint", 256);
         Objects.requireNonNull(now, "now");
         positive(ttl, "ttl");
+        Instant expiresAt = now.plus(ttl);
+        expire(now);
         Entry existing = entries.get(key);
-        if (existing != null && !existing.expiresAt().isAfter(now)) {
-            entries.remove(key);
-            existing = null;
-        }
         if (existing == null) {
-            entries.put(key, new Entry(fingerprint, State.IN_PROGRESS, null, now.plus(ttl)));
+            if (entries.size() >= CAPACITY) return new Claim(State.FAILED, null);
+            entries.put(key, new Entry(fingerprint, State.IN_PROGRESS, null, expiresAt));
+            index(key, expiresAt);
             return new Claim(State.CLAIMED, null);
         }
         if (!existing.fingerprint().equals(fingerprint)) {
@@ -35,6 +52,7 @@ public final class InMemoryGmIdempotencyStore implements GmIdempotencyStore {
         return new Claim(existing.state(), existing.response());
     }
 
+    /** 保存已认领请求的成功结果；线程安全，更新其到期索引，缺少 claim 时抛出异常。 */
     @Override
     public synchronized void complete(
             final String key,
@@ -44,6 +62,7 @@ public final class InMemoryGmIdempotencyStore implements GmIdempotencyStore {
         update(key, fingerprint, State.COMPLETED, Objects.requireNonNull(response, "response"), expiresAt);
     }
 
+    /** 保存已认领请求的失败状态；线程安全，更新到期索引，缺少 claim 时抛出异常。 */
     @Override
     public synchronized void fail(
             final String key,
@@ -52,6 +71,7 @@ public final class InMemoryGmIdempotencyStore implements GmIdempotencyStore {
         update(key, fingerprint, State.FAILED, null, expiresAt);
     }
 
+    /** @return 当前保留记录数，最多 4096；线程安全，过期记录在下次 claim 时回收。 */
     public synchronized int size() {
         return entries.size();
     }
@@ -69,7 +89,21 @@ public final class InMemoryGmIdempotencyStore implements GmIdempotencyStore {
         if (existing == null || !existing.fingerprint().equals(fingerprint)) {
             throw new IllegalStateException("idempotency claim is missing or conflicts");
         }
+        Set<String> previousKeys = expirations.get(existing.expiresAt());
+        previousKeys.remove(key);
+        if (previousKeys.isEmpty()) expirations.remove(existing.expiresAt());
         entries.put(key, new Entry(fingerprint, state, response, expiresAt));
+        index(key, expiresAt);
+    }
+
+    private void index(final String key, final Instant expiresAt) {
+        expirations.computeIfAbsent(expiresAt, ignored -> new HashSet<>()).add(key);
+    }
+
+    private void expire(final Instant now) {
+        while (!expirations.isEmpty() && !expirations.firstKey().isAfter(now)) {
+            expirations.pollFirstEntry().getValue().forEach(entries::remove);
+        }
     }
 
     private static void require(final String value, final String name, final int max) {
@@ -85,6 +119,7 @@ public final class InMemoryGmIdempotencyStore implements GmIdempotencyStore {
         }
     }
 
+    /** 当前操作状态与到期时间的不可变快照。 */
     private record Entry(
             String fingerprint,
             State state,

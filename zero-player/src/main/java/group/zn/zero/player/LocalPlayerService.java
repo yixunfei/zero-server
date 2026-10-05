@@ -69,6 +69,13 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
      */
     private final Map<Long, PlayerProfile> players = new ConcurrentHashMap<>();
 
+    /** 仓库 miss 加载与回填的准入锁；不在锁内调用外部后端或完成业务 future。 */
+    private final Object loadGuard = new Object();
+    /** 同 UID 共享完整物理加载与回填，最多保留默认缓存并发加载预算个 UID。 */
+    private final Map<Long, CompletableFuture<PlayerProfile>> repositoryLoads = new java.util.HashMap<>();
+    /** 关闭后禁止新建仓库加载；由 loadGuard 保护。 */
+    private boolean closed;
+
     /**
      * Actor 注册句柄。
      */
@@ -260,11 +267,11 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
                             GameRequestContext.client(request.traceId()),
                             LaneKey.session(request.accountId()),
                             new LoginCommand(request, uid, result)), result);
-                } catch (RuntimeException dispatchFailure) {
+                } catch (RuntimeException | Error dispatchFailure) {
                     result.completeExceptionally(dispatchFailure);
                 }
             });
-        } catch (RuntimeException failure) {
+        } catch (RuntimeException | Error failure) {
             result.completeExceptionally(failure);
         }
         return result;
@@ -292,11 +299,11 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
                             GameRequestContext.client(request.traceId()),
                             LaneKey.player(Long.toString(request.uid())),
                             new LoadPlayerCommand(request, profile, result)), result);
-                } catch (RuntimeException failure) {
+                } catch (RuntimeException | Error failure) {
                     result.completeExceptionally(failure);
                 }
             });
-        } catch (RuntimeException failure) {
+        } catch (RuntimeException | Error failure) {
             result.completeExceptionally(failure);
         }
         return result;
@@ -342,11 +349,24 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
     /**
      * 关闭服务并取消 Actor handler 注册。
      *
-     * <p>数据变更：只取消 handler 注册，不清空已有本地状态。线程安全性由 Actor 调度器保证。
+     * <p>取消 handler 注册并结束等待仓库加载的观察者，不清空已有本地状态；线程安全。
+     * 已进入后端的物理工作不能强制中断，完成后不会重新挂接已关闭的加载目录。
      */
     @Override
     public void close() {
-        subscriptions.forEach(ActorSubscription::close);
+        List<CompletableFuture<PlayerProfile>> pending;
+        synchronized (loadGuard) {
+            if (closed) return;
+            closed = true;
+            pending = List.copyOf(repositoryLoads.values());
+            repositoryLoads.clear();
+        }
+        try {
+            subscriptions.forEach(ActorSubscription::close);
+        } finally {
+            ZeroException failure = closedFailure();
+            pending.forEach(result -> result.completeExceptionally(failure));
+        }
     }
 
     private static java.util.concurrent.Executor localExecutor(final Object repository, final Object cache) {
@@ -379,9 +399,44 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
             if (cached.isPresent()) {
                 return CompletableFuture.completedFuture(checkedProfile(request.uid(), cached.orElseThrow()));
             }
-            return loadRepositoryProfile(request.uid()).thenComposeAsync(profile ->
-                    playerCache.put(request.uid(), profile).thenApply(ignored -> profile), remoteIoExecutor);
+            return loadAndCacheProfile(request.uid());
         }, remoteIoExecutor);
+    }
+
+    private CompletionStage<PlayerProfile> loadAndCacheProfile(final long uid) {
+        CompletableFuture<PlayerProfile> result;
+        synchronized (loadGuard) {
+            if (closed) return CompletableFuture.failedFuture(closedFailure());
+            CompletableFuture<PlayerProfile> existing = repositoryLoads.get(uid);
+            if (existing != null) return existing.copy();
+            if (repositoryLoads.size() >= group.zn.zero.cache.CachePolicy.DEFAULT_MAX_CONCURRENT_LOADS) {
+                return CompletableFuture.failedFuture(ZeroException.of(
+                        group.zn.zero.cache.CacheErrorCode.BACKPRESSURE_REJECTED,
+                        "player repository load capacity exceeded", null));
+            }
+            result = new CompletableFuture<>();
+            repositoryLoads.put(uid, result);
+        }
+        try {
+            loadRepositoryProfile(uid).thenComposeAsync(profile ->
+                    playerCache.put(uid, profile).thenApply(ignored -> profile), remoteIoExecutor)
+                    .whenComplete((profile, failure) -> finishRepositoryLoad(uid, result, profile, failure));
+        } catch (RuntimeException | Error failure) {
+            finishRepositoryLoad(uid, result, null, failure);
+        }
+        return result.copy();
+    }
+
+    private void finishRepositoryLoad(final long uid, final CompletableFuture<PlayerProfile> result,
+            final PlayerProfile profile, final Throwable failure) {
+        synchronized (loadGuard) { repositoryLoads.remove(uid, result); }
+        if (failure == null) result.complete(profile);
+        else result.completeExceptionally(failure);
+    }
+
+    private static ZeroException closedFailure() {
+        return ZeroException.of(group.zn.zero.core.error.SystemErrorCode.SYSTEM_ERROR,
+                "player service closed", null);
     }
 
     private CompletionStage<PlayerProfile> loadRepositoryProfile(final long uid) {

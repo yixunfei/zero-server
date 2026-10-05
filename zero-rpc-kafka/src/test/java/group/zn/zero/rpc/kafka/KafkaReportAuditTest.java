@@ -11,8 +11,8 @@ import group.zn.zero.rpc.RpcResponse;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
@@ -34,7 +34,7 @@ class KafkaReportAuditTest {
     /** 用桶锁和逻辑 tick 前进确定性重现选桶之后被扫描的交错。 */
     @Test void schedulingRechecksTickAfterAcquiringBucket() throws Exception {
         try (KafkaRpcTimeoutWheel wheel = new KafkaRpcTimeoutWheel(Duration.ofHours(1), 8, (id, token) -> { }, timer.executor())) {
-            ArrayDeque<?>[] buckets = (ArrayDeque<?>[]) field(wheel, "buckets");
+            Map<?, ?>[] buckets = (Map<?, ?>[]) field(wheel, "buckets");
             AtomicLong tick = (AtomicLong) field(wheel, "currentTick");
             Thread scheduler = new Thread(() -> wheel.schedule("c", Instant.now().plusMillis(10), 1));
             synchronized (buckets[2]) {

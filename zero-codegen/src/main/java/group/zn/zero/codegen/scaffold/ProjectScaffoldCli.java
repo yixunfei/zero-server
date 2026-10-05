@@ -11,7 +11,7 @@ public final class ProjectScaffoldCli {
 
     private static final String DEFAULT_PROJECT_NAME = "zero-local-game";
     private static final String DEFAULT_PACKAGE_NAME = "group.zn.zero.localgame";
-    private static final String DEFAULT_ZERO_VERSION = "0.1.1";
+    private static final String DEFAULT_ZERO_VERSION = "0.1.2-SNAPSHOT";
 
     private ProjectScaffoldCli() {
     }
@@ -138,6 +138,8 @@ public final class ProjectScaffoldCli {
             final ProjectScaffoldRequest request,
             final ProjectScaffoldResult result, final ScaffoldComponents components) {
         Path target = result.outputDirectory();
+        String wrapper = java.io.File.separatorChar == '\\' ? "mvnw.cmd" : "mvnw";
+        String maven = java.nio.file.Files.isRegularFile(Path.of(wrapper)) ? "./" + wrapper : "mvn";
         System.out.println("Created zeroServer local game scaffold:");
         System.out.println("  path: " + target);
         System.out.println("  template: " + result.templateId());
@@ -151,11 +153,12 @@ public final class ProjectScaffoldCli {
         System.out.println("  components: " + String.join(", ", selection.components()));
         System.out.println("  runtimeCapabilities: " + selection.capabilities().size());
         System.out.println("Next:");
-        System.out.println("  mvn -q -f \"" + target.resolve("pom.xml") + "\" clean test");
-        System.out.println("  mvn -q -f \"" + target.resolve("pom.xml") + "\" exec:java");
-        System.out.println("  mvn -q -f \"" + target.resolve("pom.xml") + "\" -Dexec.mainClass="
+        System.out.println("  1. " + maven + " -q -f \"" + target.resolve("pom.xml") + "\" clean test");
+        System.out.println("  2. " + maven + " -q -f \"" + target.resolve("pom.xml") + "\" exec:java");
+        System.out.println("  3. read \"" + target.resolve("BUSINESS_GUIDE.md")
+                + "\" and follow `First Business Change`");
+        System.out.println("  diagnose: " + maven + " -q -f \"" + target.resolve("pom.xml") + "\" -Dexec.mainClass="
                 + request.packageName() + ".RuntimeAssembly exec:java  # diagnose without starting services");
-        System.out.println("  read \"" + target.resolve("BUSINESS_GUIDE.md") + "\" for business editing points");
         System.out.println("  read \"" + target.resolve("COMPONENTS.md") + "\" for component boundaries");
         System.out.println("  read \"" + target.resolve("NEXT_STEPS.md") + "\" for production promotion gaps");
         System.out.println("  inspect \"" + target.resolve("zero-scaffold.json") + "\" for scaffold metadata");

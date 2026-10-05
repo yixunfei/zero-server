@@ -9,11 +9,19 @@ package group.zn.zero.net;
  * @param maxPendingBytesPerConnection 单连接待写预算。
  * @param maxPendingBytesTotal 单个服务器所有连接共享预算。
  * @param flushConsolidationLimit 0 表示立即刷新每个响应批次；正数启用 EventLoop 内刷新合并。
+ * @param preserveTcpFrameOrder true 时同一 TCP 连接按业务处理及响应写入完成顺序串行；默认 false。
  * @author zn
  */
 public record NetworkTuning(NetworkTransport transport, int backlog, int writeLowWaterMark,
         int writeHighWaterMark, long maxPendingBytesPerConnection, long maxPendingBytesTotal,
-        int flushConsolidationLimit) {
+        int flushConsolidationLimit, boolean preserveTcpFrameOrder) {
+    /** 保持既有七参数装配方式，TCP 帧处理默认允许并发。 */
+    public NetworkTuning(final NetworkTransport transport, final int backlog, final int writeLowWaterMark,
+            final int writeHighWaterMark, final long maxPendingBytesPerConnection,
+            final long maxPendingBytesTotal, final int flushConsolidationLimit) {
+        this(transport, backlog, writeLowWaterMark, writeHighWaterMark, maxPendingBytesPerConnection,
+                maxPendingBytesTotal, flushConsolidationLimit, false);
+    }
     /** 校验配置；无效抛出 IllegalArgumentException，空 transport 抛出 NullPointerException。 */
     public NetworkTuning {
         java.util.Objects.requireNonNull(transport, "transport");
@@ -25,6 +33,12 @@ public record NetworkTuning(NetworkTransport transport, int backlog, int writeLo
     /** @return 默认 NIO、backlog 128、32/64KiB 水位、64/256MiB 出站预算、逐批刷新。 */
     public static NetworkTuning defaults() {
         return new NetworkTuning(NetworkTransport.NIO, 128, 32 * 1024, 64 * 1024,
-                64L * 1024 * 1024, 256L * 1024 * 1024, 0);
+                64L * 1024 * 1024, 256L * 1024 * 1024, 0, false);
+    }
+
+    /** 返回保留同一 TCP 连接业务与响应顺序的独立配置。 */
+    public NetworkTuning withTcpFrameOrderPreserved(final boolean enabled) {
+        return new NetworkTuning(transport, backlog, writeLowWaterMark, writeHighWaterMark,
+                maxPendingBytesPerConnection, maxPendingBytesTotal, flushConsolidationLimit, enabled);
     }
 }

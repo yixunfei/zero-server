@@ -19,6 +19,19 @@ import org.junit.jupiter.api.Test;
  */
 class ZeroRuntimeExecutorsFocusedTest {
 
+    /** production 默认远程 IO 必须离开调用线程，关闭后拒绝新请求。 */
+    @Test
+    void remoteIoRunsOffCallerAndClosesWithRuntime() {
+        ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.remoteIo("production-test");
+        try {
+            assertFalse(executors.remoteIoMayInline());
+            assertTrue(submitAndRead(executors.remoteIoExecutor()).startsWith("production-test-remote-io-"));
+        } finally {
+            executors.close();
+        }
+        assertThrows(RejectedExecutionException.class, () -> executors.remoteIoExecutor().execute(() -> { }));
+    }
+
     /** 验证四个执行域均使用受管线程，且不以内联方式运行。 */
     @Test
     void localPrototypeKeepsExecutionDomainsAndThreadOwnership() throws Exception {

@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.ArrayDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
@@ -44,6 +45,9 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
 
     /** 默认脏对象上限，防止停机期间无限增长。 */
     public static final int DEFAULT_MAX_DIRTY_ENTRIES = 100_000;
+
+    /** 默认最多同时保存的独立脏键数，仓库/连接池仍负责各自的资源上限。 */
+    public static final int DEFAULT_MAX_CONCURRENT_WRITES = 16;
 
     /**
      * 服务名称。
@@ -105,14 +109,20 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
     private final Object admissionLock = new Object();
     /** 是否已经停止接受新的脏入口。 */
     private boolean stopping;
+    /** 调度注册代际，禁止跨越停机边界的迟到注册重新激活定时入口。 */
+    private long scheduleGeneration;
     /** 停机等待预算。 */
     private final Duration shutdownTimeout;
     /** 脏对象数量上限。 */
     private final int maxDirtyEntries;
     /** 每个脏键的失败状态；失败项不从脏表丢弃。 */
     private final ConcurrentMap<DirtyKey, PersistenceFailure> failures = new ConcurrentHashMap<>();
+    /** 失败诊断对应的脏代际；迟到的旧代际失败不得阻塞新入口。 */
+    private final ConcurrentMap<DirtyKey, Long> failureGenerations = new ConcurrentHashMap<>();
     /** 重试预算与退避。 */
     private final PersistenceRetryPolicy retryPolicy;
+    /** 同一 flush 内的保存并发上限。 */
+    private final int maxConcurrentWrites;
 
     /**
      * 创建默认统一持久化管理服务。
@@ -172,6 +182,26 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
     public DefaultPersistenceManager(final String serviceName, final PersistenceBindingExecutor bindingExecutor,
             final Clock clock, final Duration shutdownTimeout, final int maxDirtyEntries,
             final PersistenceRetryPolicy retryPolicy) {
+        this(serviceName, bindingExecutor, clock, shutdownTimeout, maxDirtyEntries, retryPolicy,
+                DEFAULT_MAX_CONCURRENT_WRITES);
+    }
+
+    /**
+     * 创建显式并发预算的线程安全管理器；不创建线程，跨脏键并行、同一键仅一项在途。
+     * 快照必须在对象所属绑定域捕获，调用方应在关闭执行器和仓库前停止管理器。
+     * @param serviceName 服务名称；不可空白。
+     * @param bindingExecutor 快照绑定执行器；不可为空。
+     * @param clock 统计时钟；不可为空。
+     * @param shutdownTimeout 停机等待预算；必须为正。
+     * @param maxDirtyEntries 脏键数量上限；必须为正。
+     * @param retryPolicy 重试与隔离策略；不可为空。
+     * @param maxConcurrentWrites 同一 flush 的在途写入上限；必须为正，应匹配驱动容量。
+     * @throws NullPointerException 必要参数为空时抛出。
+     * @throws IllegalArgumentException 名称空白或预算非正时抛出。
+     */
+    public DefaultPersistenceManager(final String serviceName, final PersistenceBindingExecutor bindingExecutor,
+            final Clock clock, final Duration shutdownTimeout, final int maxDirtyEntries,
+            final PersistenceRetryPolicy retryPolicy, final int maxConcurrentWrites) {
         this.retryPolicy = Objects.requireNonNull(retryPolicy, "retryPolicy");
         this.shutdownTimeout = Objects.requireNonNull(shutdownTimeout, "shutdownTimeout");
         if (shutdownTimeout.isNegative() || shutdownTimeout.isZero()) {
@@ -184,6 +214,8 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             throw new IllegalArgumentException("maxDirtyEntries must be positive");
         }
         this.maxDirtyEntries = maxDirtyEntries;
+        if (maxConcurrentWrites <= 0) throw new IllegalArgumentException("maxConcurrentWrites must be positive");
+        this.maxConcurrentWrites = maxConcurrentWrites;
     }
 
     /**
@@ -302,12 +334,26 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
         if (currentInterval.isZero() || currentInterval.isNegative()) {
             throw new IllegalArgumentException("interval must be positive");
         }
-        PersistenceScheduleHandle handle = scheduler.scheduleAtFixedRate(
+        long generation;
+        synchronized (admissionLock) {
+            if (stopping) {
+                throw ZeroException.of(DataErrorCode.PERSISTENCE_FLUSH_FAILED, "persistence is stopping", null);
+            }
+            generation = scheduleGeneration;
+        }
+        PersistenceScheduleHandle handle = Objects.requireNonNull(scheduler.scheduleAtFixedRate(
                 serviceName + "-flush",
                 currentInterval,
-                () -> flushNow());
-        scheduleHandles.add(handle);
-        return handle;
+                () -> flushNow()), "schedule handle");
+        synchronized (admissionLock) {
+            if (!stopping && generation == scheduleGeneration) {
+                scheduleHandles.add(handle);
+                return handle;
+            }
+        }
+        handle.cancel();
+        throw ZeroException.of(DataErrorCode.PERSISTENCE_FLUSH_FAILED,
+                "persistence stopped during schedule registration", null);
     }
 
     /**
@@ -334,9 +380,14 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
     /** 停止定时入口并在预算内保存全部脏对象；失败保留对象且生命周期进入 FAILED。 */
     @Override
     protected void doStop() {
-        synchronized (admissionLock) { stopping = true; }
-        for (PersistenceScheduleHandle handle : scheduleHandles) handle.cancel();
-        scheduleHandles.clear();
+        List<PersistenceScheduleHandle> handles;
+        synchronized (admissionLock) {
+            stopping = true;
+            scheduleGeneration++;
+            handles = List.copyOf(scheduleHandles);
+            scheduleHandles.clear();
+        }
+        for (PersistenceScheduleHandle handle : handles) handle.cancel();
         long startedAt = System.nanoTime();
         try {
             do {
@@ -361,20 +412,26 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
     private CompletionStage<FlushAccumulator> flushBatch(
             final List<DirtyEntry<?, ?>> batch,
             final FlushAccumulator accumulator) {
-        CompletionStage<FlushAccumulator> stage = CompletableFuture.completedFuture(accumulator);
-        for (DirtyEntry<?, ?> entry : batch) {
-            stage = stage.thenCompose(current -> flushEntry(entry)
-                    .handle((ignored, throwable) -> {
+        int lanes = Math.min(maxConcurrentWrites, batch.size());
+        CompletableFuture<?>[] completions = new CompletableFuture<?>[lanes];
+        for (int lane = 0; lane < lanes; lane++) {
+            CompletionStage<Void> stage = CompletableFuture.completedFuture(null);
+            for (int index = lane; index < batch.size(); index += lanes) {
+                DirtyEntry<?, ?> entry = batch.get(index);
+                stage = stage.thenCompose(ignored -> flushEntry(entry)
+                    .handle((saved, throwable) -> {
                         if (throwable == null) {
-                            current.success();
+                            accumulator.success();
                         } else {
                             recordFailure(entry, throwable);
-                            current.failure();
+                            accumulator.failure();
                         }
-                        return current;
+                        return null;
                     }));
+            }
+            completions[lane] = stage.toCompletableFuture();
         }
-        return stage;
+        return CompletableFuture.allOf(completions).thenApply(ignored -> accumulator);
     }
 
     private void startFlush(final FlushRequest request) {
@@ -388,7 +445,7 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             FlushAccumulator accumulator = new FlushAccumulator(startedAt, batch.size());
             flushBatch(batch, accumulator).thenApply(this::completeResult)
                     .whenComplete((result, failure) -> finishFlush(request, result, failure));
-        } catch (RuntimeException failure) {
+        } catch (RuntimeException | Error failure) {
             finishFlush(request, null, failure);
         }
     }
@@ -417,7 +474,7 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
     private CompletionStage<Void> flushEntry(final DirtyEntry<?, ?> entry) {
         try {
             return flushTyped((DirtyEntry) entry);
-        } catch (RuntimeException failure) {
+        } catch (RuntimeException | Error failure) {
             return failedFuture(DataErrorCode.PERSISTENCE_FLUSH_FAILED, "snapshot capture failed", failure);
         }
     }
@@ -429,8 +486,10 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
                 .thenCompose(entity -> saveSnapshot(entry, target, entity))
                 .thenRun(() -> {
                     synchronized (admissionLock) {
-                        dirtyEntries.remove(entry.key(), entry);
-                        failures.remove(entry.key());
+                        if (dirtyEntries.remove(entry.key(), entry)) {
+                            failures.remove(entry.key());
+                            failureGenerations.remove(entry.key(), entry.generation());
+                        }
                     }
                 });
     }
@@ -467,8 +526,9 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
      * @param targetName 目标名。 @param id 实体 ID。 @return 是否有失败状态被恢复。 */
     public boolean retryFailed(final String targetName, final Object id) {
         synchronized (admissionLock) {
-            return failures.remove(new DirtyKey(requireText(targetName, "targetName"),
-                    Objects.requireNonNull(id, "id"))) != null;
+            DirtyKey key = new DirtyKey(requireText(targetName, "targetName"), Objects.requireNonNull(id, "id"));
+            failureGenerations.remove(key);
+            return failures.remove(key) != null;
         }
     }
 
@@ -484,6 +544,9 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
         while (cause instanceof java.util.concurrent.CompletionException && cause.getCause() != null) cause = cause.getCause();
         var code = cause instanceof ZeroException zero ? zero.errorCode() : DataErrorCode.PERSISTENCE_FLUSH_FAILED;
         synchronized (admissionLock) {
+            if (dirtyEntries.get(entry.key()) != entry) {
+                return;
+            }
             PersistenceFailure previous = failures.get(entry.key());
             int attempts = previous == null ? 1 : previous.attempts() + 1;
             boolean isolated = attempts >= retryPolicy.maxAttempts() || code == DataErrorCode.VERSION_CONFLICT
@@ -493,6 +556,7 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             long now = clock.millis();
             failures.put(entry.key(), new PersistenceFailure(entry.targetName(), entry.id(), attempts,
                     now > Long.MAX_VALUE - delay ? Long.MAX_VALUE : now + delay, isolated, code.code()));
+            failureGenerations.put(entry.key(), entry.generation());
         }
     }
 
@@ -583,12 +647,12 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
         /**
          * 成功数量。
          */
-        private int successCount;
+        private final AtomicInteger successCount = new AtomicInteger();
 
         /**
          * 失败数量。
          */
-        private int failureCount;
+        private final AtomicInteger failureCount = new AtomicInteger();
 
         /**
          * 创建 flush 计数器。
@@ -605,14 +669,14 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
          * 记录成功。
          */
         void success() {
-            successCount++;
+            successCount.incrementAndGet();
         }
 
         /**
          * 记录失败。
          */
         void failure() {
-            failureCount++;
+            failureCount.incrementAndGet();
         }
 
         /**
@@ -639,7 +703,7 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
          * @return 成功数量。
          */
         int successCount() {
-            return successCount;
+            return successCount.get();
         }
 
         /**
@@ -648,7 +712,7 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
          * @return 失败数量。
          */
         int failureCount() {
-            return failureCount;
+            return failureCount.get();
         }
     }
 }

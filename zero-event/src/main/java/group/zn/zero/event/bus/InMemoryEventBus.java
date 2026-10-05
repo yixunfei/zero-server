@@ -18,6 +18,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Executor;
 
 /**
  * 本地内存事件总线。
@@ -71,6 +72,9 @@ public final class InMemoryEventBus implements EventBus {
      */
     private final Clock clock;
 
+    /** 处理器执行域；默认直接执行以保持兼容，可由 starter 注入受管执行器。 */
+    private final Executor dispatchExecutor;
+
     /**
      * 创建内存事件总线。
      *
@@ -78,7 +82,7 @@ public final class InMemoryEventBus implements EventBus {
      * @throws NullPointerException 当死信接收器为空时抛出。
      */
     public InMemoryEventBus(final DeadLetterSink deadLetterSink) {
-        this(deadLetterSink, Clock.systemUTC());
+        this(deadLetterSink, Clock.systemUTC(), Runnable::run);
     }
 
     /**
@@ -89,8 +93,24 @@ public final class InMemoryEventBus implements EventBus {
      * @throws NullPointerException 当死信接收器或时钟为空时抛出。
      */
     public InMemoryEventBus(final DeadLetterSink deadLetterSink, final Clock clock) {
+        this(deadLetterSink, clock, Runnable::run);
+    }
+
+    /**
+     * 创建可配置执行域的内存事件总线。
+     *
+     * @param deadLetterSink 死信接收器；不可为空。
+     * @param clock 时钟；不可为空。
+     * @param dispatchExecutor 处理器执行器；不可为空；由调用方管理生命周期。
+     * @throws NullPointerException 任一参数为空时抛出。
+     */
+    public InMemoryEventBus(
+            final DeadLetterSink deadLetterSink,
+            final Clock clock,
+            final Executor dispatchExecutor) {
         this.deadLetterSink = Objects.requireNonNull(deadLetterSink, "deadLetterSink");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.dispatchExecutor = Objects.requireNonNull(dispatchExecutor, "dispatchExecutor");
     }
 
     /**
@@ -174,7 +194,35 @@ public final class InMemoryEventBus implements EventBus {
         }
 
         if (handlerSnapshot.isEmpty()) return SUCCESS;
-        return dispatch(event, handlerSnapshot, 0, null, null);
+        return scheduleDispatch(event, handlerSnapshot);
+    }
+
+    private CompletionStage<Void> scheduleDispatch(
+            final ZeroEvent event,
+            final List<HandlerRegistration> handlerSnapshot) {
+        CompletableFuture<Void> completion = new CompletableFuture<>();
+        try {
+            dispatchExecutor.execute(() -> {
+                CompletionStage<Void> stage;
+                try {
+                    stage = dispatch(event, handlerSnapshot, 0, null, null);
+                    stage.whenComplete((ignored, failure) -> {
+                        if (failure == null) {
+                            completion.complete(null);
+                        } else {
+                            completion.completeExceptionally(failure);
+                        }
+                    });
+                } catch (RuntimeException | Error failure) {
+                    completion.completeExceptionally(failure);
+                }
+            });
+        } catch (RuntimeException | Error failure) {
+            ZeroException zeroException = asZeroException(failure);
+            recordDeadLetter(event, zeroException);
+            completion.completeExceptionally(zeroException);
+        }
+        return completion.minimalCompletionStage();
     }
 
     private CompletionStage<Void> dispatch(final ZeroEvent event, final List<HandlerRegistration> registrations,
@@ -203,6 +251,20 @@ public final class InMemoryEventBus implements EventBus {
             failures = continuation.failuresAfterCompletion();
         }
         return finish(failures, completion);
+    }
+
+    /** 把异步 handler 的续调重新送回配置的执行域，避免完成线程劫持发布者线程。 */
+    private void resume(final Continuation continuation) {
+        try {
+            dispatchExecutor.execute(() -> dispatch(
+                    continuation.event,
+                    continuation.registrations,
+                    continuation.next,
+                    continuation.failuresAfterCompletion(),
+                    continuation.completion));
+        } catch (RuntimeException | Error failure) {
+            continuation.completion.completeExceptionally(asZeroException(failure));
+        }
     }
 
     private List<ZeroException> appendFailure(final ZeroEvent event, final List<ZeroException> failures,
@@ -260,7 +322,7 @@ public final class InMemoryEventBus implements EventBus {
         private void completed(final Void ignored, final Throwable exception) {
             if (!claimed.compareAndSet(false, true)) return;
             failure = exception;
-            if (handoff.getAndSet(2) == 1) dispatch(event, registrations, next, failuresAfterCompletion(), completion);
+            if (handoff.getAndSet(2) == 1) resume(this);
         }
 
         private List<ZeroException> failuresAfterCompletion() {

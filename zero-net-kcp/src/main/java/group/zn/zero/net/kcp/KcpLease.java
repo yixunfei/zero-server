@@ -71,7 +71,7 @@ final class KcpLease {
             services.store().release(conv(), services.nodeId(), generation()).whenComplete((ok, failure) -> {
                 if (failure != null) session.owner.observeFailure(session.connection, NetErrorCode.STOP_FAILED, failure);
             });
-        } catch (RuntimeException failure) { session.owner.observeFailure(session.connection, NetErrorCode.STOP_FAILED, failure); }
+        } catch (RuntimeException | Error failure) { session.owner.observeFailure(session.connection, NetErrorCode.STOP_FAILED, failure); }
     }
     private void lost(final Throwable failure) {
         active = false; session.owner.counters().reason("lease.lost");

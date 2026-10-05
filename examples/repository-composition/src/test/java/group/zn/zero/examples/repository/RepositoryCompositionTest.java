@@ -32,7 +32,7 @@ class RepositoryCompositionTest {
                 new PostgresqlDataEnvelopeStore(),
                 new RedisDataEnvelopeStore("composition_example", "balances"));
         for (ZeroDataEnvelopeStore store : stores) {
-            try (var factory = new EnvelopeRepositoryFactory(metadata -> store)) {
+            try (var factory = new EnvelopeRepositoryFactory(metadata -> store, Runnable::run)) {
                 var repository = factory.create(RepositoryCompositionApplication.BALANCES);
                 var service = new BalanceService(repository);
                 assertEquals(1, service.credit("player", 10).toCompletableFuture().join().version());

@@ -1,6 +1,7 @@
 package group.zn.zero.runtime.kafka;
 
 import group.zn.zero.rpc.kafka.KafkaRpcAdapter;
+import group.zn.zero.rpc.kafka.KafkaRpcConsumerExecution;
 import group.zn.zero.rpc.kafka.KafkaRpcSettings;
 import group.zn.zero.rpc.observer.RpcTransportObserver;
 import group.zn.zero.rpc.RpcRequest;
@@ -39,13 +40,23 @@ interface KafkaRpcAdapterResourceFactory {
      * @return 生产资源工厂；不可为空，无状态且线程安全。
      */
     static KafkaRpcAdapterResourceFactory production(final java.util.concurrent.ScheduledExecutorService timer) {
-        return production(SecurityMetadataVerifier.failClosed(), timer);
+        return production(SecurityMetadataVerifier.failClosed(), KafkaRpcConsumerExecution.compatibilityDefault(), timer);
     }
 
     /** 在 handler 注册前安装验证器，返回尚未发布的真实资源。 */
     static KafkaRpcAdapterResourceFactory production(final SecurityMetadataVerifier verifier, final java.util.concurrent.ScheduledExecutorService timer) {
+        return production(verifier, KafkaRpcConsumerExecution.compatibilityDefault(), timer);
+    }
+
+    /** 在 handler 注册前安装验证器和业务交付策略，返回尚未发布的真实资源。 */
+    static KafkaRpcAdapterResourceFactory production(
+            final SecurityMetadataVerifier verifier,
+            final KafkaRpcConsumerExecution consumerExecution,
+            final java.util.concurrent.ScheduledExecutorService timer) {
         Objects.requireNonNull(verifier, "verifier");
-        return (settings, observer) -> new DefaultKafkaRpcAdapterResource(settings, observer, verifier, timer);
+        Objects.requireNonNull(consumerExecution, "consumerExecution");
+        return (settings, observer) -> new DefaultKafkaRpcAdapterResource(
+                settings, observer, verifier, consumerExecution, timer);
     }
 }
 
@@ -141,10 +152,13 @@ final class DefaultKafkaRpcAdapterResource implements KafkaRpcAdapterResource {
     DefaultKafkaRpcAdapterResource(
             final KafkaRpcSettings settings,
             final RpcTransportObserver observer,
-            final SecurityMetadataVerifier verifier, final java.util.concurrent.ScheduledExecutorService timer) {
+            final SecurityMetadataVerifier verifier,
+            final KafkaRpcConsumerExecution consumerExecution,
+            final java.util.concurrent.ScheduledExecutorService timer) {
         this.adapter = new KafkaRpcAdapter(
                 Objects.requireNonNull(settings, "settings"),
-                Objects.requireNonNull(observer, "observer"), timer);
+                Objects.requireNonNull(observer, "observer"),
+                Objects.requireNonNull(consumerExecution, "consumerExecution"), timer);
         this.adapter.securityMetadataVerifier(verifier);
     }
 

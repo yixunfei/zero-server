@@ -79,15 +79,15 @@ public final class PostgresqlOwnershipStore implements OwnershipStore {
     public boolean release(final OwnershipLease lease) {
         Objects.requireNonNull(lease, "lease");
         try (Connection connection = database.connection()) {
-            Instant now = PostgresqlOwnershipSupport.databaseNow(connection);
-            String sql = "delete from " + database.ownershipTable() + " where resource_type=? and resource_id=? "
-                    + "and generation=? and process_id=? and incarnation_id=? and epoch=? and expires_at>=?";
+            // 保留历史 epoch；删除行会让后续 acquire 从 1 重新开始，使旧租约身份复活。
+            String sql = "update " + database.ownershipTable()
+                    + " set expires_at=clock_timestamp() - interval '1 microsecond' where resource_type=? and resource_id=? "
+                    + "and generation=? and process_id=? and incarnation_id=? and epoch=? and expires_at>=clock_timestamp()";
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 PostgresqlOwnershipSupport.bindResource(statement, lease.resource(), 1);
                 statement.setString(4, lease.owner().processId());
                 statement.setString(5, lease.owner().incarnationId());
                 statement.setLong(6, lease.epoch());
-                statement.setTimestamp(7, PostgresqlOwnershipSupport.timestamp(now));
                 return statement.executeUpdate() == 1;
             }
         } catch (SQLException failure) {

@@ -21,6 +21,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -125,6 +130,85 @@ class PostgresqlOwnershipExternalIT {
                 StateVersion.initial(), "request-1", "different")));
         assertThrows(OwnershipException.class, () -> restarted.commit(new StateCommitRequest<>(resource, lease,
                 StateVersion.initial(), "request-2", "second")));
+    }
+
+    /** 主动释放不能清除 fencing 历史；同一 incarnation 重获租约后旧 token 仍须被拒绝。 */
+    @Test
+    void releaseRetainsEpochAcrossReacquisition() {
+        var resource = resource("release-epoch");
+        var owner = incarnation("same-process");
+        var oldLease = first.acquire(resource, owner, Duration.ofSeconds(30));
+        assertTrue(first.release(oldLease));
+        var newLease = second.acquire(resource, owner, Duration.ofSeconds(30));
+        assertEquals(oldLease.epoch() + 1, newLease.epoch());
+        assertThrows(OwnershipException.class, () -> first.assertCurrent(oldLease));
+        assertThrows(OwnershipException.class, () -> state.commit(new StateCommitRequest<>(resource, oldLease,
+                StateVersion.initial(), "stale-after-release", "old")));
+        assertTrue(state.commit(new StateCommitRequest<>(resource, newLease,
+                StateVersion.initial(), "new-after-release", "new")).committed());
+    }
+
+    /** 两个请求都完成首次去重查询后才竞争行锁；等待者必须重放已提交收据。 */
+    @Test
+    void concurrentIdenticalCommitsReplayAfterWaitingForLeaseLock() throws Exception {
+        var resource = resource("concurrent-replay");
+        var lease = first.acquire(resource, incarnation("concurrent-writer"), Duration.ofSeconds(30));
+        var request = new StateCommitRequest<>(resource, lease, StateVersion.initial(), "same-request", "value");
+        var reads = new CountDownLatch(2);
+        var source = synchronizeReceiptReads(ConnectionSettings.load().orElseThrow().dataSource(), reads);
+        var gatedDatabase = new PostgresqlOwnershipDatabase(source, tablePrefix);
+        var gatedStore = new PostgresqlFencedStateStore<>(gatedDatabase, new StringCodec());
+        try (ExecutorService workers = Executors.newFixedThreadPool(2)) {
+            Future<CommitResult<String>> left = workers.submit(() -> gatedStore.commit(request));
+            Future<CommitResult<String>> right = workers.submit(() -> gatedStore.commit(request));
+            var firstResult = left.get(10, TimeUnit.SECONDS);
+            var secondResult = right.get(10, TimeUnit.SECONDS);
+            assertEquals(1, (firstResult.committed() ? 1 : 0) + (secondResult.committed() ? 1 : 0));
+            assertEquals(1, (firstResult.replayed() ? 1 : 0) + (secondResult.replayed() ? 1 : 0));
+            assertEquals(firstResult.newVersion(), secondResult.newVersion());
+            assertEquals(1, state.read(resource).orElseThrow().version().value());
+        }
+    }
+
+    /** 在真实 JDBC 查询结束后设置屏障，保证首次去重读取都未见收据。 */
+    private static DataSource synchronizeReceiptReads(final DataSource delegate, final CountDownLatch reads) {
+        return (DataSource) Proxy.newProxyInstance(DataSource.class.getClassLoader(), new Class<?>[] {DataSource.class},
+                (proxy, method, args) -> {
+                    Object result = invoke(delegate, method, args);
+                    return result instanceof Connection connection ? synchronizeConnection(connection, reads) : result;
+                });
+    }
+
+    private static Connection synchronizeConnection(final Connection delegate, final CountDownLatch reads) {
+        return (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(), new Class<?>[] {Connection.class},
+                (proxy, method, args) -> {
+                    Object result = invoke(delegate, method, args);
+                    if (result instanceof PreparedStatement statement && args != null && args[0] instanceof String sql
+                            && sql.startsWith("select expected_version")) {
+                        return synchronizeStatement(statement, reads);
+                    }
+                    return result;
+                });
+    }
+
+    private static PreparedStatement synchronizeStatement(final PreparedStatement delegate, final CountDownLatch reads) {
+        return (PreparedStatement) Proxy.newProxyInstance(PreparedStatement.class.getClassLoader(),
+                new Class<?>[] {PreparedStatement.class}, (proxy, method, args) -> {
+                    Object result = invoke(delegate, method, args);
+                    if (method.getName().equals("executeQuery")) {
+                        reads.countDown();
+                        if (!reads.await(5, TimeUnit.SECONDS)) throw new AssertionError("both receipt reads must finish");
+                    }
+                    return result;
+                });
+    }
+
+    private static Object invoke(final Object target, final Method method, final Object[] args) throws Throwable {
+        try {
+            return method.invoke(target, args);
+        } catch (InvocationTargetException failure) {
+            throw failure.getCause();
+        }
     }
 
     /** 迁移记录可由新的 store 实例读取并从 checkpoint 继续推进。 */

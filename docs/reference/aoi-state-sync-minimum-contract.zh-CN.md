@@ -1,5 +1,7 @@
 # AOI / 状态同步本地契约与扩展边界
 
+2026-10-05：`SyncEnvelope.preparePayload(map)` 返回深不可变快照，多个观察者可共享快照和一次 SHA-256。普通 Map 和显式 hash 仍立即计算、校验；摘要 canonical 格式保持，使用单 StringBuilder 与线程独占 digest。准备入口仅接受 Map、Collection 及可证明不可变的标量，拒绝数组和自定义可变叶子。此能力不代表生产广播/一次编码多处发送已经接入；迁移见[说明](../migrations/20261005-performance-issues.zh-CN.md)。
+
 当前状态：`implemented-local-minimum-slice / productionReady=false`。对应模块：`zero-aoi、zero-state-sync`，入口：`InMemoryAoiIndex、InMemoryStateSync`。使用方式见[可运行示例](../../examples/aoi-state-sync/README.zh-CN.md)，整体状态见[能力矩阵](../capability-matrix.zh-CN.md)。
 
 本页先列当前本地限制和验证口径。末尾保留历史设计输入，其中候选类型、状态和跨服行为可能尚未实现，不应直接作为现行 API 使用。生产扩展仍需评审公共 API、Actor 所有权和数据边界；`requiresConfirmation=true`。

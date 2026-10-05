@@ -18,12 +18,13 @@ import org.junit.jupiter.api.Test;
 
 /** 缺失玩家策略与登录仓库校验回归。 @author zn */
 class MissingPlayerPolicyTest {
-    /** 两次读取都未命中时，只创建一次；后到的条件写冲突读取获胜记录。 */
+    /** 两个服务共享仓库且初读都未命中时，后到的条件写冲突必须读取获胜记录。 */
     @Test void concurrentCreationKeepsWinningProfile() {
         var backing = new InMemoryCrudRepository<Long, PlayerProfile>();
         var firstRead = new CompletableFuture<Optional<PlayerProfile>>();
         var secondRead = new CompletableFuture<Optional<PlayerProfile>>();
         var reads = new java.util.concurrent.atomic.AtomicInteger();
+        var writes = new java.util.concurrent.atomic.AtomicInteger();
         @SuppressWarnings("unchecked")
         CrudRepository<Long, PlayerProfile> repository = (CrudRepository<Long, PlayerProfile>) Proxy.newProxyInstance(
                 CrudRepository.class.getClassLoader(), new Class<?>[]{CrudRepository.class}, (proxy, method, args) -> {
@@ -32,17 +33,22 @@ class MissingPlayerPolicyTest {
                         if (read == 1) return firstRead;
                         if (read == 2) return secondRead;
                     }
+                    if (method.getName().equals("save")) writes.incrementAndGet();
                     try { return method.invoke(backing, args); }
                     catch (InvocationTargetException failure) { throw failure.getCause(); }
                 });
         try (var service = new LocalPlayerService(new LocalActorScheduler(), request -> 7, repository,
-                new InMemoryCacheService<>(), MissingPlayerPolicy.CREATE_DEFAULT, Runnable::run)) {
+                new InMemoryCacheService<>(), MissingPlayerPolicy.CREATE_DEFAULT, Runnable::run);
+                var competitor = new LocalPlayerService(new LocalActorScheduler(), request -> 7, repository,
+                        new InMemoryCacheService<>(), MissingPlayerPolicy.CREATE_DEFAULT, Runnable::run)) {
             var first = service.loadPlayer(new PlayerLoadRequest(7, "first"));
-            var second = service.loadPlayer(new PlayerLoadRequest(7, "second"));
+            var second = competitor.loadPlayer(new PlayerLoadRequest(7, "second"));
+            assertEquals(2, reads.get());
             firstRead.complete(Optional.empty());
             secondRead.complete(Optional.empty());
             assertEquals(1, first.toCompletableFuture().join().version());
             assertEquals(first.toCompletableFuture().join(), second.toCompletableFuture().join());
+            assertEquals(2, writes.get());
             assertEquals(1, backing.findById(7L).toCompletableFuture().join().orElseThrow().version());
         }
     }

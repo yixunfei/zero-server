@@ -4,17 +4,20 @@ import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.data.envelope.ZeroDataEnvelope;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeStore;
 import group.zn.zero.data.error.DataErrorCode;
+import group.zn.zero.data.model.PageRequest;
+import group.zn.zero.data.model.PageResult;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import javax.sql.DataSource;
-import org.postgresql.ds.PGSimpleDataSource;
 
 /**
  * PostgreSQL JDBC-backed 通用对象表信封存储。
@@ -22,6 +25,9 @@ import org.postgresql.ds.PGSimpleDataSource;
  * @author zn
  */
 public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStore {
+
+    /** 单次协议批次上限，限制参数和服务端执行成本。 */
+    private static final int BATCH_SIZE = 256;
 
     /**
      * 数据命名空间。
@@ -40,22 +46,6 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
 
     /** Caller-owned source; closing a borrowed connection returns it to its source. */
     private final DataSource dataSource;
-
-    /**
-     * 创建无连接池的 PostgreSQL JDBC-backed 信封存储，适用于测试与低频工具。
-     * 每次操作借用新连接；业务运行应注入受管 DataSource，生产装配已使用 Hikari 池。
-     *
-     * @param namespace 数据命名空间；不可为空。
-     * @param collection 数据集合名称；不可为空。
-     * @param settings driver 配置；不可为空。
-     * @throws NullPointerException 当必要参数为空时抛出。
-     */
-    public PostgresqlDriverEnvelopeStore(
-            final String namespace,
-            final String collection,
-            final PostgresqlDriverSettings settings) {
-        this(namespace, collection, Objects.requireNonNull(settings, "settings").tableName(), unpooled(settings));
-    }
 
     /** Uses a caller-owned DataSource with auto-commit connections and a validated SQL table name. */
     public PostgresqlDriverEnvelopeStore(
@@ -117,6 +107,128 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
             return List.copyOf(results);
         } catch (SQLException ex) {
             throw ZeroException.of(DataErrorCode.READ_FAILED, "postgresql read all failed", ex);
+        }
+    }
+
+    /** 批量查询，复用一个连接；结果不可变，按输入 ID 排序，缺失项省略，重复项保留。 */
+    @Override
+    public List<ZeroDataEnvelope> findByIds(final Collection<String> ids) {
+        List<String> current = List.copyOf(ids);
+        if (current.isEmpty()) return List.of();
+        var found = new HashMap<String, ZeroDataEnvelope>();
+        String sql = "select * from " + tableName + " where namespace=? and collection=? and id=any(?)";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, namespace);
+            statement.setString(2, collection);
+            for (int offset = 0; offset < current.size(); offset += BATCH_SIZE) {
+                var keys = connection.createArrayOf("text",
+                        current.subList(offset, Math.min(offset + BATCH_SIZE, current.size())).toArray());
+                try {
+                    statement.setArray(3, keys);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            ZeroDataEnvelope envelope = row(rows).toEnvelope();
+                            found.put(envelope.id(), envelope);
+                        }
+                    }
+                } finally { keys.free(); }
+            }
+            List<ZeroDataEnvelope> result = new ArrayList<>(current.size());
+            for (String id : current) {
+                if (found.containsKey(id)) result.add(found.get(id));
+            }
+            return List.copyOf(result);
+        } catch (SQLException failure) {
+            throw ZeroException.of(DataErrorCode.READ_FAILED, "postgresql batch read failed", failure);
+        }
+    }
+
+    /** SQL 下推分页；按 ID 稳定排序，跨语句并发写时 items/total 为弱一致。 */
+    @Override
+    public PageResult<ZeroDataEnvelope> findPage(final PageRequest request) {
+        Objects.requireNonNull(request, "request");
+        String sql = "select * from " + tableName
+                + " where namespace=? and collection=? order by id limit ? offset ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, namespace);
+            statement.setString(2, collection);
+            statement.setInt(3, request.limit());
+            statement.setInt(4, request.offset());
+            List<ZeroDataEnvelope> items = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) items.add(row(rows).toEnvelope());
+            }
+            long total = count(connection);
+            long next = (long) request.offset() + items.size();
+            return new PageResult<>(items, !items.isEmpty() && next < total ? String.valueOf(next) : null, total);
+        } catch (SQLException failure) {
+            throw ZeroException.of(DataErrorCode.READ_FAILED, "postgresql page read failed", failure);
+        }
+    }
+
+    /** JDBC 有界批处理；逐项 CAS 独立提交，结果不可变并按输入顺序返回，非事务原子批次。 */
+    @Override
+    public List<Boolean> saveIfVersionBatch(final Collection<ConditionalWrite> writes) {
+        List<ConditionalWrite> current = List.copyOf(writes);
+        for (ConditionalWrite write : current) validateEnvelope(write.envelope());
+        if (current.isEmpty()) return List.of();
+        List<Boolean> result = new ArrayList<>(current.size());
+        try (Connection connection = connection()) {
+            int offset = 0;
+            while (offset < current.size()) {
+                boolean insert = current.get(offset).expectedVersion() == 0L;
+                int end = offset + 1;
+                while (end < current.size() && end - offset < BATCH_SIZE
+                        && (current.get(end).expectedVersion() == 0L) == insert) end++;
+                executeWrites(connection, current.subList(offset, end), insert, result);
+                offset = end;
+            }
+            return List.copyOf(result);
+        } catch (SQLException failure) {
+            throw ZeroException.of(classifyWriteFailure(failure), "postgresql batch conditional write failed", failure);
+        }
+    }
+
+    private void executeWrites(final Connection connection, final List<ConditionalWrite> writes,
+                               final boolean insert, final List<Boolean> result) throws SQLException {
+        // INSERT SELECT 防止 reWriteBatchedInserts 合并后只能返回 SUCCESS_NO_INFO，丢失逐项 CAS 结果。
+        String sql = insert ? "insert into " + tableName
+                + " (namespace, collection, id, version, schema_version, codec_version, updated_at_epoch_millis, payload)"
+                + " select ?, ?, ?, ?, ?, ?, ?, ? on conflict (namespace, collection, id) do nothing"
+                : updateSql();
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (ConditionalWrite write : writes) {
+                PostgresqlDataRow row = PostgresqlDataRow.fromEnvelope(write.envelope());
+                if (insert) bindRow(statement, row);
+                else bindUpdate(statement, row, write.expectedVersion());
+                statement.addBatch();
+            }
+            int[] counts = statement.executeBatch();
+            if (counts.length != writes.size()) throw new SQLException("invalid JDBC batch result size");
+            for (int count : counts) {
+                if (count != 0 && count != 1) throw new SQLException("JDBC batch requires exact CAS update counts");
+                result.add(count == 1);
+            }
+        }
+    }
+
+    /** 批量删除，复用连接并按有界 ID 数组执行；不承诺批次事务原子性。 */
+    @Override
+    public void deleteAll(final Collection<String> ids) {
+        List<String> current = List.copyOf(ids);
+        if (current.isEmpty()) return;
+        String sql = "delete from " + tableName + " where namespace=? and collection=? and id=any(?)";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, namespace);
+            statement.setString(2, collection);
+            for (int offset = 0; offset < current.size(); offset += BATCH_SIZE) {
+                var keys = connection.createArrayOf("text",
+                        current.subList(offset, Math.min(offset + BATCH_SIZE, current.size())).toArray());
+                try { statement.setArray(3, keys); statement.executeUpdate(); }
+                finally { keys.free(); }
+            }
+        } catch (SQLException failure) {
+            throw ZeroException.of(DataErrorCode.DELETE_FAILED, "postgresql batch delete failed", failure);
         }
     }
 
@@ -206,18 +318,23 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
      */
     @Override
     public long count() {
+        try (Connection connection = connection()) {
+            return count(connection);
+        } catch (SQLException ex) {
+            throw ZeroException.of(DataErrorCode.READ_FAILED, "postgresql count failed", ex);
+        }
+    }
+
+    private long count(final Connection connection) throws SQLException {
         String sql = "select count(*) from " + tableName
                 + " where namespace=? and collection=?";
-        try (Connection connection = connection();
-                PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, namespace);
             statement.setString(2, collection);
             try (ResultSet resultSet = statement.executeQuery()) {
                 resultSet.next();
                 return resultSet.getLong(1);
             }
-        } catch (SQLException ex) {
-            throw ZeroException.of(DataErrorCode.READ_FAILED, "postgresql count failed", ex);
         }
     }
 
@@ -253,12 +370,22 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
     }
 
     private boolean updateIfVersion(final PostgresqlDataRow row, final long expectedVersion) throws SQLException {
-        String sql = "update " + tableName
+        try (Connection connection = connection();
+                PreparedStatement statement = connection.prepareStatement(updateSql())) {
+            bindUpdate(statement, row, expectedVersion);
+            return statement.executeUpdate() == 1;
+        }
+    }
+
+    private String updateSql() {
+        return "update " + tableName
                 + " set version=?, schema_version=?, codec_version=?, "
                 + "updated_at_epoch_millis=?, payload=? "
                 + "where namespace=? and collection=? and id=? and version=?";
-        try (Connection connection = connection();
-                PreparedStatement statement = connection.prepareStatement(sql)) {
+    }
+
+    private void bindUpdate(final PreparedStatement statement, final PostgresqlDataRow row,
+                            final long expectedVersion) throws SQLException {
             statement.setLong(1, row.version());
             statement.setInt(2, row.schemaVersion());
             statement.setInt(3, row.codecVersion());
@@ -268,8 +395,6 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
             statement.setString(7, row.collection());
             statement.setString(8, row.id());
             statement.setLong(9, expectedVersion);
-            return statement.executeUpdate() == 1;
-        }
     }
 
     private void bindRow(final PreparedStatement statement, final PostgresqlDataRow row) throws SQLException {
@@ -315,14 +440,6 @@ public final class PostgresqlDriverEnvelopeStore implements ZeroDataEnvelopeStor
             try { connection.close(); } catch (SQLException cleanup) { failure.addSuppressed(cleanup); }
             throw failure;
         }
-    }
-
-    private static DataSource unpooled(final PostgresqlDriverSettings settings) {
-        var source = new PGSimpleDataSource();
-        source.setURL(settings.jdbcUrl());
-        source.setUser(settings.username());
-        source.setPassword(settings.password());
-        return source;
     }
 
     private String requireText(final String value, final String name) {

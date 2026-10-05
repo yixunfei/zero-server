@@ -69,9 +69,9 @@ public final class LocalConfigHotReloadService extends AbstractLifecycle {
     private final Clock clock;
 
     /**
-     * 按注册顺序保存的 typed 配置表。
+     * 按注册顺序发布的不可变配置表快照；读取不竞争 start/stop 生命周期锁。
      */
-    private final Map<String, ConfigTable<?, ?>> tables = new LinkedHashMap<>();
+    private volatile Map<String, ConfigTable<?, ?>> tables = Map.of();
 
     /**
      * watcher 运行失败。
@@ -137,7 +137,9 @@ public final class LocalConfigHotReloadService extends AbstractLifecycle {
                     null);
         }
         ConfigTable<K, V> table = new ConfigTable<>(checkedDefinition);
-        tables.put(checkedDefinition.tableName(), table);
+        Map<String, ConfigTable<?, ?>> updated = new LinkedHashMap<>(tables);
+        updated.put(checkedDefinition.tableName(), table);
+        tables = Collections.unmodifiableMap(updated);
         return table;
     }
 
@@ -146,7 +148,7 @@ public final class LocalConfigHotReloadService extends AbstractLifecycle {
      *
      * @return 不可变、有序、可能为空、线程安全的表名集合。
      */
-    public synchronized Set<String> registeredTableNames() {
+    public Set<String> registeredTableNames() {
         return Collections.unmodifiableSet(new LinkedHashSet<>(tables.keySet()));
     }
 
@@ -405,7 +407,7 @@ public final class LocalConfigHotReloadService extends AbstractLifecycle {
         }
     }
 
-    private synchronized ConfigTable<?, ?> requireTable(final String tableName) {
+    private ConfigTable<?, ?> requireTable(final String tableName) {
         String checkedName = Objects.requireNonNull(tableName, "tableName");
         ConfigTable<?, ?> table = tables.get(checkedName);
         if (table == null) {
@@ -417,7 +419,7 @@ public final class LocalConfigHotReloadService extends AbstractLifecycle {
         return table;
     }
 
-    private synchronized List<ConfigTable<?, ?>> tablesSnapshot() {
+    private List<ConfigTable<?, ?>> tablesSnapshot() {
         return List.copyOf(tables.values());
     }
 

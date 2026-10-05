@@ -8,7 +8,6 @@ import group.zn.zero.security.ReplayProtection;
 import group.zn.zero.security.SecurityChain;
 import group.zn.zero.security.SecurityContext;
 import java.security.MessageDigest;
-import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -84,12 +83,36 @@ public final class SecurityNetworkPolicy implements ProductionNetworkPolicy {
     public CompletionStage<ReplayProtection.ReplayDecision> checkReplayAsync(
             final ProtocolFrame frame,
             final SecurityContext context) {
+        return checkReplayAsync("legacy", frame, context, 0L);
+    }
+
+    /**
+     * 使用连接内单调接收序列向 replay provider 提交判定。
+     *
+     * <p>当前协议没有发送方 nonce 或序列号，因此本方法只提供每连接请求的唯一标识，不能把帧内容
+     * 摘要伪装成防重放凭据。调用方必须保证 {@code sequence} 按接收顺序递增。</p>
+     *
+     * @param connectionId 传输连接标识；不可为空。
+     * @param frame inbound frame；不可为空。
+     * @param context 已鉴权上下文；不可为空。
+     * @param sequence 当前连接的接收序列；必须非负。
+     * @return replay 判定阶段；不可为空。
+     */
+    public CompletionStage<ReplayProtection.ReplayDecision> checkReplayAsync(
+            final String connectionId,
+            final ProtocolFrame frame,
+            final SecurityContext context,
+            final long sequence) {
+        Objects.requireNonNull(connectionId, "connectionId");
         Objects.requireNonNull(frame, "frame");
         Objects.requireNonNull(context, "context");
+        if (sequence < 0L) {
+            throw new IllegalArgumentException("sequence must be non-negative");
+        }
         ReplayProtection.ReplayRequest request = new ReplayProtection.ReplayRequest(
-                digestFrame(frame),
+                replayNonce(connectionId, sequence),
                 Instant.now(),
-                Integer.toUnsignedLong(frame.protocolId()),
+                sequence,
                 context.correlationId(),
                 Duration.ofSeconds(30));
         CompletionStage<ReplayProtection.ReplayDecision> stage;
@@ -118,24 +141,20 @@ public final class SecurityNetworkPolicy implements ProductionNetworkPolicy {
         return delegate.coordinateReconnect(connection, subjectId, reconnectWindow);
     }
 
+    private static String replayNonce(final String connectionId, final long sequence) {
+        String nonce = "tcp:" + connectionId + ':' + Long.toUnsignedString(sequence);
+        if (nonce.length() > 256) {
+            throw new IllegalArgumentException("connectionId is too long for replay nonce");
+        }
+        return nonce;
+    }
+
+    /** 将握手凭据减少为摘要后再跨安全边界传递。 */
     private static String digest(final byte[] payload) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(payload));
         } catch (java.security.NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 unavailable", exception);
         }
-    }
-
-    private static String digestFrame(final ProtocolFrame frame) {
-        byte[] extension = frame.extension();
-        byte[] payload = frame.payload();
-        ByteBuffer canonical = ByteBuffer.allocate(16 + extension.length + payload.length);
-        canonical.putInt(frame.protocolId())
-                .putInt(frame.protocolVersion())
-                .putInt(frame.flags())
-                .putInt(extension.length)
-                .put(extension)
-                .put(payload);
-        return digest(canonical.array());
     }
 }

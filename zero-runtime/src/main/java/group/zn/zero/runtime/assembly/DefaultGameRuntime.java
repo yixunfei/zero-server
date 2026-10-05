@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.LongSupplier;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 确定性拓扑、双 ledger 和 single-use 状态机的默认 runtime。
@@ -40,6 +41,8 @@ final class DefaultGameRuntime implements GameRuntime {
     private final Duration startupTimeout;
     private final LongSupplier nanoTime;
     private final HealthProbeRunner healthProbeRunner = new HealthProbeRunner();
+    /** 串行化生命周期请求，但不跨越状态锁执行组件代码。 */
+    private final ReentrantLock lifecycleOperation = new ReentrantLock();
     private volatile RuntimeState runtimeState = RuntimeState.BUILT;
     private boolean startClaimed;
     private boolean terminalRequested;
@@ -62,58 +65,94 @@ final class DefaultGameRuntime implements GameRuntime {
     }
 
     @Override
-    public synchronized void start() {
-        if (startClaimed || terminalRequested || runtimeState != RuntimeState.BUILT) {
-            throw reuseFailure();
-        }
-        startClaimed = true;
-        setState(RuntimeState.STARTING);
+    public void start() {
+        lifecycleOperation.lock();
         try {
-            RuntimeDeadline startupDeadline = RuntimeDeadline.using(startupTimeout, nanoTime);
-            for (BuiltComponent component : components) {
-                startComponent(component, startupDeadline);
+            RuntimeDeadline startupDeadline;
+            synchronized (this) {
+                if (startClaimed || terminalRequested || runtimeState != RuntimeState.BUILT) {
+                    throw reuseFailure();
+                }
+                startClaimed = true;
+                setState(RuntimeState.STARTING);
+                startupDeadline = RuntimeDeadline.using(startupTimeout, nanoTime);
             }
-            setState(RuntimeState.RUNNING);
-        } catch (Throwable failure) {
-            RuntimeAssemblyException primary = normalizeStartFailure(failure);
-            setState(RuntimeState.STOPPING);
-            primary = startedComponents.stopAll(primary, tracker);
-            primary = resources.closeAll(primary);
-            fail(primary);
-            throw primary;
+            try {
+                for (BuiltComponent component : components) {
+                    startComponent(component, startupDeadline);
+                }
+                synchronized (this) {
+                    setState(RuntimeState.RUNNING);
+                }
+            } catch (Throwable failure) {
+                RuntimeAssemblyException primary = normalizeStartFailure(failure);
+                synchronized (this) {
+                    setState(RuntimeState.STOPPING);
+                }
+                primary = startedComponents.stopAll(primary, tracker);
+                primary = resources.closeAll(primary);
+                synchronized (this) {
+                    fail(primary);
+                }
+                throw primary;
+            }
+        } finally {
+            lifecycleOperation.unlock();
         }
     }
 
     @Override
-    public synchronized void stop() {
-        if (runtimeState == RuntimeState.STARTING) throw reuseFailure();
-        if (runtimeState == RuntimeState.STOPPING) return;
-        if (runtimeState == RuntimeState.STOPPED || runtimeState == RuntimeState.CLOSED) {
-            return;
+    public void stop() {
+        lifecycleOperation.lock();
+        try {
+            synchronized (this) {
+                if (runtimeState == RuntimeState.STARTING) throw reuseFailure();
+                if (runtimeState == RuntimeState.STOPPING) return;
+                if (runtimeState == RuntimeState.STOPPED || runtimeState == RuntimeState.CLOSED) {
+                    return;
+                }
+                terminalRequested = true;
+            }
+            RuntimeAssemblyException failure = cleanup();
+            if (failure != null) {
+                synchronized (this) {
+                    fail(failure);
+                }
+                throw failure;
+            }
+            synchronized (this) {
+                setState(RuntimeState.STOPPED);
+            }
+        } finally {
+            lifecycleOperation.unlock();
         }
-        terminalRequested = true;
-        RuntimeAssemblyException failure = cleanup();
-        if (failure != null) {
-            fail(failure);
-            throw failure;
-        }
-        setState(RuntimeState.STOPPED);
     }
 
     @Override
-    public synchronized void close() {
-        if (runtimeState == RuntimeState.STARTING) throw reuseFailure();
-        if (runtimeState == RuntimeState.STOPPING) return;
-        if (runtimeState == RuntimeState.CLOSED) {
-            return;
+    public void close() {
+        lifecycleOperation.lock();
+        try {
+            synchronized (this) {
+                if (runtimeState == RuntimeState.STARTING) throw reuseFailure();
+                if (runtimeState == RuntimeState.STOPPING) return;
+                if (runtimeState == RuntimeState.CLOSED) {
+                    return;
+                }
+                terminalRequested = true;
+            }
+            RuntimeAssemblyException failure = cleanup();
+            if (failure != null) {
+                synchronized (this) {
+                    fail(failure);
+                }
+                throw failure;
+            }
+            synchronized (this) {
+                setState(RuntimeState.CLOSED);
+            }
+        } finally {
+            lifecycleOperation.unlock();
         }
-        terminalRequested = true;
-        RuntimeAssemblyException failure = cleanup();
-        if (failure != null) {
-            fail(failure);
-            throw failure;
-        }
-        setState(RuntimeState.CLOSED);
     }
 
     @Override
@@ -224,7 +263,9 @@ final class DefaultGameRuntime implements GameRuntime {
     }
 
     private RuntimeAssemblyException cleanup() {
-        setState(RuntimeState.STOPPING);
+        synchronized (this) {
+            setState(RuntimeState.STOPPING);
+        }
         RuntimeAssemblyException failure = startedComponents.stopAll(null, tracker);
         return resources.closeAll(failure);
     }
