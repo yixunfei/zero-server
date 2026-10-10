@@ -40,8 +40,11 @@ public final class LogRuntime {
         Objects.requireNonNull(sink, "sink");
         return List.of(
                 RuntimeProviders.create(ComponentDescriptor.builder(StandardRuntimeCapabilityModel.LOCAL_LOG_SINK)
-                        .provide(TERMINAL_LOG_SINK).kind(ComponentKind.LOCAL).build(), context ->
-                        ComponentContribution.builder().bind(TERMINAL_LOG_SINK, sink.get()).build()),
+                        .provide(TERMINAL_LOG_SINK).kind(ComponentKind.LOCAL).build(), context -> {
+                            LogSink terminal = Objects.requireNonNull(sink.get(), "terminal sink");
+                            if (terminal instanceof AutoCloseable resource) context.resources().register(resource);
+                            return ComponentContribution.builder().bind(TERMINAL_LOG_SINK, terminal).build();
+                        }),
                 RuntimeProviders.create(ComponentDescriptor.builder(StandardRuntimeCapabilityModel.LOCAL_LOG_APPENDER)
                         .provide(LOG_APPENDER).require(RuntimeBasics.CONFIG).require(TERMINAL_LOG_SINK)
                         .kind(ComponentKind.LOCAL).build(), context -> {

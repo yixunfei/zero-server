@@ -54,16 +54,12 @@ public final class PostgresqlFencedStateStore<T> implements FencedStateStore<T> 
         Objects.requireNonNull(request, "request");
         byte[] encoded = codec.encode(request.payload());
         try (Connection connection = database.connection()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
             try {
-                CommitResult<T> replay = replayIfPresent(connection, request, encoded);
-                if (replay != null) {
-                    connection.commit();
-                    return replay;
-                }
                 validateLease(connection, request.lease());
                 // 等待租约行锁期间，同请求可能已由另一事务提交；必须在 CAS 前重读收据。
-                replay = replayIfPresent(connection, request, encoded);
+                CommitResult<T> replay = replayIfPresent(connection, request, encoded);
                 if (replay != null) {
                     connection.commit();
                     return replay;
@@ -83,6 +79,12 @@ public final class PostgresqlFencedStateStore<T> implements FencedStateStore<T> 
                     throw PostgresqlOwnershipSupport.failure("PostgreSQL state commit failed", sqlFailure);
                 }
                 throw failure;
+            } finally {
+                try {
+                    connection.setAutoCommit(originalAutoCommit);
+                } catch (SQLException failure) {
+                    throw PostgresqlOwnershipSupport.failure("PostgreSQL state commit cleanup failed", failure);
+                }
             }
         } catch (SQLException failure) {
             throw PostgresqlOwnershipSupport.failure("PostgreSQL state commit failed", failure);
@@ -100,7 +102,7 @@ public final class PostgresqlFencedStateStore<T> implements FencedStateStore<T> 
                 }
                 OwnershipLease current = PostgresqlOwnershipSupport.lease(result, lease.resource());
                 if (!sameLease(current, lease)
-                        || current.expiresAt().isBefore(PostgresqlOwnershipSupport.databaseNow(connection))) {
+                        || !current.validAt(PostgresqlOwnershipSupport.databaseNow(connection))) {
                     throw new OwnershipException("stale or expired ownership lease");
                 }
             }

@@ -35,6 +35,12 @@ public final class ServiceDiscoveryRpcServiceResolver implements RpcServiceResol
      */
     private final AtomicLong cursor = new AtomicLong();
 
+    /** 因元数据无效而隔离的实例累计数，供运维诊断使用。 */
+    private final AtomicLong rejectedInstances = new AtomicLong();
+
+    /** @return 无效实例累计数；线程安全，同一坏实例可在多次查询中重复计数。 */
+    public long rejectedInstances() { return rejectedInstances.get(); }
+
     /**
      * 创建 RPC 服务实例解析器。
      *
@@ -83,10 +89,20 @@ public final class ServiceDiscoveryRpcServiceResolver implements RpcServiceResol
                 current.clusterName().isBlank() ? List.of() : List.of(current.clusterName()),
                 current.healthyOnly(),
                 true);
-        List<RpcServiceInstance> instances = discovery.lookup(serviceQuery).stream()
-                .map(NacosRpcMetadataMapper::toRpcServiceInstance)
-                .filter(instance -> instance.matches(current))
-                .toList();
+        List<group.zn.zero.discovery.ServiceInstance> discovered;
+        try { discovered = discovery.lookup(serviceQuery); }
+        catch (RuntimeException failure) {
+            throw ZeroException.of(RpcErrorCode.SERVICE_NOT_FOUND, "rpc discovery lookup failed", failure);
+        }
+        var instances = new java.util.ArrayList<RpcServiceInstance>();
+        for (var candidate : discovered) {
+            try {
+                RpcServiceInstance instance = NacosRpcMetadataMapper.toRpcServiceInstance(candidate);
+                if (instance.matches(current)) instances.add(instance);
+            } catch (RuntimeException invalidMetadata) {
+                rejectedInstances.incrementAndGet();
+            }
+        }
         return RpcServiceSnapshot.now(current, instances);
     }
 

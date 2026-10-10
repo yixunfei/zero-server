@@ -68,7 +68,7 @@ public final class PeriodicAsyncTask extends AbstractLifecycle {
             if (handle != null) handle.cancel(false);
             pending = running;
         }
-        try { pending.get(30, TimeUnit.SECONDS); }
+        try { pending.get(executors.closeTimeout().toNanos(), TimeUnit.NANOSECONDS); }
         catch (InterruptedException failure) {
             Thread.currentThread().interrupt(); throw ZeroException.of(SystemErrorCode.SYSTEM_ERROR, "maintenance stop interrupted", failure);
         } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException failure) {
@@ -77,25 +77,33 @@ public final class PeriodicAsyncTask extends AbstractLifecycle {
     }
 
     private void tick() {
-        var completion = new CompletableFuture<Void>();
-        synchronized (guard) {
-            if (stopping || !running.isDone()) return;
-            running = completion;
-        }
+        CompletableFuture<Void> completion = null;
         try {
+            synchronized (guard) {
+                if (stopping || !running.isDone()) return;
+                completion = new CompletableFuture<>();
+                running = completion;
+            }
+            var submitted = completion;
             executors.remoteIoExecutor().execute(() -> {
-                try { action.get().whenComplete((ignored, failure) -> complete(completion, failure)); }
-                catch (RuntimeException | Error failure) { complete(completion, failure); }
+                try { action.get().whenComplete((ignored, failure) -> complete(submitted, failure)); }
+                catch (RuntimeException | Error failure) { complete(submitted, failure); }
             });
-        } catch (RuntimeException failure) { complete(completion, failure); }
+        } catch (RuntimeException | Error failure) { complete(completion, failure); }
     }
 
     private void complete(final CompletableFuture<Void> completion, final Throwable failure) {
-        if (failure != null) {
-            lastFailure = failure; failureCount.incrementAndGet();
-            System.getLogger(PeriodicAsyncTask.class.getName()).log(System.Logger.Level.ERROR,
-                    SystemErrorCode.SYSTEM_ERROR.code() + ": periodic maintenance failed: " + name);
+        try {
+            if (failure != null) {
+                lastFailure = failure; failureCount.incrementAndGet();
+                System.getLogger(PeriodicAsyncTask.class.getName()).log(System.Logger.Level.ERROR,
+                        SystemErrorCode.SYSTEM_ERROR.code() + ": periodic maintenance failed: " + name);
+            }
+        } catch (RuntimeException | Error diagnosticFailure) {
+            // 诊断后端故障仍可从 lastFailure 查询，不得杀死 JDK 周期调度。
+            lastFailure = diagnosticFailure;
+        } finally {
+            if (completion != null) completion.complete(null);
         }
-        completion.complete(null);
     }
 }

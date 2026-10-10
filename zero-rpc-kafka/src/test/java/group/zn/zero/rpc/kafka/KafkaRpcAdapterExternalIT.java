@@ -94,7 +94,7 @@ class KafkaRpcAdapterExternalIT {
                     "caller-group-" + suffix,
                     "zero.rpc.external." + suffix,
                     "reply-caller-" + suffix), timer.executor());
-            byte[] secret = "external-test-secret".getBytes(StandardCharsets.UTF_8);
+            byte[] secret = "external-test-secret-01234567890123456789012345678901".getBytes(StandardCharsets.UTF_8);
             SecurityMetadataAssertion assertion = SecurityMetadataAssertion.digest(secret);
             provider.securityMetadataVerifier(SecurityMetadataAssertion.verifier(assertion));
             RpcCallOptions secureOptions = RpcCallOptions.defaults()

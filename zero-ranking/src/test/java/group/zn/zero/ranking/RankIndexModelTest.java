@@ -34,7 +34,7 @@ class RankIndexModelTest {
             assertEquals(expected, actual.score());
             assertEquals(step + 1, actual.version());
             reference.put(uid, actual);
-            assertEquals(actual, service.submitScore("r", "s", uid, 999, 999, mode, "k" + step));
+            assertEquals(actual, service.submitScore("r", "s", uid, score, tie, mode, "k" + step));
             if (step % 41 == 0) {
                 List<RankingEntry> sorted = reference.values().stream().sorted(order).toList();
                 assertEquals(sorted.subList(0, Math.min(100, sorted.size())), service.queryTop("r", "s", 100));

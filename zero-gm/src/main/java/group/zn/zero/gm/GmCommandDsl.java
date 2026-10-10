@@ -13,6 +13,11 @@ import java.util.List;
  */
 public final class GmCommandDsl {
 
+    /** 跨所有传输共享的原始字符预算，避免非 REST 调用绕过。 */
+    private static final int MAX_CHARACTERS = 4096;
+    /** 路径及参数 token 总预算。 */
+    private static final int MAX_TOKENS = 64;
+
     private GmCommandDsl() {
     }
 
@@ -27,6 +32,9 @@ public final class GmCommandDsl {
      * @throws ZeroException 当 DSL 为空、缺少 `/` 前缀、引号未闭合或没有任何 token 时抛出。
      */
     public static GmParsedCommand parse(final String rawText) {
+        if (rawText != null && rawText.length() > MAX_CHARACTERS) {
+            throw ZeroException.of(GmErrorCode.COMMAND_DSL_INVALID);
+        }
         if (rawText == null || rawText.isBlank()) {
             throw ZeroException.of(GmErrorCode.COMMAND_DSL_EMPTY);
         }
@@ -40,6 +48,11 @@ public final class GmCommandDsl {
             throw ZeroException.of(GmErrorCode.COMMAND_DSL_INVALID);
         }
         return new GmParsedCommand(trimmed, tokens);
+    }
+
+    private static void addToken(final List<String> tokens, final StringBuilder current) {
+        if (tokens.size() >= MAX_TOKENS) throw ZeroException.of(GmErrorCode.COMMAND_DSL_INVALID);
+        tokens.add(current.toString());
     }
 
     private static List<String> splitTokens(final String body) {
@@ -68,7 +81,7 @@ public final class GmCommandDsl {
             }
             if (!inQuote && Character.isWhitespace(value)) {
                 if (tokenStarted) {
-                    tokens.add(current.toString());
+                    addToken(tokens, current);
                     current.setLength(0);
                     tokenStarted = false;
                 }
@@ -81,7 +94,7 @@ public final class GmCommandDsl {
             throw ZeroException.of(GmErrorCode.COMMAND_DSL_INVALID);
         }
         if (tokenStarted) {
-            tokens.add(current.toString());
+            addToken(tokens, current);
         }
         return List.copyOf(tokens);
     }

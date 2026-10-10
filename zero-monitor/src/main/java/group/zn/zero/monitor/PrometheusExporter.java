@@ -110,7 +110,10 @@ public final class PrometheusExporter {
     }
 
     private String typeOf(final MetricDefinition definition) {
-        return definition.name().endsWith("_total") ? "counter" : "gauge";
+        return switch (definition.type()) {
+            case COUNTER -> "counter";
+            case GAUGE -> "gauge";
+        };
     }
 
     private void appendLabels(
@@ -147,23 +150,11 @@ public final class PrometheusExporter {
     }
 
     private void appendEscapedHelp(final StringBuilder builder, final String value) {
-        for (int index = 0; index < value.length(); index++) {
-            char current = value.charAt(index);
-            if (current == '\\') {
-                builder.append('\\');
-            }
-            builder.append(current);
-        }
+        MetricTextEscaper.append(builder, value, false);
     }
 
     private void appendEscapedLabel(final StringBuilder builder, final String value) {
-        for (int index = 0; index < value.length(); index++) {
-            char current = value.charAt(index);
-            if (current == '\\' || current == '"') {
-                builder.append('\\');
-            }
-            builder.append(current);
-        }
+        MetricTextEscaper.append(builder, value, true);
     }
 
     private record SeriesKey(String name, Map<String, String> labels) {

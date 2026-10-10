@@ -99,7 +99,7 @@ public final class KafkaProductionTelemetryObserver implements RpcTransportObser
             case HANDLER_FAILED, SEND_FAILED, PENDING_FAILED -> LogResult.FAILURE;
             case PENDING_TIMED_OUT -> LogResult.TIMEOUT;
             case CONSUMER_RESTARTING -> LogResult.DEGRADED;
-            default -> LogResult.SUCCESS;
+            case REQUEST_SENT, ONEWAY_SENT, REQUEST_RECEIVED, HANDLER_SUCCEEDED, RESPONSE_SENT, PENDING_COMPLETED -> LogResult.SUCCESS;
         };
     }
 

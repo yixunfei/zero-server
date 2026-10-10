@@ -137,7 +137,25 @@ public final class MonitorAlertLogSink implements AlertSink {
         fields.put("alert.severity", event.severity().name());
         fields.put("observed.value", String.valueOf(event.value()));
         fields.put("threshold", String.valueOf(event.threshold()));
-        event.labels().forEach((key, value) -> fields.put("metric.label." + key, value));
+        event.labels().forEach((key, value) -> fields.put(labelKey(key), value));
         return fields;
+    }
+
+    /** 保持标签命名空间并将任意长度限制在日志字段键预算内。 */
+    private String labelKey(final String key) {
+        String prefix = "metric.label.";
+        if (key.length() <= ZeroLogRecord.MAX_FIELD_KEY_LENGTH - prefix.length()) {
+            return prefix + key;
+        }
+        String hash;
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(key.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            hash = java.util.HexFormat.of().formatHex(digest, 0, 8);
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+        int keep = ZeroLogRecord.MAX_FIELD_KEY_LENGTH - prefix.length() - hash.length() - 1;
+        return prefix + key.substring(0, keep) + "_" + hash;
     }
 }

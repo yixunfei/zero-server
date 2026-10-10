@@ -118,6 +118,15 @@ public final class DurablePersistenceService implements AutoCloseable {
         return tracked(() -> enqueue(() -> { journal.compact(); return null; }));
     }
 
+    /**
+     * 在受管 IO 队列确认已归档结果并释放收据，与提交/flush 串行；线程安全。
+     * operationId 为 String.compareTo 单调水位，之后旧 ID 明确拒绝；未解决意图禁止回收。
+     * @param operationId 包含归档边界。 @return 释放条数的完成信号；失败保留现场。
+     */
+    public CompletionStage<Integer> acknowledgeThrough(final String operationId) {
+        return tracked(() -> enqueue(() -> journal.acknowledgeThrough(operationId)));
+    }
+
     /** 停止准入，等待已接受的捕获/刷盘，然后释放日志锁；待落库意图由下次启动恢复。
      * @return 关闭完成信号；线程安全且幂等，调用者不得在 Actor/IO worker 上同步等待。 */
     public CompletionStage<Void> closeAsync() {

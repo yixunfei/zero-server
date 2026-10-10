@@ -1,7 +1,5 @@
 package group.zn.zero.security;
 
-import java.net.Inet4Address;
-import java.net.Inet6Address;
 import java.util.List;
 
 /** Resolves forwarded addresses only when the direct peer belongs to a trusted proxy set. */
@@ -17,24 +15,35 @@ public final class TrustedProxyResolver {
     public TrustedSourceAddress resolve(String peerAddress, String forwardedFor) {
         SecurityValues.require(peerAddress, "peerAddress", 128);
         if (forwardedFor == null || forwardedFor.isBlank() || !isTrusted(peerAddress)) return new TrustedSourceAddress(peerAddress, peerAddress, false);
+        if (forwardedFor.length() > 8 * 129) throw new IllegalArgumentException("forwarded address chain is too large");
         String[] hops = forwardedFor.split(",", -1);
-        if (hops.length == 0 || hops.length > maxForwardedHops) throw new IllegalArgumentException("forwarded address chain is not trusted");
-        String source = hops[0].trim();
-        SecurityValues.require(source, "sourceAddress", 128);
-        if (!source.matches("[0-9a-fA-F:.]+")) {
-            throw new IllegalArgumentException("forwarded address is invalid");
-        }
-        try {
-            java.net.InetAddress address = java.net.InetAddress.getByName(source);
-            if (!(address instanceof Inet4Address || address instanceof Inet6Address)
-                    || source.isBlank()) {
-                throw new IllegalArgumentException("forwarded address is invalid");
-            }
-        } catch (java.net.UnknownHostException e) {
-            throw new IllegalArgumentException("forwarded address is invalid", e);
+        if (hops.length > maxForwardedHops) throw new IllegalArgumentException("forwarded address chain is not trusted");
+        String source = peerAddress;
+        for (int index = hops.length - 1; index >= 0; index--) {
+            source = requireLiteral(hops[index].trim());
+            if (!isTrusted(source)) break;
         }
         return new TrustedSourceAddress(peerAddress, source, true);
     }
+    private static String requireLiteral(String source) {
+        SecurityValues.require(source, "sourceAddress", 128);
+        if (!source.matches("[0-9a-fA-F:.]+")) throw new IllegalArgumentException("forwarded address is invalid");
+        if (!source.contains(":")) {
+            String[] octets = source.split("\\.", -1);
+            if (octets.length != 4) throw new IllegalArgumentException("forwarded IPv4 address is invalid");
+            for (String octet : octets) {
+                if (!octet.matches("0|[1-9][0-9]{0,2}") || Integer.parseInt(octet) > 255)
+                    throw new IllegalArgumentException("forwarded IPv4 address is invalid");
+            }
+        }
+        try {
+            java.net.InetAddress.getByName(source);
+        } catch (java.net.UnknownHostException failure) {
+            throw new IllegalArgumentException("forwarded address is invalid", failure);
+        }
+        return source;
+    }
+
     private boolean isTrusted(String peer) { return trustedProxies.stream().anyMatch(network -> network.contains(peer)); }
     @FunctionalInterface public interface Network { boolean contains(String address); }
 }

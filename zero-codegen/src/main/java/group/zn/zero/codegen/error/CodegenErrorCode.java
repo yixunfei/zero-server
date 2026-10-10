@@ -33,7 +33,10 @@ public enum CodegenErrorCode implements ErrorCode {
     /**
      * 输出文件失败。
      */
-    OUTPUT_FAILED("ZERO-CODEGEN-OUTPUT-FAILED", "code generation output failed");
+    OUTPUT_FAILED("ZERO-CODEGEN-OUTPUT-FAILED", "code generation output failed"),
+
+    /** 产物已经提交，仅恢复元数据清理失败。 */
+    OUTPUT_COMMITTED_CLEANUP_FAILED("ZERO-CODEGEN-OUTPUT-COMMITTED-CLEANUP-FAILED", "output committed; cleanup failed");
 
     /**
      * 错误码。

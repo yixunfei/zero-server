@@ -13,7 +13,7 @@
 
     <artifactId>zero-hot-update</artifactId>
     <name>zeroServer Hot Update</name>
-    <description>配置、活动、CGLIB 和 ClassLoader 热更抽象。</description>
+    <description>本地 CSV 配置热重载与授权抽象。</description>
 
     <dependencies>
         <dependency>

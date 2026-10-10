@@ -22,7 +22,7 @@ class RankingNotificationContractTest {
                 () -> service.submitScore("r", "s", "u", 10, 0, ScoreMergeMode.SET, "one")));
         assertEquals(1, service.queryTop("r", "s", 10).size());
         assertEquals(0, old.size());
-        assertEquals(1, service.submitScore("r", "s", "u", 20, 0, ScoreMergeMode.SET, "one").version());
+        assertEquals(1, service.submitScore("r", "s", "u", 10, 0, ScoreMergeMode.SET, "one").version());
         assertEquals(List.of(), metrics);
     }
     /** 同步回调可查询已提交状态并跨榜写入；通知和完成顺序不变。 */

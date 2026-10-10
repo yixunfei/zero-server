@@ -16,11 +16,14 @@ class GmIdempotencyCapacityTest {
             assertEquals(GmIdempotencyStore.State.CLAIMED,
                     store.claim("key-" + index, "operation", now, Duration.ofMinutes(1)).state());
         }
-        assertEquals(GmIdempotencyStore.State.FAILED,
+        assertEquals(GmIdempotencyStore.State.CAPACITY_REJECTED,
                 store.claim("overflow", "operation", now, Duration.ofMinutes(1)).state());
         assertEquals(GmIdempotencyStore.State.IN_PROGRESS,
                 store.claim("key-0", "operation", now, Duration.ofMinutes(1)).state());
         assertEquals(4096, store.size());
+        assertEquals(GmIdempotencyStore.State.CAPACITY_REJECTED,
+                store.claim("next", "operation", now.plusSeconds(60), Duration.ofMinutes(1)).state());
+        for (int index = 0; index < 4096; index++) store.fail("key-" + index, "operation", now.plusSeconds(60));
         assertEquals(GmIdempotencyStore.State.CLAIMED,
                 store.claim("next", "operation", now.plusSeconds(60), Duration.ofMinutes(1)).state());
         assertEquals(1, store.size());

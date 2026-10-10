@@ -1,6 +1,5 @@
 package group.zn.zero.runtime.bootstrap;
 
-import group.zn.zero.core.error.SystemErrorCode;
 import group.zn.zero.core.error.ZeroException;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -8,7 +7,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.Objects;
 
@@ -67,7 +65,7 @@ public final class ZeroRuntimeExecutors implements AutoCloseable {
      */
     private final boolean backgroundMayInline;
     /** 按职责隔离的受管计时执行器，冷启动按需创建，统一关闭。 */
-    private final java.util.Map<String, java.util.concurrent.ScheduledExecutorService> timers = new java.util.HashMap<>();
+    private final java.util.Map<String, java.util.concurrent.ScheduledExecutorService> timers = new java.util.LinkedHashMap<>();
     /** 关闭后禁止再创建计时资源。 */
     private boolean closed;
 
@@ -87,6 +85,8 @@ public final class ZeroRuntimeExecutors implements AutoCloseable {
         this.ownedServices = List.copyOf(Objects.requireNonNull(ownedServices, "ownedServices"));
         this.ownedServices.forEach(service -> Objects.requireNonNull(service, "service"));
         this.closeTimeout = Objects.requireNonNull(closeTimeout, "closeTimeout");
+        if (closeTimeout.isZero() || closeTimeout.isNegative()) throw new IllegalArgumentException("closeTimeout must be positive");
+        closeTimeout.toNanos();
         this.remoteIoMayInline = remoteIoMayInline;
         this.backgroundMayInline = backgroundMayInline;
     }
@@ -120,11 +120,19 @@ public final class ZeroRuntimeExecutors implements AutoCloseable {
      * @throws IllegalArgumentException 前缀为空白时抛出。
      */
     public static ZeroRuntimeExecutors remoteIo(final String threadNamePrefix) {
+        return remoteIo(threadNamePrefix, DEFAULT_CLOSE_TIMEOUT);
+    }
+
+    /** 创建具有明确停止预算的受管 IO 域；构造不启动线程。
+     * @param threadNamePrefix 稳定线程前缀。 @param closeTimeout 正关闭/维护等待预算。
+     * @return 自有 IO 执行域；线程安全。 @throws IllegalArgumentException 预算或前缀非法。 */
+    public static ZeroRuntimeExecutors remoteIo(final String threadNamePrefix, final Duration closeTimeout) {
+        requireTimeout(closeTimeout);
         String prefix = requireText(threadNamePrefix, "threadNamePrefix");
         ExecutorService remoteIo = Executors.newThreadPerTaskExecutor(
                 Thread.ofVirtual().name(prefix + "-remote-io-", 0).factory());
         return new ZeroRuntimeExecutors(Runnable::run, Runnable::run, remoteIo, Runnable::run,
-                List.of(remoteIo), DEFAULT_CLOSE_TIMEOUT, false, true);
+                List.of(remoteIo), closeTimeout, false, true);
     }
 
     /**
@@ -182,6 +190,16 @@ public final class ZeroRuntimeExecutors implements AutoCloseable {
      * @throws IllegalArgumentException 当前缀为空白或 actorThreads 小于 1 时抛出。
      */
     public static ZeroRuntimeExecutors localPrototype(final String threadNamePrefix, final int actorThreads) {
+        return localPrototype(threadNamePrefix, actorThreads, DEFAULT_CLOSE_TIMEOUT);
+    }
+
+    /** 创建分离执行域并设置累计关闭预算；不切换外部业务线程。
+     * @param threadNamePrefix 稳定前缀。 @param actorThreads 正 Actor 线程数。
+     * @param closeTimeout 正关闭/维护等待预算。 @return 线程安全的自有执行域。
+     * @throws IllegalArgumentException 参数非法。 */
+    public static ZeroRuntimeExecutors localPrototype(final String threadNamePrefix, final int actorThreads,
+            final Duration closeTimeout) {
+        requireTimeout(closeTimeout);
         String prefix = requireText(threadNamePrefix, "threadNamePrefix");
         if (actorThreads < 1) {
             throw new IllegalArgumentException("actorThreads must be positive");
@@ -197,7 +215,7 @@ public final class ZeroRuntimeExecutors implements AutoCloseable {
                 remoteIo,
                 background,
                 List.of(logic, actor, remoteIo, background),
-                DEFAULT_CLOSE_TIMEOUT,
+                closeTimeout,
                 false,
                 false);
     }
@@ -281,63 +299,30 @@ public final class ZeroRuntimeExecutors implements AutoCloseable {
         return backgroundMayInline;
     }
 
+    /** 返回维护等待与执行器关闭的配置预算；每次关闭累计使用，不是每个池独享。
+     * @return 正时长；不可变、线程安全。 */
+    public Duration closeTimeout() { return closeTimeout; }
+
     /**
-     * 关闭由 starter 拥有的执行器。
-     *
-     * @throws ZeroException 当等待关闭被中断时抛出，必须绑定 ErrorCode。
+     * 先排空 timer 再关闭工作执行域；线程安全，重复请求幂等，不关闭借用执行器。
+     * 已开始的 timer 可完成最后一次 IO 提交；总等待使用一个单调预算。
+     * @throws ZeroException 中断或关闭失败时抛出，其他资源仍尝试关闭；中断标志恢复。
      */
     @Override
     public void close() {
-        List<ExecutorService> services;
+        List<ExecutorService> timerServices;
         synchronized (this) {
             if (closed) return;
             closed = true;
-            services = new java.util.ArrayList<>(timers.values());
-            services.addAll(ownedServices);
+            timerServices = new java.util.ArrayList<>(timers.values());
         }
-        for (ExecutorService service : services) {
-            service.shutdown();
-        }
-        ZeroException interruptionFailure = null;
-        for (ExecutorService service : services) {
-            if (interruptionFailure != null) {
-                shutdownNowAfterInterruption(service, interruptionFailure);
-                continue;
-            }
-            try {
-                if (!service.awaitTermination(closeTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                    service.shutdownNow();
-                }
-            } catch (InterruptedException ex) {
-                interruptionFailure = ZeroException.of(
-                        SystemErrorCode.SYSTEM_ERROR,
-                        "close runtime executor interrupted",
-                        ex);
-                shutdownNowAfterInterruption(service, interruptionFailure);
-            }
-        }
-        if (interruptionFailure != null) {
-            Thread.currentThread().interrupt();
-            throw interruptionFailure;
-        }
+        new ExecutorShutdown(closeTimeout).close(timerServices, ownedServices);
     }
 
-    /**
-     * 在线程已被中断后立即停止单个执行器；失败会附加到统一中断异常并继续处理后续执行器。
-     *
-     * @param service 待停止执行器；不可为空。
-     * @param interruptionFailure 中断主异常；不可为空，本方法可能追加 suppressed。
-     */
-    private static void shutdownNowAfterInterruption(
-            final ExecutorService service,
-            final ZeroException interruptionFailure) {
-        try {
-            service.shutdownNow();
-        } catch (RuntimeException | Error closeFailure) {
-            if (closeFailure != interruptionFailure) {
-                interruptionFailure.addSuppressed(closeFailure);
-            }
-        }
+    private static void requireTimeout(final Duration timeout) {
+        Objects.requireNonNull(timeout, "closeTimeout");
+        if (timeout.isZero() || timeout.isNegative()) throw new IllegalArgumentException("closeTimeout must be positive");
+        timeout.toNanos();
     }
 
     private static ThreadFactory namedThreadFactory(final String prefix) {

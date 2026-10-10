@@ -46,6 +46,12 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
 
     /** 精确容量与公平性设置。 */
     private final ActorSchedulerConfig config;
+    /** 由组合根拥有的超时计时器；确定性直接执行器可不配置。 */
+    private final java.util.concurrent.ScheduledExecutorService timeoutTimer;
+    /** 单次实际执行预算，不包含排队时间。 */
+    private final long executionTimeoutNanos;
+    /** 累计超时隔离次数。 */
+    private final LongAdder timedOut = new LongAdder();
     /** 全局未完成许可。 */
     private final AtomicInteger pending = new AtomicInteger();
     /** 当前执行/异步挂起数。 */
@@ -60,8 +66,19 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
     private final LongAdder queueWait = new LongAdder();
     /** 最大排队等待。 */
     private final LongAccumulator maxQueueWait = new LongAccumulator(Long::max, 0);
-    /** 直接执行器同 Lane 续调蹦床；不同 Lane 保持同步嵌套调用语义。 */
-    private final ThreadLocal<DrainRun> currentRun = new ThreadLocal<>();
+    /**
+     * 直接执行器同 Lane 续调蹦床；不同 Lane 保持同步嵌套调用语义。
+     *
+     * <p>static 而非实例级：实例级 ThreadLocal 的 key 随调度器实例 GC 后被弱引用清除，但 value
+     * 链（DrainRun→LaneQueue→handler）会滞留在长寿命池线程的 ThreadLocalMap 中直到槽位复用，
+     * 频繁重建调度器时造成缓慢内存滞留。static key 永不过期，槽位中最多保留一条最近活跃链，
+     * 同线程后续调度器实例的嵌套 set/remove 会自然复用并覆盖同一槽位。
+     * 嵌套 finally 中恢复 prior 的语义必须保留：三层以上嵌套（A→B→C）时入口重入检测
+     * （runDrain 开头沿 prior 链查同队列）依赖中间层结束后链上仍有外层节点；若内层 finally
+     * 无条件 remove，更深层将失去跨层同队列重入检测，可能同线程递归 drain 同一队列。
+     * owner 字段用于跳过其它调度器实例遗留的节点，避免跨实例误判同队列重入。
+     */
+    private static final ThreadLocal<DrainRun> currentRun = new ThreadLocal<>();
 
     /**
      * 外部执行器。
@@ -95,8 +112,24 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
      * @throws NullPointerException 参数为空。
      */
     public ExecutorActorScheduler(final Executor executor, final ActorSchedulerConfig config) {
+        this(executor, config, null, java.time.Duration.ZERO);
+    }
+
+    /**
+     * 使用受管计时器观察执行超时；不创建线程，也不关闭注入的 timer。
+     * 超时失败通知调用方并拒绝该 lane 排队/新消息，直到真实 handler 完成才释放许可。
+     * @param executor 逻辑执行器。 @param config 队列预算。 @param timer 受管计时器，可空表示关闭观察。
+     * @param executionTimeout 正执行预算；timer 为空时必须为零。线程安全。
+     */
+    public ExecutorActorScheduler(final Executor executor, final ActorSchedulerConfig config,
+            final java.util.concurrent.ScheduledExecutorService timer, final java.time.Duration executionTimeout) {
         this.executor = Objects.requireNonNull(executor, "executor");
         this.config = Objects.requireNonNull(config, "config");
+        timeoutTimer = timer;
+        executionTimeoutNanos = Objects.requireNonNull(executionTimeout, "executionTimeout").toNanos();
+        if (timer == null ? executionTimeoutNanos != 0 : executionTimeoutNanos <= 0) {
+            throw new IllegalArgumentException("timer requires a positive execution timeout");
+        }
         for (int index = 0; index < stripes.length; index++) {
             stripes[index] = new LaneStripe();
         }
@@ -133,6 +166,7 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
         synchronized (stripe) {
             if (closed.get()) return reject(ActorErrorCode.SCHEDULER_CLOSED);
             laneQueue = stripe.lanes.get(message.laneKey());
+            if (laneQueue != null && laneQueue.isolated) return reject(ActorErrorCode.EXECUTION_TIMEOUT);
             if ((laneQueue != null && laneQueue.pending >= config.maxPendingPerLane()) || !acquire()) {
                 return reject(ActorErrorCode.CAPACITY_EXCEEDED);
             }
@@ -179,14 +213,16 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
     }
 
     private void runDrain(final LaneKey key, final LaneStripe stripe, final LaneQueue queue) {
+        // 沿链只认本调度器实例的节点：static ThreadLocal 下链上可能滞留其它已丢弃实例的
+        // DrainRun，其 queue 引用属于旧实例的分段状态，不能参与本实例的同队列重入判定。
         DrainRun prior = currentRun.get();
         for (DrainRun cursor = prior; cursor != null; cursor = cursor.parent) {
-            if (cursor.queue == queue) {
+            if (cursor.owner == this && cursor.queue == queue) {
                 cursor.again = true;
                 return;
             }
         }
-        DrainRun run = new DrainRun(queue, prior);
+        DrainRun run = new DrainRun(this, queue, prior);
         currentRun.set(run);
         try {
             do {
@@ -213,13 +249,20 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
             long waited = Math.max(0, System.nanoTime() - envelope.queuedAt());
             queueWait.add(waited);
             maxQueueWait.accumulate(waited);
-            CompletionStage<Void> stage = handle(envelope);
+            ExecutionWatch watch = new ExecutionWatch(envelope, stripe, laneQueue);
+            CompletionStage<Void> stage;
+            try {
+                watch.start();
+                stage = handle(envelope);
+            } catch (RuntimeException | Error failure) {
+                stage = CompletableFuture.failedFuture(failure);
+            }
             if (stage.getClass() == CompletableFuture.class && ((CompletableFuture<?>) stage).isDone()) {
                 Throwable failure = null;
                 try { ((CompletableFuture<?>) stage).join(); }
                 catch (RuntimeException ex) { failure = ex; }
-                completeEnvelope(envelope, failure, stripe, laneQueue);
-            } else if (awaitCompletion(envelope, stage, laneKey, stripe, laneQueue)) {
+                watch.finish(failure);
+            } else if (awaitCompletion(envelope, stage, laneKey, stripe, laneQueue, watch)) {
                 return;
             }
         }
@@ -233,14 +276,14 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
     }
 
     private boolean awaitCompletion(final Envelope envelope, final CompletionStage<Void> stage,
-            final LaneKey laneKey, final LaneStripe stripe, final LaneQueue laneQueue) {
+            final LaneKey laneKey, final LaneStripe stripe, final LaneQueue laneQueue, final ExecutionWatch watch) {
         // 0=注册回调中，1=已交出执行权，2=完成。注册期间同步完成则由当前 drain 继续，
         // 避免 direct executor 在 isDone/whenComplete 竞态中不断递归续调并耗尽栈。
         AtomicInteger handoff = new AtomicInteger();
         AtomicBoolean claimed = new AtomicBoolean();
         java.util.function.BiConsumer<Void, Throwable> completion = (ignored, ex) -> {
             if (!claimed.compareAndSet(false, true)) return;
-            completeEnvelope(envelope, ex, stripe, laneQueue);
+            watch.finish(ex);
             if (handoff.getAndSet(2) == 1) scheduleDrain(laneKey, stripe, laneQueue);
         };
         try { stage.whenComplete(completion); }
@@ -261,13 +304,16 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
 
     private void completeEnvelope(final Envelope envelope, final Throwable failure,
             final LaneStripe stripe, final LaneQueue queue) {
-        release(stripe, queue);
+        release(stripe, queue, envelope.message().laneKey());
         if (failure == null) envelope.completion().complete(null);
         else envelope.completion().completeExceptionally(asZeroException(failure));
     }
 
-    private void release(final LaneStripe stripe, final LaneQueue queue) {
-        synchronized (stripe) { queue.pending--; }
+    private void release(final LaneStripe stripe, final LaneQueue queue, final LaneKey laneKey) {
+        synchronized (stripe) {
+            queue.pending--;
+            if (closed.get() && queue.pending == 0) stripe.lanes.remove(laneKey, queue);
+        }
         active.decrementAndGet();
         pending.decrementAndGet();
         completed.increment();
@@ -299,9 +345,12 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
         if (current instanceof ZeroException zeroException) {
             return zeroException;
         }
+        // 对外消息不拷贝底层异常文本：getMessage() 可能含 SQL/连接串/凭据/玩家输入，
+        // 且会经完成信号进入业务可见的异常文本。原始异常仅作 cause 保留（不入对外消息），
+        // 与 RuntimeAssemblyException 的安全消息裁剪一致。
         return ZeroException.of(
                 SystemErrorCode.SYSTEM_ERROR,
-                current.getMessage() == null ? SystemErrorCode.SYSTEM_ERROR.message() : current.getMessage(),
+                SystemErrorCode.SYSTEM_ERROR.message(),
                 current);
     }
 
@@ -330,6 +379,9 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
      */
     private static final class LaneQueue {
 
+        /** 当前 handler 超时；真实完成前拒绝后续准入。 */
+        private boolean isolated;
+
         /** 含执行中/异步挂起的准入数；只在段锁内访问。 */
         private int pending;
 
@@ -353,6 +405,55 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
     public ActorSchedulerStatistics statistics() {
         return new ActorSchedulerStatistics(pending.get(), active.get(), completed.sum(), rejected.sum(),
                 queueWait.sum(), maxQueueWait.get());
+    }
+
+    /** @return 累计执行超时次数；线程安全，不暴露高基数 lane 标识。 */
+    public long executionTimeoutCount() { return timedOut.sum(); }
+
+    /** 每条执行的超时所有权；所有状态由 lane 段锁保护，通知始终在锁外。 */
+    private final class ExecutionWatch {
+        /** 被观察的消息。 */
+        private final Envelope envelope;
+        /** lane 状态锁。 */
+        private final LaneStripe stripe;
+        /** 被观察队列。 */
+        private final LaneQueue queue;
+        /** 真实 handler 是否完成。 */
+        private boolean finished;
+        /** 定时句柄；在注册回调前发布。 */
+        private java.util.concurrent.ScheduledFuture<?> timer;
+        private ExecutionWatch(Envelope envelope, LaneStripe stripe, LaneQueue queue) {
+            this.envelope = envelope; this.stripe = stripe; this.queue = queue;
+        }
+        private void start() {
+            if (timeoutTimer != null) timer = timeoutTimer.schedule(this::expire,
+                    executionTimeoutNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
+        }
+        private void expire() {
+            List<Envelope> rejectedMessages;
+            synchronized (stripe) {
+                if (finished) return;
+                queue.isolated = true;
+                timedOut.increment();
+                rejectedMessages = new ArrayList<>(queue.messages);
+                queue.messages.clear();
+                queue.pending -= rejectedMessages.size();
+                pending.addAndGet(-rejectedMessages.size());
+                rejected.add(rejectedMessages.size());
+            }
+            ZeroException failure = ZeroException.of(ActorErrorCode.EXECUTION_TIMEOUT);
+            envelope.completion().completeExceptionally(failure);
+            rejectedMessages.forEach(message -> message.completion().completeExceptionally(failure));
+        }
+        private void finish(final Throwable failure) {
+            Throwable outcome;
+            synchronized (stripe) {
+                finished = true;
+                outcome = queue.isolated ? ZeroException.of(ActorErrorCode.EXECUTION_TIMEOUT) : failure;
+            }
+            if (timer != null) timer.cancel(false);
+            completeEnvelope(envelope, outcome, stripe, queue);
+        }
     }
 
     /**
@@ -381,13 +482,16 @@ public final class ExecutorActorScheduler implements ActorScheduler, AutoCloseab
 
     /** 调用线程私有的直接执行器续调记录。 @author zn */
     private static final class DrainRun {
+        /** 所属调度器实例；static ThreadLocal 下用于跳过其它实例遗留的节点。 */
+        private final ExecutorActorScheduler owner;
         /** 当前 Lane。 */
         private final LaneQueue queue;
         /** 跨 Lane 同步嵌套的上层记录。 */
         private final DrainRun parent;
         /** 本次退出后是否迭代续调。 */
         private boolean again;
-        private DrainRun(final LaneQueue queue, final DrainRun parent) {
+        private DrainRun(final ExecutorActorScheduler owner, final LaneQueue queue, final DrainRun parent) {
+            this.owner = owner;
             this.queue = queue;
             this.parent = parent;
         }

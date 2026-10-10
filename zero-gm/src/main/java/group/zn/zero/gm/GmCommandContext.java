@@ -55,4 +55,9 @@ public record GmCommandContext(
     public static GmCommandContext simple(final String operator, final String operatorIp, final String traceId) {
         return new GmCommandContext(operator, operatorIp, traceId, Set.of(), Set.of(), "", "", Map.of());
     }
+    /** @return 固定安全诊断文本；不输出身份、令牌或请求值，线程安全且无变更。 */
+    @Override
+    public String toString() {
+        return "GmCommandContext{identity=[REDACTED]}";
+    }
 }

@@ -18,6 +18,19 @@ import org.junit.jupiter.api.Test;
  */
 class MetricContractTest {
 
+    /** 瞬时磁盘容量导出为 GAUGE，只有累计量显式使用 COUNTER。 */
+    @Test
+    void diskTotalMetricShouldBeGauge() {
+        InMemoryMetricRegistry registry = new InMemoryMetricRegistry();
+        new SystemMetricCollector().registerDefaults(registry);
+
+        MetricDefinition diskTotal = registry.definitions().stream()
+                .filter(definition -> definition.name().equals(SystemMetricCollector.DISK_TOTAL))
+                .findFirst().orElseThrow();
+
+        assertEquals(MetricType.GAUGE, diskTotal.type());
+    }
+
     /**
      * 验证定义 schema 防御性复制、保持顺序且不可修改。
      */
@@ -26,7 +39,7 @@ class MetricContractTest {
         List<String> input = new ArrayList<>(List.of("module", "operation", "result"));
 
         MetricDefinition definition = new MetricDefinition(
-                "zero_request_total", "请求次数", "count", input);
+                "zero_request_total", "请求次数", "count", input, group.zn.zero.monitor.MetricType.COUNTER);
         input.set(0, "changed");
 
         assertEquals(List.of("module", "operation", "result"), definition.labelNames());

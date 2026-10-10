@@ -20,6 +20,9 @@ public enum CacheErrorCode implements ErrorCode {
      */
     WRITE_FAILED(ErrorCategory.CACHE, "ZERO-CACHE-WRITE-FAILED", "cache write failed"),
 
+    /** 写入观察超时，实际结果未知，已准入写入仍可能随后完成。 */
+    WRITE_TIMEOUT(ErrorCategory.CACHE, "ZERO-CACHE-WRITE-TIMEOUT", "cache write outcome unknown"),
+
     /**
      * 缓存加载失败。
      */

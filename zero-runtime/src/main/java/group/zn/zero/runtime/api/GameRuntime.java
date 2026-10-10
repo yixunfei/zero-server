@@ -15,6 +15,13 @@ import java.util.Optional;
 public interface GameRuntime extends Lifecycle, AutoCloseable {
 
     /**
+     * 启动并在统一 startup deadline 内同步等待 mandatory 异步健康探针。
+     * 仅生命周期控制线程调用，不得在 Actor 或 Netty IO 线程调用；失败执行回滚。
+     * @throws group.zn.zero.runtime.diagnostics.RuntimeAssemblyException 探针失败、超时或启动失败。
+     */
+    @Override void start();
+
+    /**
      * 取得单值 capability。
      *
      * @param key key；不可为空。

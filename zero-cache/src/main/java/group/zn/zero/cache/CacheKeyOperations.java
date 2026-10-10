@@ -27,8 +27,19 @@ final class CacheKeyOperations<K> {
     private final Map<K, State> states = new HashMap<>();
     /** 正在执行或等待前序屏障的写入总数，受本对象锁保护。 */
     private int writes;
+    /** 有界物理屏障开始时间；不暴露业务键。 */
+    private final Map<CompletableFuture<Void>, Long> writeStarts = new HashMap<>();
+    /** 观察期限；不会放开物理完成屏障。 */
+    private final long writeTimeoutNanos;
     /** 仅在当前线程完成屏障期间存在，防止同步完成链递归耗尽栈。 */
     private final ThreadLocal<CompletionDrain> completionDrain = new ThreadLocal<>();
+
+    CacheKeyOperations() { this(CachePolicy.DEFAULT_WRITE_TIMEOUT); }
+
+    CacheKeyOperations(final java.time.Duration timeout) {
+        writeTimeoutNanos = timeout.toNanos();
+        if (writeTimeoutNanos <= 0) throw new IllegalArgumentException("write timeout must be positive");
+    }
 
     /** 开始读取；调用方必须在异步操作结束后 release。 */
     synchronized Token<K> read(final K key) {
@@ -85,9 +96,12 @@ final class CacheKeyOperations<K> {
             token = new Token<>(key, state, ++state.generation);
             before = state.tail;
             state.tail = done;
+            writeStarts.put(done, System.nanoTime());
         }
-        CompletionStage<T> execution = execute(before, done, token, () -> action.apply(token));
-        return execution.toCompletableFuture().copy();
+        CompletableFuture<T> result = new CompletableFuture<>();
+        CompletionStage<T> observer = observe(result);
+        execute(before, done, token, () -> action.apply(token), result);
+        return observer;
     }
 
     /** 加载回填仅在原代际有效时进入同键写序列；超时取消观察不能提前释放物理写入屏障。 */
@@ -101,18 +115,29 @@ final class CacheKeyOperations<K> {
             token.state.references++;
             before = token.state.tail;
             token.state.tail = done;
+            writeStarts.put(done, System.nanoTime());
         }
-        CompletionStage<T> execution = execute(before, done, token, () -> {
+        CompletableFuture<T> result = new CompletableFuture<>();
+        CompletionStage<T> observer = observe(result);
+        execute(before, done, token, () -> {
             boolean current;
             synchronized (this) { current = token.generation == token.state.generation; }
             return current ? action.get() : stale.get();
-        });
-        return execution.toCompletableFuture().copy();
+        }, result);
+        return observer;
     }
 
-    private <T> CompletionStage<T> execute(final CompletableFuture<Void> before,
-            final CompletableFuture<Void> done, final Token<K> token, final Supplier<CompletionStage<T>> action) {
-        CompletableFuture<T> result = new CompletableFuture<>();
+    private <T> CompletionStage<T> observe(final CompletableFuture<T> physical) {
+        return physical.copy().orTimeout(writeTimeoutNanos, java.util.concurrent.TimeUnit.NANOSECONDS)
+                .exceptionallyCompose(failure -> CompletableFuture.failedFuture(
+                        failure instanceof java.util.concurrent.TimeoutException
+                                ? ZeroException.of(CacheErrorCode.WRITE_TIMEOUT,
+                                        "cache write observation timed out; outcome unknown", failure) : failure));
+    }
+
+    private <T> void execute(final CompletableFuture<Void> before,
+            final CompletableFuture<Void> done, final Token<K> token, final Supplier<CompletionStage<T>> action,
+            final CompletableFuture<T> result) {
         AtomicBoolean settled = new AtomicBoolean();
         BiConsumer<T, Throwable> completion = (value, failure) -> {
             if (settled.compareAndSet(false, true)) finish(token, done, result, value, failure);
@@ -125,7 +150,6 @@ final class CacheKeyOperations<K> {
                 completion.accept(null, failure);
             }
         });
-        return result;
     }
 
     /** 准入在短锁内完成，拒绝不创建状态引用或改变代际。 */
@@ -146,6 +170,7 @@ final class CacheKeyOperations<K> {
             synchronized (this) {
                 token.state.writes--;
                 writes--;
+                writeStarts.remove(done);
                 release(token);
             }
             drain.observers.add(() -> {
@@ -166,6 +191,19 @@ final class CacheKeyOperations<K> {
 
     /** 一个在途读取/变更的身份；record 相等性包含键、状态实例和代际。 */
     record Token<K>(K key, State state, long generation) { }
+
+    /** 无外部调用的短锁诊断，最大扫描 4096 项。 */
+    synchronized CacheWriteDiagnostics diagnostics() {
+        long now = System.nanoTime();
+        long oldest = 0;
+        int overdue = 0;
+        for (long started : writeStarts.values()) {
+            long age = Math.max(0, now - started);
+            oldest = Math.max(oldest, age);
+            if (age >= writeTimeoutNanos) overdue++;
+        }
+        return new CacheWriteDiagnostics(writes, overdue, java.time.Duration.ofNanos(oldest));
+    }
 
     /** 单键状态，仅由外层短锁访问。 */
     private static final class State {

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import group.zn.zero.rpc.DefaultRpcCorrelationIdGenerator;
 import group.zn.zero.rpc.RpcCallContext;
@@ -40,6 +41,69 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class CommonInterfaceRpcTest {
+
+    /** 绑定中途失败只删除本次句柄；旧句柄不能删掉新注册。 */
+    @Test void scopedBindingRollbackDoesNotRemoveReplacement() {
+        InMemoryRpcTransport transport = new InMemoryRpcTransport();
+        RpcHandler handler = request -> CompletableFuture.completedFuture(null);
+        var original = transport.registerScoped("svc", "method", "", "", handler);
+        transport.unregister("svc", "method");
+        var replacement = transport.registerScoped("svc", "method", "", "", handler);
+        original.close();
+        assertThrows(group.zn.zero.core.error.ZeroException.class,
+                () -> transport.registerScoped("svc", "method", "", "", handler));
+        replacement.close();
+        var again = transport.registerScoped("svc", "method", "", "", handler);
+        again.close();
+    }
+
+    /** 第二个方法注册失败时，先前路由必须完成回滚。 */
+    @Test void failedBindingLeavesNoPartialRoutes() {
+        InMemoryRpcTransport transport = new InMemoryRpcTransport();
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        RpcHandlerRegistry registry = new RpcHandlerRegistry() {
+            @Override public void register(String service, String method, RpcHandler handler) {
+                transport.register(service, method, handler);
+            }
+            @Override public void unregister(String service, String method) { transport.unregister(service, method); }
+            @Override public group.zn.zero.rpc.spi.RpcHandlerRegistration registerScoped(String service,
+                    String method, String topic, String group, RpcHandler handler) {
+                if (calls.incrementAndGet() == 2) throw new IllegalStateException("registration failed");
+                return transport.registerScoped(service, method, topic, group, handler);
+            }
+        };
+        assertThrows(IllegalStateException.class,
+                () -> new RpcServiceBinder(registry, codecRegistry()).bind(PlayerRemoteRpc.class, new PlayerRemoteRpcImpl()));
+        assertEquals(2, calls.get());
+        new RpcServiceBinder(transport, codecRegistry()).bind(PlayerRemoteRpc.class, new PlayerRemoteRpcImpl());
+    }
+
+    /** 关闭失败时保持绑定状态，下一次关闭应能重试失败的注册句柄。 */
+    @Test void failedCloseCanRetryRegistrationCleanup() {
+        InMemoryRpcTransport transport = new InMemoryRpcTransport();
+        var closeCalls = new java.util.concurrent.atomic.AtomicInteger();
+        RpcHandlerRegistry registry = new RpcHandlerRegistry() {
+            @Override public void register(String service, String method, RpcHandler handler) {
+                transport.register(service, method, handler);
+            }
+            @Override public void unregister(String service, String method) { transport.unregister(service, method); }
+            @Override public group.zn.zero.rpc.spi.RpcHandlerRegistration registerScoped(String service,
+                    String method, String topic, String group, RpcHandler handler) {
+                var owned = transport.registerScoped(service, method, topic, group, handler);
+                return () -> {
+                    if (closeCalls.incrementAndGet() == 1) throw new IllegalStateException("transient cleanup failure");
+                    owned.close();
+                };
+            }
+        };
+        RpcBoundService bound = new RpcServiceBinder(registry, codecRegistry())
+                .bind(PlayerRemoteRpc.class, new PlayerRemoteRpcImpl());
+        assertThrows(IllegalStateException.class, bound::close);
+        assertTrue(bound.bound());
+        bound.close();
+        assertFalse(bound.bound());
+        new RpcServiceBinder(transport, codecRegistry()).bind(PlayerRemoteRpc.class, new PlayerRemoteRpcImpl());
+    }
 
     /**
      * 验证同步 common 接口调用可以通过本地 RPC 传输完成。
@@ -462,6 +526,13 @@ class CommonInterfaceRpcTest {
      * @author zn
      */
     static final class CapturingRpcTransport implements RpcTransport, RpcHandlerRegistry {
+
+        /** 委托精确注册所有权，不把测试装饰器变为无条件注销。 */
+        @Override
+        public group.zn.zero.rpc.spi.RpcHandlerRegistration registerScoped(final String service,
+                final String method, final String topic, final String group, final RpcHandler handler) {
+            return delegate.registerScoped(service, method, topic, group, handler);
+        }
 
         /**
          * 内存 RPC 传输。

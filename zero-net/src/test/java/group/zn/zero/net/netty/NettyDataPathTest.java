@@ -75,6 +75,8 @@ class NettyDataPathTest {
             assertTrue(budget.used() > 0);
             var failure = assertThrows(CompletionException.class, () -> connection.sendFrame(frame).toCompletableFuture().join());
             assertEquals(NetErrorCode.OUTBOUND_OVERFLOW, ((ZeroException) failure.getCause()).errorCode());
+            assertTrue(failure.getCause().getMessage().contains("local-exhausted"));
+            assertTrue(failure.getCause().getMessage().contains("required="));
             held.promises.get(0).setSuccess();
             assertFalse(batch.isDone());
             held.promises.get(1).setFailure(new ClosedChannelException());
@@ -96,6 +98,22 @@ class NettyDataPathTest {
             bytes.release();
             assertThrows(RuntimeException.class,
                     () -> channel.writeOutbound(new ProtocolFrame(1, 1, 0, null, new byte[100])));
+        } finally { channel.finishAndReleaseAll(); }
+    }
+
+    @Test void staticallyOversizedBatchReportsBothBudgetsWithoutAdmission() {
+        var channel = new EmbeddedChannel();
+        var options = ServerOptions.tcp("localhost", 0).withTuning(
+                new NetworkTuning(NetworkTransport.NIO, 128, 32, 64, 1000, 2000, 0));
+        var budget = new OutboundBudget(2000);
+        var connection = new NettyConnection("c", channel, new ZeroBinaryFrameCodec(), options, budget);
+        try {
+            var frame = new ProtocolFrame(1, 1, 0, null, new byte[600]);
+            var failure = assertThrows(CompletionException.class, () -> connection.sendFrame(frame).toCompletableFuture().join());
+            assertTrue(failure.getCause().getMessage().contains("static"));
+            assertTrue(failure.getCause().getMessage().contains("local=0/1000"));
+            assertTrue(failure.getCause().getMessage().contains("global=0/2000"));
+            assertEquals(0, budget.used());
         } finally { channel.finishAndReleaseAll(); }
     }
 

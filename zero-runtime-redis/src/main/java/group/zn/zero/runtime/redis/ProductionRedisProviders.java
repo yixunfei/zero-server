@@ -91,6 +91,8 @@ final class ProductionRedisProviders {
                 ZeroProductionRuntimeConfigKeys.ADAPTER_CACHE_REDIS_CACHE_NAME,
                 true);
         ResolvedProductionSetting codec = codecSetting(valueCodec);
+        ResolvedProductionSetting cooldown = directSetting(resolver,
+                ZeroProductionRuntimeConfigKeys.ADAPTER_CACHE_REDIS_FAILURE_COOLDOWN, false);
         List<ResolvedProductionSetting> settings = List.of(uri, namespace, cacheName, codec);
         ProductionAdapterDiagnostic diagnostic = diagnostic(
                 ProductionAdapterNames.ADAPTER_REDIS_CACHE,
@@ -110,7 +112,7 @@ final class ProductionRedisProviders {
                 valueCodec,
                 ProductionConfigSources.from(
                         ProductionRedisCacheProvider.ID,
-                        List.of(namespace, cacheName)));
+                        List.of(namespace, cacheName, cooldown)));
         return new CacheResolution(diagnostic, provider);
     }
 

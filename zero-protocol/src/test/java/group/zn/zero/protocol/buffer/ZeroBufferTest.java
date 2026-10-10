@@ -204,10 +204,10 @@ class ZeroBufferTest {
 
         assertArrayEquals(
                 new boolean[] {true, false, true, true, false, false, true, false, true},
-                reader.readPresenceBits());
+                reader.readPresenceBits(9));
         assertArrayEquals(
                 new boolean[] {true, false, false, true, false, false, true, false, false, true},
-                reader.readPresenceBits());
+                reader.readPresenceBits(10));
     }
 
     /**

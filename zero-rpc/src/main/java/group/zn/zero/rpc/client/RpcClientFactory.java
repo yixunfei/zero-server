@@ -179,6 +179,10 @@ public final class RpcClientFactory {
     public <T> T create(final Class<T> serviceInterface, final RpcCallOptions options) {
         Class<T> currentInterface = Objects.requireNonNull(serviceInterface, "serviceInterface");
         RpcCallOptions currentOptions = Objects.requireNonNull(options, "options");
+        // 请求级 trace/reply/timeout 不进入进程级缓存，默认选项代理仍按接口复用。
+        if (!currentOptions.equals(defaultOptions)) {
+            return currentInterface.cast(newClient(currentInterface, currentOptions));
+        }
         Object proxy = clients.computeIfAbsent(
                 new ClientKey(currentInterface, currentOptions),
                 ignored -> newClient(currentInterface, currentOptions));
@@ -301,6 +305,16 @@ public final class RpcClientFactory {
                 final MethodBinding binding,
                 final Object[] args,
                 final Instant timeoutAt) {
+            try {
+                return invokeEncoded(binding, args, timeoutAt);
+            } catch (RuntimeException | Error failure) {
+                return CompletableFuture.completedFuture(failureResult(binding.descriptor(), null, failure));
+            }
+        }
+
+        /** 请求构造失败也必须遵守 RpcResult 契约。 */
+        private CompletionStage<RpcResult<Object>> invokeEncoded(
+                final MethodBinding binding, final Object[] args, final Instant timeoutAt) {
             RpcMethodDescriptor descriptor = binding.descriptor();
             RpcCallContext context = RpcCallContext.current();
             String correlationId = correlationIdGenerator.nextCorrelationId();

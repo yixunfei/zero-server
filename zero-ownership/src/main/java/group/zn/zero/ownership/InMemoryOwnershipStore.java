@@ -100,7 +100,7 @@ public final class InMemoryOwnershipStore implements OwnershipStore {
             final ProcessIncarnation owner,
             final Duration duration,
             final Instant now) {
-        long epoch = epochs.merge(resource, 1L, Long::sum);
+        long epoch = epochs.merge(resource, 1L, Math::addExact);
         OwnershipLease lease = new OwnershipLease(resource, Objects.requireNonNull(owner, "owner"), epoch, now.plus(duration));
         leases.put(resource, lease);
         return lease;

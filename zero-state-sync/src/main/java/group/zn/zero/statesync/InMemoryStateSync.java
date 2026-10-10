@@ -8,6 +8,24 @@ public final class InMemoryStateSync {
     /** 已应用的版本和序号；由所属执行域串行访问。 */
     private final Map<Observer, Baseline> baselines = new HashMap<>();
 
+    /** 所属执行域管理的最大观察者数量。 */
+    private final int capacity;
+
+    /** 默认最多 4096 个观察者，不创建线程。 */
+    public InMemoryStateSync() { this(4096); }
+
+    /** @param capacity 正观察者容量。 @throws IllegalArgumentException 容量非正数。 */
+    public InMemoryStateSync(final int capacity) {
+        if (capacity <= 0) throw new IllegalArgumentException("baseline capacity must be positive");
+        this.capacity = capacity;
+    }
+
+    /** 观察者离场时显式释放基线；随后收到 delta 会要求全量同步。
+     * @param sceneId 场景。 @param observerId 观察者。 @return 是否移除；仅所属执行域调用。 */
+    public boolean remove(final String sceneId, final String observerId) {
+        return baselines.remove(new Observer(sceneId, observerId)) != null;
+    }
+
     /**
      * 接收同步消息；旧消息不会改变状态，缺失基线要求重新同步。
      * @param envelope 输入信封；不可为空。
@@ -21,6 +39,9 @@ public final class InMemoryStateSync {
         }
         Observer observer = new Observer(envelope.sceneId(), envelope.observerId());
         Baseline known = baselines.get(observer);
+        if (known == null && baselines.size() >= capacity) {
+            return new Result(Status.RESYNC_REQUIRED, -1);
+        }
         if (known != null && envelope.syncSeq() <= known.sequence()) {
             if (envelope.syncSeq() == known.sequence()
                     && envelope.stateVersion() == known.version()

@@ -27,7 +27,16 @@ final class NettyServerResources implements AutoCloseable {
     NettyServerResources(final ServerOptions options, final NettyIoResources borrowed) {
         owned = borrowed == null;
         io = owned ? NettyIoResources.open(options) : borrowed;
-        io.validate(options);
+        try { io.validate(options); }
+        catch (RuntimeException | Error failure) {
+            if (owned) {
+                try { io.close(); }
+                catch (RuntimeException | Error cleanup) {
+                    if (cleanup != failure) failure.addSuppressed(cleanup);
+                }
+            }
+            throw failure;
+        }
     }
 
     NettyIoResources io() { return io; }
@@ -46,25 +55,47 @@ final class NettyServerResources implements AutoCloseable {
     @Override public void close() {
         if (closed.compareAndSet(false, true)) {
             if (listener == null) closeChildren(null);
-            else listener.close().addListener(done -> closeChildren(done.isSuccess() ? null : done.cause()));
+            else {
+                try { listener.close().addListener(done -> closeChildren(done.isSuccess() ? null : done.cause())); }
+                catch (RuntimeException | Error failure) { closeChildren(failure); }
+            }
         }
         if (!io.inEventLoop()) {
-            NettyIoResources.await(drained);
+            try { NettyIoResources.await(drained); }
+            catch (RuntimeException | Error failure) {
+                if (owned) {
+                    try { io.close(); }
+                    catch (RuntimeException | Error cleanup) { suppress(failure, cleanup); }
+                }
+                throw failure;
+            }
             if (owned) io.close();
         }
     }
 
     private void closeChildren(final Throwable listenerFailure) {
-        children.close().addListener(done -> {
-            Throwable failure = listenerFailure == null ? done.cause() : listenerFailure;
-            try {
-                if (owned) io.close();
-                if (failure == null) drained.complete(null);
-                else drained.completeExceptionally(failure);
-            } catch (RuntimeException closeFailure) {
-                if (failure != null) closeFailure.addSuppressed(failure);
-                drained.completeExceptionally(closeFailure);
-            }
-        });
+        try {
+            children.close().addListener(done -> finishClose(combine(listenerFailure, done.cause())));
+        } catch (RuntimeException | Error failure) {
+            finishClose(combine(listenerFailure, failure));
+        }
+    }
+
+    private void finishClose(final Throwable failure) {
+        Throwable result = failure;
+        try { if (owned) io.close(); }
+        catch (RuntimeException | Error cleanup) { result = combine(result, cleanup); }
+        if (result == null) drained.complete(null);
+        else drained.completeExceptionally(result);
+    }
+
+    private static Throwable combine(final Throwable first, final Throwable next) {
+        if (first == null) return next;
+        suppress(first, next);
+        return first;
+    }
+
+    private static void suppress(final Throwable first, final Throwable next) {
+        if (next != null && first != next) first.addSuppressed(next);
     }
 }

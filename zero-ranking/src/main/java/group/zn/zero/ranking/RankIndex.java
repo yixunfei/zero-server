@@ -3,6 +3,7 @@ package group.zn.zero.ranking;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -29,6 +30,10 @@ final class RankIndex {
 
     /** 原子性由外层锁保证；替换旧键并插入新值，参数不可为空。 */
     void replace(final RankingEntry previous, final RankingEntry entry) {
+        Objects.requireNonNull(entry, "entry");
+        // RankingEntry 的 UID 已验证；固定比较器不调用业务代码。先分配，再验证并删除旧键。
+        int height = Math.min(MAX_LEVEL, 1 + Integer.numberOfTrailingZeros(ThreadLocalRandom.current().nextInt()));
+        Node node = new Node(entry, height);
         if (previous != null) remove(previous);
         Node current = head;
         for (int level = levels - 1; level >= 0; level--) {
@@ -39,14 +44,12 @@ final class RankIndex {
             }
             predecessors[level] = current;
         }
-        int height = Math.min(MAX_LEVEL, 1 + Integer.numberOfTrailingZeros(ThreadLocalRandom.current().nextInt()));
         for (int level = levels; level < height; level++) {
             ranks[level] = 0;
             predecessors[level] = head;
             head.span[level] = size;
         }
         levels = Math.max(levels, height);
-        Node node = new Node(entry, height);
         for (int level = 0; level < height; level++) {
             Node prior = predecessors[level];
             node.next[level] = prior.next[level];

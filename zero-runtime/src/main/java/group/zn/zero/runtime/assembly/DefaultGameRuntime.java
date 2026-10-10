@@ -15,15 +15,18 @@ import group.zn.zero.runtime.diagnostics.RuntimeFailurePhase;
 import group.zn.zero.runtime.diagnostics.RuntimePhaseOutcome;
 import group.zn.zero.runtime.health.HealthPhase;
 import group.zn.zero.runtime.health.HealthProbe;
+import group.zn.zero.runtime.health.HealthRequest;
 import group.zn.zero.runtime.health.HealthResult;
 import group.zn.zero.runtime.health.HealthStatus;
 import group.zn.zero.runtime.health.RuntimeHealthSnapshot;
 import group.zn.zero.runtime.spi.ComponentContribution;
 import group.zn.zero.runtime.spi.RuntimeDeadline;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletionStage;
 import java.util.function.LongSupplier;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -39,6 +42,10 @@ final class DefaultGameRuntime implements GameRuntime {
     private final StartedComponentLedger startedComponents = new StartedComponentLedger();
     private final RuntimeReportTracker tracker;
     private final Duration startupTimeout;
+    /** lifecycle stop 和所有资源关闭的累计预算。 */
+    private final Duration shutdownTimeout;
+    /** 隔离阻塞生命周期调用，最多一个真实在途操作。 */
+    private final LifecycleCallBoundary calls = new LifecycleCallBoundary();
     private final LongSupplier nanoTime;
     private final HealthProbeRunner healthProbeRunner = new HealthProbeRunner();
     /** 串行化生命周期请求，但不跨越状态锁执行组件代码。 */
@@ -54,6 +61,7 @@ final class DefaultGameRuntime implements GameRuntime {
             final BuildResourceLedger resources,
             final RuntimeReportTracker tracker,
             final Duration startupTimeout,
+            final Duration shutdownTimeout,
             final LongSupplier nanoTime) {
         this.plan = Objects.requireNonNull(plan, "plan");
         this.bindings = Objects.requireNonNull(bindings, "bindings");
@@ -61,6 +69,7 @@ final class DefaultGameRuntime implements GameRuntime {
         this.resources = Objects.requireNonNull(resources, "resources");
         this.tracker = Objects.requireNonNull(tracker, "tracker");
         this.startupTimeout = Objects.requireNonNull(startupTimeout, "startupTimeout");
+        this.shutdownTimeout = Objects.requireNonNull(shutdownTimeout, "shutdownTimeout");
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     }
 
@@ -89,8 +98,11 @@ final class DefaultGameRuntime implements GameRuntime {
                 synchronized (this) {
                     setState(RuntimeState.STOPPING);
                 }
-                primary = startedComponents.stopAll(primary, tracker);
-                primary = resources.closeAll(primary);
+                RuntimeDeadline cleanupDeadline = RuntimeDeadline.using(shutdownTimeout, nanoTime);
+                if (!calls.pending()) {
+                    primary = startedComponents.stopAll(primary, tracker, calls, cleanupDeadline);
+                    primary = resources.closeAll(primary, calls, cleanupDeadline);
+                }
                 synchronized (this) {
                     fail(primary);
                 }
@@ -103,7 +115,11 @@ final class DefaultGameRuntime implements GameRuntime {
 
     @Override
     public void stop() {
-        lifecycleOperation.lock();
+        if (rejectOrIgnoreReentrantShutdown()) {
+            return;
+        }
+        RuntimeDeadline deadline = RuntimeDeadline.using(shutdownTimeout, nanoTime);
+        acquireShutdown(deadline);
         try {
             synchronized (this) {
                 if (runtimeState == RuntimeState.STARTING) throw reuseFailure();
@@ -113,7 +129,7 @@ final class DefaultGameRuntime implements GameRuntime {
                 }
                 terminalRequested = true;
             }
-            RuntimeAssemblyException failure = cleanup();
+            RuntimeAssemblyException failure = cleanup(deadline);
             if (failure != null) {
                 synchronized (this) {
                     fail(failure);
@@ -130,7 +146,11 @@ final class DefaultGameRuntime implements GameRuntime {
 
     @Override
     public void close() {
-        lifecycleOperation.lock();
+        if (rejectOrIgnoreReentrantShutdown()) {
+            return;
+        }
+        RuntimeDeadline deadline = RuntimeDeadline.using(shutdownTimeout, nanoTime);
+        acquireShutdown(deadline);
         try {
             synchronized (this) {
                 if (runtimeState == RuntimeState.STARTING) throw reuseFailure();
@@ -138,9 +158,13 @@ final class DefaultGameRuntime implements GameRuntime {
                 if (runtimeState == RuntimeState.CLOSED) {
                     return;
                 }
+                if (runtimeState == RuntimeState.STOPPED) {
+                    setState(RuntimeState.CLOSED);
+                    return;
+                }
                 terminalRequested = true;
             }
-            RuntimeAssemblyException failure = cleanup();
+            RuntimeAssemblyException failure = cleanup(deadline);
             if (failure != null) {
                 synchronized (this) {
                     fail(failure);
@@ -222,17 +246,23 @@ final class DefaultGameRuntime implements GameRuntime {
             final RuntimeDeadline startupDeadline) {
         long startedAt = System.nanoTime();
         try {
-            lifecycle.start();
+            calls.call(() -> {
+                lifecycle.start();
+                startedComponents.record(componentId, lifecycle);
+                return null;
+            }, startupDeadline, componentId, RuntimeFailurePhase.START);
         } catch (Throwable failure) {
             tracker.startFailed(componentId, elapsed(startedAt));
+            if (failure instanceof RuntimeAssemblyException known
+                    && known.errorCode() == RuntimeErrorCode.RUNTIME_STARTUP_TIMEOUT) {
+                throw known;
+            }
             throw RuntimeAssemblyException.failure(
                     RuntimeErrorCode.RUNTIME_COMPONENT_START_FAILED,
                     RuntimeFailurePhase.START,
                     componentId,
-                    "component=" + componentId,
-                    safeCause(failure));
+                    "component=" + componentId);
         }
-        startedComponents.record(componentId, lifecycle);
         tracker.started(componentId, elapsed(startedAt));
         ensureBudget(componentId, RuntimeFailurePhase.START, startupDeadline);
     }
@@ -244,7 +274,21 @@ final class DefaultGameRuntime implements GameRuntime {
         long startedAt = System.nanoTime();
         HealthResult result = null;
         try {
-            result = healthProbeRunner.await(componentId, probe, startupDeadline);
+            java.time.Duration remaining = startupDeadline.remaining();
+            if (remaining.isZero()) {
+                throw calls.timeout(componentId, RuntimeFailurePhase.HEALTH);
+            }
+            CompletionStage<HealthResult> stage;
+            try {
+                HealthRequest request = new HealthRequest(HealthPhase.STARTUP, remaining, Instant.now());
+                stage = calls.call(() -> Objects.requireNonNull(probe.check(request), "health stage"),
+                        startupDeadline, componentId, RuntimeFailurePhase.HEALTH);
+            } catch (RuntimeAssemblyException failure) { throw failure; }
+            catch (Exception failure) {
+                throw RuntimeAssemblyException.failure(RuntimeErrorCode.RUNTIME_COMPONENT_HEALTH_FAILED,
+                        RuntimeFailurePhase.HEALTH, componentId, "component=" + componentId);
+            }
+            result = healthProbeRunner.await(componentId, stage, startupDeadline);
             if (result.status() != HealthStatus.HEALTHY) {
                 tracker.health(componentId, RuntimePhaseOutcome.FAILED, elapsed(startedAt), result);
                 throw RuntimeAssemblyException.failure(
@@ -262,12 +306,37 @@ final class DefaultGameRuntime implements GameRuntime {
         }
     }
 
-    private RuntimeAssemblyException cleanup() {
+    private RuntimeAssemblyException cleanup(final RuntimeDeadline deadline) {
         synchronized (this) {
             setState(RuntimeState.STOPPING);
         }
-        RuntimeAssemblyException failure = startedComponents.stopAll(null, tracker);
-        return resources.closeAll(failure);
+        if (calls.pending()) return calls.timeout(null, RuntimeFailurePhase.STOP);
+        RuntimeAssemblyException failure = startedComponents.stopAll(null, tracker, calls, deadline);
+        return resources.closeAll(failure, calls, deadline);
+    }
+
+    /** 等待并发生命周期操作也计入预算，不能在获取操作锁之前无界阻塞。 */
+    private void acquireShutdown(final RuntimeDeadline deadline) {
+        try {
+            if (!lifecycleOperation.tryLock(deadline.remaining().toNanos(), java.util.concurrent.TimeUnit.NANOSECONDS)) {
+                throw calls.timeout(null, RuntimeFailurePhase.STOP);
+            }
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            throw calls.timeout(null, RuntimeFailurePhase.STOP);
+        }
+    }
+
+    /** 处理用户 lifecycle 回调内对当前 runtime 的关闭重入。 */
+    private boolean rejectOrIgnoreReentrantShutdown() {
+        if (!calls.inCall()) {
+            return false;
+        }
+        RuntimeState state = runtimeState;
+        if (state == RuntimeState.STOPPING) {
+            return true;
+        }
+        throw reuseFailure();
     }
 
     private void ensureBudget(

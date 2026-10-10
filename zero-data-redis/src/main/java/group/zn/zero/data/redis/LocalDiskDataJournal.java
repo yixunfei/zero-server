@@ -102,9 +102,13 @@ public final class LocalDiskDataJournal {
         try (FileChannel channel = FileChannel.open(path,
                 StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE,
-                StandardOpenOption.READ)) {
-            long boundary = recoverBoundary(path, channel.size());
-            channel.truncate(boundary);
+                StandardOpenOption.READ);
+                var lock = channel.lock()) {
+            long boundary = recoverBoundary(path, channel);
+            if (boundary != channel.size()) {
+                throw ZeroException.of(DataErrorCode.READ_FAILED,
+                        "journal has an incomplete tail; explicit recovery is required", null);
+            }
             channel.position(boundary);
             for (byte[] bytes : frames) {
                 java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(bytes);
@@ -137,7 +141,8 @@ public final class LocalDiskDataJournal {
             while (offset < bytes.length) {
                 int[] frame = completeFrame(bytes, offset);
                 if (frame == null) {
-                    break;
+                    throw ZeroException.of(DataErrorCode.READ_FAILED,
+                            "local data journal has an incomplete tail", null);
                 }
                 entries.add(codec.decode(java.util.Arrays.copyOfRange(
                         bytes, frame[0], frame[0] + frame[1])));
@@ -150,12 +155,19 @@ public final class LocalDiskDataJournal {
     }
 
     /** 首次追加或上次写失败后恢复完整帧边界，完整帧损坏不可静默截断。 */
-    private long recoverBoundary(final Path path, final long size) throws IOException {
+    private long recoverBoundary(final Path path, final FileChannel channel) throws IOException {
+        long size = channel.size();
         Long verified = verifiedLengths.get(path);
         if (verified != null && verified == size) {
             return size;
         }
-        byte[] bytes = Files.readAllBytes(path);
+        if (size > Integer.MAX_VALUE) throw new IOException("journal requires rotation before scanning");
+        byte[] bytes = new byte[(int) size];
+        java.nio.ByteBuffer input = java.nio.ByteBuffer.wrap(bytes);
+        channel.position(0);
+        while (input.hasRemaining()) {
+            if (channel.read(input) < 0) throw new IOException("journal changed during scan");
+        }
         int offset = 0;
         while (offset < bytes.length) {
             int[] frame = completeFrame(bytes, offset);

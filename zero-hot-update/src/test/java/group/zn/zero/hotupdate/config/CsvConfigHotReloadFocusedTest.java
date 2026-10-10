@@ -37,6 +37,41 @@ import org.junit.jupiter.api.io.TempDir;
  * @author zn
  */
 class CsvConfigHotReloadFocusedTest {
+    /** 未注入授权时默认拒绝，拒绝在文件解码和发布前发生并产生审计结果。 */
+    @Test void reloadRequiresExplicitAuthorization() throws IOException {
+        Path source = write("authorization.csv", "id,name,price\n1,old,10\n");
+        var results = new ArrayList<ConfigReloadResult>();
+        var service = new LocalConfigHotReloadService(Runnable::run, ConfigReloadRequestFactory.local("test"),
+                (request, result) -> results.add(result), ConfigHotReloadOptions.manualOnly());
+        var table = service.register(definition(source));
+        service.start();
+        try {
+            Files.writeString(source, "invalid csv");
+            var result = service.reloadAsync("items", request("denied")).toCompletableFuture().join();
+            assertEquals(ConfigReloadErrorCode.AUTHORIZATION_DENIED, result.errorCode());
+            assertEquals("old", table.find(1).orElseThrow().name());
+            assertEquals(2, results.size());
+            assertThrows(ZeroException.class, () -> service.authorizer((name, request, automatic) -> true));
+        } finally { service.stop(); }
+    }
+    @Test void observerFailureDoesNotRollBackAcceptedSnapshot() throws IOException {
+        Path source = write("observer-failure.csv", "id,name,price\n1,old,10\n");
+        var throwing = new AtomicBoolean();
+        LocalConfigHotReloadService service = service((request, result) -> {
+            if (throwing.get()) throw new IllegalStateException("observer");
+        });
+        var table = service.register(definition(source));
+        service.start();
+        try {
+            throwing.set(true);
+            Files.writeString(source, "id,name,price\n1,new,20\n", StandardCharsets.UTF_8);
+            var failure = assertThrows(java.util.concurrent.CompletionException.class,
+                    () -> service.reloadAsync("items", request("changed")).toCompletableFuture().join());
+            assertEquals(ConfigReloadErrorCode.OBSERVER_FAILED, ((ZeroException) failure.getCause()).errorCode());
+            assertEquals(2, table.snapshot().version());
+            assertEquals("new", table.find(1).orElseThrow().name());
+        } finally { service.stop(); }
+    }
 
     /**
      * JUnit 隔离的配置文件目录。
@@ -267,11 +302,13 @@ class CsvConfigHotReloadFocusedTest {
     }
 
     private static LocalConfigHotReloadService service(final ConfigReloadObserver observer) {
-        return new LocalConfigHotReloadService(
+        var service = new LocalConfigHotReloadService(
                 Runnable::run,
                 ConfigReloadRequestFactory.local("focused-test"),
                 observer,
                 ConfigHotReloadOptions.manualOnly());
+        service.authorizer((table, request, automatic) -> true);
+        return service;
     }
 
     private static ConfigTableDefinition<Integer, ItemConfig> definition(final Path source) {

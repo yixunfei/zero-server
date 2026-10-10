@@ -37,14 +37,28 @@ public final class PostgresqlMigrationStore implements MigrationStore {
                 + " source_process_id, source_incarnation_id, target_process_id, target_incarnation_id, state,"
                 + " checkpoint_version, updated_at, checkpoint_schema_version, checkpoint_codec_version, history_complete)"
                 + " values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (migration_id) do nothing";
-        try (Connection connection = database.connection(); PreparedStatement statement = connection.prepareStatement(insert)) {
-            bindRecord(statement, record);
-            statement.executeUpdate();
-            MigrationRecord persisted = find(record.id()).orElseThrow();
-            if (!sameMetadata(persisted, record)) {
-                throw new OwnershipException("migration id was reused with different metadata");
+        try (Connection connection = database.connection()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try (PreparedStatement statement = connection.prepareStatement(insert)) {
+                bindRecord(statement, record);
+                statement.executeUpdate();
+                MigrationRecord persisted = lock(connection, record.id()).orElseThrow();
+                if (!sameMetadata(persisted, record)) {
+                    throw new OwnershipException("migration id was reused with different metadata");
+                }
+                connection.commit();
+                return persisted;
+            } catch (SQLException | RuntimeException failure) {
+                PostgresqlOwnershipSupport.rollback(connection, failure);
+                throw failure;
+            } finally {
+                try {
+                    connection.setAutoCommit(originalAutoCommit);
+                } catch (SQLException failure) {
+                    throw PostgresqlOwnershipSupport.failure("PostgreSQL migration create cleanup failed", failure);
+                }
             }
-            return persisted;
         } catch (SQLException failure) {
             throw PostgresqlOwnershipSupport.failure("PostgreSQL migration create failed", failure);
         }
@@ -77,10 +91,14 @@ public final class PostgresqlMigrationStore implements MigrationStore {
         Objects.requireNonNull(checkpointVersion, "checkpointVersion");
         Objects.requireNonNull(now, "now");
         try (Connection connection = database.connection()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
             try {
                 MigrationRecord current = lock(connection, id)
                         .orElseThrow(() -> new OwnershipException("migration does not exist"));
+                if (checkpointVersion.value() < current.checkpointVersion().value()) {
+                    throw new OwnershipException("migration checkpoint version cannot move backwards");
+                }
                 if (current.state() == next) {
                     connection.commit();
                     return current;
@@ -104,9 +122,52 @@ public final class PostgresqlMigrationStore implements MigrationStore {
             } catch (SQLException | RuntimeException failure) {
                 PostgresqlOwnershipSupport.rollback(connection, failure);
                 throw failure;
+            } finally {
+                try {
+                    connection.setAutoCommit(originalAutoCommit);
+                } catch (SQLException failure) {
+                    throw PostgresqlOwnershipSupport.failure("PostgreSQL migration transition cleanup failed", failure);
+                }
             }
         } catch (SQLException failure) {
             throw PostgresqlOwnershipSupport.failure("PostgreSQL migration transition failed", failure);
+        }
+    }
+
+    /** 使用同一行锁保护 checkpoint CAS，和状态推进互斥。 */
+    @Override
+    public MigrationRecord updateCheckpoint(final MigrationId id, final StateVersion expectedVersion,
+            final MigrationCheckpointMetadata expectedMetadata, final MigrationCheckpointMetadata metadata,
+            final Instant now) {
+        Objects.requireNonNull(id, "id");
+        try (Connection connection = database.connection()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try {
+                MigrationRecord current = lock(connection, id)
+                        .orElseThrow(() -> new OwnershipException("migration does not exist"));
+                MigrationRecord updated = current.updateCheckpoint(expectedVersion, expectedMetadata, metadata, now);
+                String sql = "update " + database.migrationTable()
+                        + " set checkpoint_schema_version=?, checkpoint_codec_version=?, history_complete=?,"
+                        + " updated_at=? where migration_id=?";
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    statement.setString(1, metadata.schemaVersion());
+                    statement.setString(2, metadata.codecVersion());
+                    statement.setBoolean(3, metadata.historyComplete());
+                    statement.setTimestamp(4, PostgresqlOwnershipSupport.timestamp(now));
+                    statement.setString(5, id.value());
+                    statement.executeUpdate();
+                }
+                connection.commit();
+                return updated;
+            } catch (SQLException | RuntimeException failure) {
+                PostgresqlOwnershipSupport.rollback(connection, failure);
+                throw failure;
+            } finally {
+                connection.setAutoCommit(originalAutoCommit);
+            }
+        } catch (SQLException failure) {
+            throw PostgresqlOwnershipSupport.failure("PostgreSQL checkpoint update failed", failure);
         }
     }
 
@@ -161,11 +222,7 @@ public final class PostgresqlMigrationStore implements MigrationStore {
     }
 
     private static boolean sameMetadata(final MigrationRecord left, final MigrationRecord right) {
-        return left.id().equals(right.id()) && left.resource().equals(right.resource())
-                && left.source().equals(right.source()) && left.target().equals(right.target())
-                && left.state() == right.state() && left.checkpointVersion().equals(right.checkpointVersion())
-                && left.checkpointMetadata().equals(right.checkpointMetadata())
-                && left.updatedAt().equals(PostgresqlOwnershipSupport.timestamp(right.updatedAt()).toInstant());
+        return left.sameCreationMetadata(right);
     }
 
     private static Map<MigrationState, MigrationState[]> allowedTransitions() {

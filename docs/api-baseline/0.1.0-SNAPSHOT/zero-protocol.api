@@ -63,7 +63,7 @@ public boolean isReadable();
 public boolean readBoolean();
 public boolean[] readBooleanArray();
 public boolean[] readNullableBooleanArray();
-public boolean[] readPresenceBits();
+public boolean[] readPresenceBits(int);
 public byte getByte(int);
 public byte getByte(int);
 public byte getByte(int);

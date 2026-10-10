@@ -48,9 +48,18 @@ final class ProductionRedisCacheProvider implements RuntimeComponentProvider {
             ZeroProductionRuntimeConfigKeys.ADAPTER_CACHE_REDIS_NAMESPACE);
     private static final ConfigKey<String> CACHE_NAME = sensitiveString(
             ZeroProductionRuntimeConfigKeys.ADAPTER_CACHE_REDIS_CACHE_NAME);
+    /** 生产读取故障必须冷却，避免 DB 穿透；应用可配置正时长。 */
+    private static final ConfigKey<java.time.Duration> FAILURE_COOLDOWN = ConfigKey.duration(ID,
+            ZeroProductionRuntimeConfigKeys.ADAPTER_CACHE_REDIS_FAILURE_COOLDOWN)
+            .acceptedSources(SOURCES)
+            .defaultValue(java.time.Duration.ofSeconds(1))
+            .validate(value -> !value.isZero() && !value.isNegative()
+                    && value.compareTo(java.time.Duration.ofDays(1)) <= 0, "positive-at-most-one-day")
+            .build();
     private static final ConfigSchema CONFIG_SCHEMA = ConfigSchema.builder(ID)
             .add(NAMESPACE)
             .add(CACHE_NAME)
+            .add(FAILURE_COOLDOWN)
             .build();
 
     private final ComponentDescriptor descriptor = ComponentDescriptor.builder(ID)
@@ -90,6 +99,9 @@ final class ProductionRedisCacheProvider implements RuntimeComponentProvider {
             ProductionRedisResource resource = checked.require(ProductionRedisRuntimeCapabilities.RESOURCE);
             group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors executors =
                     checked.require(group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS);
+            if (executors.remoteIoMayInline()) {
+                throw new IllegalStateException("redis cache requires non-inline remote IO execution");
+            }
             RedisDistributedCacheService<Object, Object> cacheService = cacheService(
                     resource.acquire(checked.resources()),
                     checked.config(),
@@ -139,7 +151,7 @@ final class ProductionRedisCacheProvider implements RuntimeComponentProvider {
                         CacheKeyCodecs.defaults(),
                         valueCodec,
                         new RedisCacheEnvelopeCodec(),
-                        ioExecutor));
+                        ioExecutor), false, config.require(FAILURE_COOLDOWN));
     }
 
     private static ConfigKey<String> sensitiveString(final String logicalName) {

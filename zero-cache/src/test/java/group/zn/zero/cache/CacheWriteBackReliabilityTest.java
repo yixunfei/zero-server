@@ -82,12 +82,33 @@ class CacheWriteBackReliabilityTest {
         assertEquals("second", store.values.get("k").value());
     }
 
+    /** 同步抛和异步失败都以失败 stage 呈现队列背压，不能把未入队的值写入 L1。 */
+    @Test void synchronousAndAsynchronousBackendFailuresHaveSameBackpressureResult() {
+        for (boolean synchronous : new boolean[]{true, false}) {
+            var store = new Store();
+            store.fail = true;
+            store.synchronousFailure = synchronous;
+            var cache = new LayeredCacheService<String, String>(CachePolicy.defaults(), store);
+            for (int i = 0; i < 1024; i++) cache.getOrLoad("k" + i, CacheLoader.sync(key -> Optional.of(key)))
+                    .toCompletableFuture().join();
+            CompletionStage<Optional<String>> rejected = org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+                    () -> cache.getOrLoad("overflow", CacheLoader.sync(key -> Optional.of(key))));
+            assertThrows(java.util.concurrent.CompletionException.class, () -> rejected.toCompletableFuture().join());
+            assertEquals(1, cache.writeBackRejectedCount());
+            assertEquals(1024, cache.healthSnapshot().backlogCount());
+            store.fail = false;
+            assertTrue(cache.get("overflow").toCompletableFuture().join().isEmpty());
+        }
+    }
+
     /** 可控条件写后端。 */
     private static final class Store implements CacheStore<String, String> {
         /** 测试线程中的后端数据。 */
         private final Map<String, CacheStoreEntry<String>> values = new HashMap<>();
         /** 写故障开关。 */
         private boolean fail;
+        /** 同步后端故障分支。 */
+        private boolean synchronousFailure;
         /** 可控重试完成阶段。 */
         private CompletableFuture<Boolean> delayedWrite;
         /** @return 当前值。 */
@@ -96,6 +117,7 @@ class CacheWriteBackReliabilityTest {
         public CompletionStage<Void> put(String key, CacheStoreEntry<String> entry) { values.put(key, entry); return CompletableFuture.completedFuture(null); }
         /** @return 原子单调版本比较结果。 */
         public synchronized CompletionStage<Boolean> putIfVersion(String key, CacheStoreEntry<String> entry) {
+            if (fail && synchronousFailure) throw new IllegalStateException("backend unavailable");
             if (fail) return CompletableFuture.failedFuture(new IllegalStateException("backend unavailable"));
             if (delayedWrite != null) return delayedWrite;
             var previous = values.get(key);

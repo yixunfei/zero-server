@@ -19,7 +19,7 @@ final class LogTextEscaper {
     }
 
     /**
-     * 判断字符串是否包含 C0、DEL 或 C1 控制字符。
+     * 判断字符串是否包含 C0、DEL、C1、Unicode 行分隔或双向控制字符。
      *
      * @param value 待检查字符串；不可为空。
      * @return 包含控制字符时返回 true。
@@ -101,6 +101,9 @@ final class LogTextEscaper {
      * @return C0、DEL 或 C1 控制字符返回 true。
      */
     private static boolean isControl(final char value) {
-        return value <= 0x1F || value >= 0x7F && value <= 0x9F;
+        return value <= 0x1F || value >= 0x7F && value <= 0x9F
+                || value == 0x2028 || value == 0x2029
+                || value >= 0x202A && value <= 0x202E
+                || value >= 0x2066 && value <= 0x2069;
     }
 }

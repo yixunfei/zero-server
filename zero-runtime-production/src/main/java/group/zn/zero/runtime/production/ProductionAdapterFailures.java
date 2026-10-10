@@ -147,6 +147,7 @@ public final class ProductionAdapterFailures {
                 descriptor.phase(),
                 descriptor.errorCode(),
                 descriptor.safeMessage());
+        safe.copyRuntimeDetails(source);
         boolean closing = descriptor.phase() == ProductionAdapterFailurePhase.CLOSE;
         ProductionAdapterFailurePhase cleanupPhase = closing
                 ? ProductionAdapterFailurePhase.CLOSE
@@ -178,6 +179,17 @@ public final class ProductionAdapterFailures {
                     failure.failurePhase(),
                     failure.errorCode(),
                     failure.message());
+        }
+        if (source instanceof group.zn.zero.runtime.diagnostics.RuntimeAssemblyException failure) {
+            if (!"production-runtime".equals(fallbackAdapter)) {
+                return new FailureDescriptor(fallbackAdapter, fallbackPhase, fallbackCode, fallbackMessage);
+            }
+            if (failure.getCause() instanceof ProductionAdapterException adapterFailure) {
+                return new FailureDescriptor(adapterFailure.adapterName(), adapterFailure.failurePhase(),
+                        adapterFailure.errorCode(), adapterFailure.message());
+            }
+            return new FailureDescriptor(fallbackAdapter, fallbackPhase,
+                    failure.errorCode(), failure.errorCode().message());
         }
         return new FailureDescriptor(
                 Objects.requireNonNull(fallbackAdapter, "fallbackAdapter"),

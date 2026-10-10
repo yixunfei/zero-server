@@ -11,7 +11,7 @@ class MetricReportAuditTest {
     /** 满容量保留最近样本并显式统计淘汰。 */
     @Test void sampleRetentionIsBoundedAndObservable() {
         InMemoryMetricRegistry registry = new InMemoryMetricRegistry(new MetricLabelPolicy() { }, 3);
-        registry.register(new MetricDefinition("audit_total", "test", "count", List.of()));
+        registry.register(new MetricDefinition("audit_total", "test", "count", List.of(), group.zn.zero.monitor.MetricType.COUNTER));
         for (int i = 0; i < 10; i++) registry.record(new MetricSample("audit_total", i, Map.of(), Instant.EPOCH));
         assertEquals(3, registry.samples().size());
         assertEquals(7, registry.droppedSamples());

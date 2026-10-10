@@ -32,6 +32,91 @@ class KafkaRpcAdapterSafetyTest {
     /** 测试使用的第三方敏感异常标记。 */
     private static final String FAILURE_SECRET = "adapter-observer-secret";
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"missing", "expired", "sync", "async", "null", "route", "deadline"})
+    void allRejectionPathsObserveOnceAndNeverExecute(final String mode) {
+        var gateway = new SafetyGateway(false);
+        var rejected = new AtomicInteger();
+        var calls = new AtomicInteger();
+        var source = request("reject-" + mode, "service", "method");
+        var metadata = source.securityMetadata();
+        if (mode.equals("missing")) metadata = null;
+        if (mode.equals("expired")) {
+            metadata = new group.zn.zero.security.SecurityMetadataSnapshot(metadata.subject(), metadata.transport(),
+                    metadata.peerAddress(), metadata.trustedSourceAddress(), metadata.traceId(), metadata.correlationId(),
+                    metadata.permissions(), metadata.assertionReference(), Instant.now().minusSeconds(2),
+                    Instant.now().minusSeconds(1), metadata.signature());
+        }
+        var request = new RpcRequest(source.correlationId(), source.replyTopic(), source.serviceName(), source.methodName(),
+                source.traceId(), mode.equals("deadline") ? Instant.now().minusSeconds(1) : source.timeoutAt(),
+                source.mode(), source.topic(), source.group(), source.partitionKey(), metadata, source.payload());
+        try (var adapter = new KafkaRpcAdapter(settings(), gateway, event -> {
+            if (event.type() == RpcTransportEventType.REQUEST_REJECTED) rejected.incrementAndGet();
+        }, timer.executor())) {
+            adapter.securityMetadataVerifier((snapshot, now) -> switch (mode) {
+                case "sync" -> throw new IllegalStateException("rejected");
+                case "async" -> CompletableFuture.failedFuture(new IllegalStateException("rejected"));
+                default -> null;
+            });
+            adapter.register("service", "method", current -> { calls.incrementAndGet(); return CompletableFuture.completedFuture(null); });
+            if (mode.equals("route")) adapter.register("service", "other", current -> CompletableFuture.completedFuture(null));
+            if (mode.equals("route")) adapter.unregister("service", "method");
+            gateway.emitRequest(request);
+            assertEquals(1, rejected.get());
+            assertEquals(0, calls.get());
+        }
+    }
+
+    @Test
+    void onewayAuthenticationRejectionIsObservedExactlyOnce() {
+        var gateway = new SafetyGateway(false);
+        var calls = new AtomicInteger();
+        var rejected = new AtomicInteger();
+        try (var adapter = new KafkaRpcAdapter(settings(), gateway, event -> {
+            if (event.type() == RpcTransportEventType.REQUEST_REJECTED) rejected.incrementAndGet();
+        }, timer.executor())) {
+            adapter.register("service", "method", request -> {
+                calls.incrementAndGet();
+                return CompletableFuture.completedFuture(null);
+            });
+            gateway.emitRequest(request("rejected", "service", "method"));
+            assertEquals(0, calls.get());
+            assertEquals(1, rejected.get());
+        }
+    }
+
+    @Test
+    void observerCannotConsumeDeadlineAndStillStartHandler() {
+        var gateway = new SafetyGateway(false);
+        var calls = new AtomicInteger();
+        var source = request("deadline", "service", "method");
+        var deadline = Instant.now().plusMillis(200);
+        var request = new RpcRequest(source.correlationId(), source.replyTopic(), source.serviceName(),
+                source.methodName(), source.traceId(), deadline, source.mode(), source.topic(), source.group(),
+                source.partitionKey(), source.securityMetadata(), source.payload());
+        var started = new AtomicInteger();
+        try (var adapter = new KafkaRpcAdapter(settings(), gateway, event -> {
+            if (event.type() == RpcTransportEventType.HANDLER_STARTED) {
+                started.incrementAndGet();
+                while (Instant.now().isBefore(deadline.plusMillis(1))) {
+                    java.util.concurrent.locks.LockSupport.parkNanos(1_000_000);
+                }
+            }
+        }, timer.executor())) {
+            adapter.securityMetadataVerifier((metadata, now) -> CompletableFuture.completedFuture(
+                    new group.zn.zero.security.SecurityContext("test", now, now.plusSeconds(60), "kafka",
+                            "peer", "trusted", "trace", "deadline", java.util.Set.of(), Map.of())));
+            adapter.register("service", "method", current -> {
+                calls.incrementAndGet();
+                return CompletableFuture.completedFuture(null);
+            });
+            gateway.emitRequest(request);
+            assertEquals(1, started.get());
+            assertEquals(0, calls.get());
+            assertEquals(1, adapter.snapshot().requestRejectedCount());
+        }
+    }
+
     /**
      * 验证普通业务发送事件的 observer {@link Error} 不改变 oneway 完成结果。
      */
@@ -63,7 +148,7 @@ class KafkaRpcAdapterSafetyTest {
         SafetyGateway gateway = new SafetyGateway(true);
         KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings(), gateway, timer.executor());
         adapter.securityMetadataVerifier(group.zn.zero.security.SecurityMetadataAssertion.verifier(
-                group.zn.zero.security.SecurityMetadataAssertion.digest(new byte[] {1})));
+                group.zn.zero.security.SecurityMetadataAssertion.digest(java.util.Arrays.copyOf(new byte[] {1}, 32))));
         AtomicInteger handlerCalls = new AtomicInteger();
         adapter.register("service", "method", "request-topic", "request-group", request -> {
             handlerCalls.incrementAndGet();
@@ -136,7 +221,7 @@ class KafkaRpcAdapterSafetyTest {
                         new group.zn.zero.security.SecurityContext("test", Instant.now(),
                                 Instant.now().plusSeconds(60), "kafka", "peer", "trusted", "trace", correlationId,
                                 java.util.Set.of("rpc.invoke"), Map.of()), "test-assertion",
-                        group.zn.zero.security.SecurityMetadataAssertion.digest(new byte[] {1})), new byte[0]);
+                        group.zn.zero.security.SecurityMetadataAssertion.digest(java.util.Arrays.copyOf(new byte[] {1}, 32))), new byte[0]);
     }
 
     /**

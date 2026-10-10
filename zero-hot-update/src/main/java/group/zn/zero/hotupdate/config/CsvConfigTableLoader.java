@@ -32,6 +32,9 @@ import org.apache.commons.csv.DuplicateHeaderMode;
  */
 final class CsvConfigTableLoader {
 
+    /** 单表输入上限；读取时限流，避免文件增长绕过预检。 */
+    private static final int MAX_CONTENT_BYTES = 16 * 1024 * 1024;
+
     /**
      * RFC 4180 严格表头格式。
      */
@@ -73,8 +76,13 @@ final class CsvConfigTableLoader {
     }
 
     private static <K, V> byte[] readContent(final ConfigTableDefinition<K, V> definition) {
-        try {
-            return Files.readAllBytes(definition.source());
+        try (var input = Files.newInputStream(definition.source())) {
+            byte[] content = input.readNBytes(MAX_CONTENT_BYTES + 1);
+            if (content.length > MAX_CONTENT_BYTES) {
+                throw ZeroException.of(ConfigReloadErrorCode.FILE_READ_FAILED,
+                        "config table exceeds 16 MiB input limit", null);
+            }
+            return content;
         } catch (IOException ex) {
             throw ZeroException.of(
                     ConfigReloadErrorCode.FILE_READ_FAILED,

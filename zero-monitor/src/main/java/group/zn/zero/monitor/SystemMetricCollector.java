@@ -9,7 +9,8 @@ import java.lang.management.MemoryUsage;
 import java.lang.management.ThreadMXBean;
 import java.net.NetworkInterface;
 import java.nio.file.FileStore;
-import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -103,6 +104,8 @@ public final class SystemMetricCollector {
      * 时钟。
      */
     private final Clock clock;
+    /** 显式磁盘探针路径，默认只采集当前工作目录所属盘。 */
+    private final List<Path> diskPaths;
 
     /**
      * 创建系统指标采集器。
@@ -118,7 +121,13 @@ public final class SystemMetricCollector {
      * @throws NullPointerException 当时钟为空时抛出。
      */
     public SystemMetricCollector(final Clock clock) {
+        this(clock, List.of(Path.of(".").toAbsolutePath()));
+    }
+
+    /** 创建限定磁盘路径的采集器；空列表禁用磁盘 IO，调用方应避免不可达网络路径。 */
+    public SystemMetricCollector(final Clock clock, final List<Path> diskPaths) {
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.diskPaths = List.copyOf(diskPaths);
     }
 
     /**
@@ -136,9 +145,9 @@ public final class SystemMetricCollector {
         current.register(new MetricDefinition(
                 JVM_LOADED_CLASS_COUNT, "JVM loaded class count", "classes", List.of("area")));
         current.register(new MetricDefinition(
-                JVM_GC_COLLECTION_TOTAL, "JVM GC collection count", "count", List.of("collector")));
+                JVM_GC_COLLECTION_TOTAL, "JVM GC collection count", "count", List.of("collector"), group.zn.zero.monitor.MetricType.COUNTER));
         current.register(new MetricDefinition(
-                JVM_GC_COLLECTION_SECONDS, "JVM GC collection time", "seconds", List.of("collector")));
+                JVM_GC_COLLECTION_SECONDS, "JVM GC collection time", "seconds", List.of("collector"), group.zn.zero.monitor.MetricType.COUNTER));
         current.register(new MetricDefinition(PROCESS_CPU_LOAD, "Process CPU load ratio", "ratio", List.of()));
         current.register(new MetricDefinition(SYSTEM_CPU_LOAD, "System CPU load ratio", "ratio", List.of()));
         current.register(new MetricDefinition(SYSTEM_LOAD_AVERAGE, "System load average", "load", List.of()));
@@ -234,7 +243,8 @@ public final class SystemMetricCollector {
     }
 
     private void collectDisk(final MetricRegistry registry, final Instant now) throws IOException {
-        for (FileStore store : FileSystems.getDefault().getFileStores()) {
+        for (Path path : diskPaths) {
+            FileStore store = Files.getFileStore(path);
             Map<String, String> labels = Map.of("path", normalizeLabel(store.toString()));
             registry.record(sample(DISK_USABLE, store.getUsableSpace(), labels, now));
             registry.record(sample(DISK_TOTAL, store.getTotalSpace(), labels, now));

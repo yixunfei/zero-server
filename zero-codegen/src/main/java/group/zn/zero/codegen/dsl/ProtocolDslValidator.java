@@ -43,8 +43,13 @@ public final class ProtocolDslValidator {
         validateMethods(document.methods(), document.protocols(), messageNames);
         for (ProtocolMessage message : document.messages()) {
             for (ProtocolField field : message.fields()) {
+                ProtocolNames.identifier(field.name());
+                requireTypeBudget(field.nullable() ? ProtocolType.optional(field.type()) : field.type());
                 validateType(field.type(), enumNames, messageNames);
             }
+        }
+        for (ProtocolMethod method : document.methods()) {
+            for (ProtocolField parameter : method.parameters()) validateType(parameter.type(), enumNames, messageNames);
         }
     }
 
@@ -53,6 +58,7 @@ public final class ProtocolDslValidator {
             final Set<String> typeNames) {
         Set<String> enumNames = new HashSet<>();
         for (ProtocolEnum item : enums) {
+            ProtocolNames.identifier(item.name());
             if (!enumNames.add(item.name())) {
                 fail("duplicate enum name: " + item.name());
             }
@@ -62,6 +68,7 @@ public final class ProtocolDslValidator {
             Set<String> valueNames = new HashSet<>();
             Set<Integer> values = new HashSet<>();
             for (ProtocolEnumValue value : item.values()) {
+                ProtocolNames.identifier(value.name());
                 if (!valueNames.add(value.name())) {
                     fail("duplicate enum value name: " + item.name() + "." + value.name());
                 }
@@ -78,6 +85,7 @@ public final class ProtocolDslValidator {
             final Set<String> typeNames) {
         Set<String> messageNames = new HashSet<>();
         for (ProtocolMessage message : messages) {
+            ProtocolNames.identifier(message.name());
             if (!messageNames.add(message.name())) {
                 fail("duplicate message name: " + message.name());
             }
@@ -88,6 +96,8 @@ public final class ProtocolDslValidator {
             Set<String> fieldNames = new HashSet<>();
             int previousOrder = 0;
             for (ProtocolField field : message.fields()) {
+                ProtocolNames.identifier(field.name());
+                requireTypeBudget(field.nullable() ? ProtocolType.optional(field.type()) : field.type());
                 if (!orders.add(field.order())) {
                     fail("duplicate field order: " + message.name() + "." + field.order());
                 }
@@ -107,6 +117,7 @@ public final class ProtocolDslValidator {
         Set<Integer> ids = new HashSet<>();
         Set<String> names = new HashSet<>();
         for (ProtocolDefinition protocol : protocols) {
+            ProtocolNames.identifier(protocol.name());
             if (!ids.add(protocol.id())) {
                 fail("duplicate protocol id: " + protocol.id());
             }
@@ -123,6 +134,8 @@ public final class ProtocolDslValidator {
         Set<String> methodNames = new HashSet<>();
         Set<ProtocolDefinition> protocolSet = Set.copyOf(protocols);
         for (ProtocolMethod method : methods) {
+            ProtocolNames.identifier(method.boName());
+            ProtocolNames.identifier(method.methodName());
             String methodKey = method.boName() + "." + method.methodName();
             if (!methodNames.add(methodKey)) {
                 fail("duplicate method name: " + methodKey);
@@ -145,6 +158,8 @@ public final class ProtocolDslValidator {
         Set<String> names = new HashSet<>();
         int previousOrder = 0;
         for (ProtocolField parameter : method.parameters()) {
+            ProtocolNames.identifier(parameter.name());
+            requireTypeBudget(parameter.nullable() ? ProtocolType.optional(parameter.type()) : parameter.type());
             if (!orders.add(parameter.order())) {
                 fail("duplicate method parameter order: " + method.methodName() + "." + parameter.order());
             }
@@ -191,6 +206,10 @@ public final class ProtocolDslValidator {
         if (type.arguments().size() != expected) {
             fail("type " + type.kind() + " expects " + expected + " argument(s)");
         }
+    }
+
+    private static void requireTypeBudget(final ProtocolType type) {
+        if (!ProtocolTypeBudget.permits(type)) fail("type depth exceeds " + ProtocolTypeBudget.MAX_DEPTH);
     }
 
     private static void fail(final String message) {

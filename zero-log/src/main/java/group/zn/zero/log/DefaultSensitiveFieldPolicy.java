@@ -34,7 +34,7 @@ public final class DefaultSensitiveFieldPolicy implements SensitiveFieldPolicy {
      */
     private static final String[] IDENTIFIER_ALIASES = {
         "ip", "clientip", "sourceip", "operatorip", "remoteaddress", "sourceaddress",
-        "operator", "operatorid", "accountid", "playerid", "targetid"
+        "operator", "operatorid", "accountid", "playerid", "targetid", "userid", "sessionid", "email", "phone"
     };
 
     /**
@@ -43,7 +43,7 @@ public final class DefaultSensitiveFieldPolicy implements SensitiveFieldPolicy {
     private static final String[][] IDENTIFIER_ALIAS_PAIRS = {
         {"client", "ip"}, {"source", "ip"}, {"operator", "ip"}, {"remote", "address"},
         {"source", "address"}, {"operator", "id"}, {"account", "id"}, {"player", "id"},
-        {"target", "id"}
+        {"target", "id"}, {"user", "id"}, {"session", "id"}
     };
 
     /**
@@ -92,16 +92,31 @@ public final class DefaultSensitiveFieldPolicy implements SensitiveFieldPolicy {
         if (fieldPath == null || value == null) {
             return SensitiveFieldAction.REJECT;
         }
-        if (containsAliasSegment(fieldPath, FORBIDDEN_ALIASES)
-                || containsAliasPair(fieldPath, FORBIDDEN_ALIAS_PAIRS)
+        String canonicalPath = canonicalPath(fieldPath);
+        if (containsAliasSegment(canonicalPath, FORBIDDEN_ALIASES)
+                || containsAliasPair(canonicalPath, FORBIDDEN_ALIAS_PAIRS)
                 || containsCredentialContent(value)) {
             return SensitiveFieldAction.REJECT;
         }
-        if (containsAliasSegment(fieldPath, IDENTIFIER_ALIASES)
-                || containsAliasPair(fieldPath, IDENTIFIER_ALIAS_PAIRS)) {
+        if (containsAliasSegment(canonicalPath, IDENTIFIER_ALIASES)
+                || containsAliasPair(canonicalPath, IDENTIFIER_ALIAS_PAIRS)) {
             return SensitiveFieldAction.REDACT;
         }
         return SensitiveFieldAction.ALLOW;
+    }
+
+    /** ASCII 常规路径不分配；Unicode 使用 NFKC 并移除不可见格式字符后再匹配。 */
+    private String canonicalPath(final String path) {
+        boolean ascii = true;
+        for (int index = 0; index < path.length(); index++) {
+            if (path.charAt(index) > 127) { ascii = false; break; }
+        }
+        if (ascii) return path;
+        String normalized = java.text.Normalizer.normalize(path, java.text.Normalizer.Form.NFKC);
+        StringBuilder result = new StringBuilder(normalized.length());
+        normalized.codePoints().filter(code -> Character.getType(code) != Character.FORMAT)
+                .forEach(result::appendCodePoint);
+        return result.toString();
     }
 
     /**

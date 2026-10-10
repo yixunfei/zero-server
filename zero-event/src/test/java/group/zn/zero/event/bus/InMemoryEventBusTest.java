@@ -61,7 +61,7 @@ class InMemoryEventBusTest {
                 () -> eventBus.publish(event()).toCompletableFuture().join());
 
         assertTrue(calls.isEmpty());
-        assertEquals("ZERO-SYSTEM-ERROR", ((group.zn.zero.core.error.ZeroException) failure.getCause()).errorCode().code());
+        assertEquals(EventErrorCode.PUBLICATION_REJECTED, ((ZeroException) failure.getCause()).errorCode());
         assertEquals(1, deadLetterSink.deadLetters().size());
     }
 

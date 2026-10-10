@@ -24,8 +24,8 @@ public final class GrafanaDashboardTemplate {
     public String createDashboard(final String title, final List<String> metricNames) {
         String currentTitle = Objects.requireNonNull(title, "title");
         List<String> currentMetrics = List.copyOf(Objects.requireNonNull(metricNames, "metricNames"));
-        String panels = currentMetrics.stream()
-                .map(metric -> panelJson(currentMetrics.indexOf(metric) + 1, metric))
+        String panels = java.util.stream.IntStream.range(0, currentMetrics.size())
+                .mapToObj(index -> panelJson(index + 1, currentMetrics.get(index)))
                 .collect(Collectors.joining(","));
         return "{"
                 + "\"title\":\"" + escape(currentTitle) + "\","
@@ -37,6 +37,9 @@ public final class GrafanaDashboardTemplate {
     }
 
     private String panelJson(final int id, final String metric) {
+        if (!metric.matches("[a-zA-Z_:][a-zA-Z0-9_:]*")) {
+            throw new IllegalArgumentException("invalid metric identifier");
+        }
         int y = (id - 1) * 8;
         return "{"
                 + "\"id\":" + id + ','
@@ -48,6 +51,11 @@ public final class GrafanaDashboardTemplate {
     }
 
     private String escape(final String value) {
+        for (int index = 0; index < value.length(); index++) {
+            if (Character.isISOControl(value.charAt(index))) {
+                throw new IllegalArgumentException("dashboard text contains control characters");
+            }
+        }
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }

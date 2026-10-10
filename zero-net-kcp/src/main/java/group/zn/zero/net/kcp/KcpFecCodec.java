@@ -114,12 +114,16 @@ final class KcpFecCodec implements AutoCloseable {
         } else if (group.actual > 0 && index >= group.actual) { metric.accept("fec.invalid"); return; }
         in.get(group.shards[index]); group.present[index] = true;
         if (index < data) deliver(group, index, deliver, false);
+        if (group.shards == null) return;
         int available = 0;
         for (boolean present : group.present) if (present) available++;
         if (available >= data) {
             if (!strategy.recover(group.shards, group.present)) { metric.accept("fec.failed"); return; }
             int effective = group.actual == 0 ? data : group.actual;
-            for (int i = 0; i < effective; i++) if (!group.delivered[i]) deliver(group, i, deliver, true);
+            for (int i = 0; i < effective && group.shards != null; i++) {
+                if (!group.delivered[i]) deliver(group, i, deliver, true);
+            }
+            if (group.shards == null) return;
             erase(group.shards); group.shards = null; uncharge();
         }
     }
@@ -157,7 +161,9 @@ final class KcpFecCodec implements AutoCloseable {
     /** 释放全部矩阵和预算；幂等，单执行域。 */
     @Override public void close() {
         if (sending != null) { erase(sending); sending = null; uncharge(); }
-        for (Group group : receiving.values()) if (group.shards != null) { erase(group.shards); uncharge(); }
+        for (Group group : receiving.values()) if (group.shards != null) {
+            erase(group.shards); group.shards = null; uncharge();
+        }
         receiving.clear(); flushAt = Long.MAX_VALUE;
     }
     /** 接收组与完成墓碑。 @author zn */

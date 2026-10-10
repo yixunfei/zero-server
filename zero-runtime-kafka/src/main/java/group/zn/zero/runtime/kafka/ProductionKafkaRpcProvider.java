@@ -80,6 +80,9 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
             ZeroProductionRuntimeConfigKeys.RPC_KAFKA_POLL_TIMEOUT_MILLIS, 100);
     private static final ConfigKey<Integer> CLOSE_TIMEOUT_MILLIS = positiveInteger(
             ZeroProductionRuntimeConfigKeys.RPC_KAFKA_CLOSE_TIMEOUT_MILLIS, 3000);
+    /** 运行期发送/阻塞/API 预算，默认三秒，与启动无关。 */
+    private static final ConfigKey<Integer> IO_TIMEOUT_MILLIS = positiveInteger(
+            ZeroProductionRuntimeConfigKeys.RPC_KAFKA_IO_TIMEOUT_MILLIS, 3000);
     private static final ConfigSchema CONFIG_SCHEMA = ConfigSchema.builder(ID)
             .add(BOOTSTRAP_SERVERS)
             .add(CLIENT_ID)
@@ -89,6 +92,7 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
             .add(PENDING_CAPACITY)
             .add(POLL_TIMEOUT_MILLIS)
             .add(CLOSE_TIMEOUT_MILLIS)
+            .add(IO_TIMEOUT_MILLIS)
             .build();
 
     private final ComponentDescriptor descriptor = ComponentDescriptor.builder(ID)
@@ -226,13 +230,13 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
     }
 
     private KafkaRpcSettings settings(final ComponentConfig config) {
-        int startupTimeoutMillis = boundedMillis(startupBudget.adapterBudget());
+        int ioTimeoutMillis = config.require(IO_TIMEOUT_MILLIS);
         Map<String, Object> producerProperties = new LinkedHashMap<>(clientProperties);
-        producerProperties.put("request.timeout.ms", startupTimeoutMillis);
-        producerProperties.put("max.block.ms", startupTimeoutMillis);
+        producerProperties.put("request.timeout.ms", ioTimeoutMillis);
+        producerProperties.put("max.block.ms", ioTimeoutMillis);
         Map<String, Object> consumerProperties = new LinkedHashMap<>(clientProperties);
-        consumerProperties.put("request.timeout.ms", startupTimeoutMillis);
-        consumerProperties.put("default.api.timeout.ms", startupTimeoutMillis);
+        consumerProperties.put("request.timeout.ms", ioTimeoutMillis);
+        consumerProperties.put("default.api.timeout.ms", ioTimeoutMillis);
         return new KafkaRpcSettings(
                 config.require(BOOTSTRAP_SERVERS),
                 config.require(CLIENT_ID),
@@ -271,6 +275,8 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
                 resolver, ZeroProductionRuntimeConfigKeys.RPC_KAFKA_POLL_TIMEOUT_MILLIS, 100));
         settings.add(optionalPositiveSetting(
                 resolver, ZeroProductionRuntimeConfigKeys.RPC_KAFKA_CLOSE_TIMEOUT_MILLIS, 3000));
+        settings.add(optionalPositiveSetting(
+                resolver, ZeroProductionRuntimeConfigKeys.RPC_KAFKA_IO_TIMEOUT_MILLIS, 3000));
         return List.copyOf(settings);
     }
 
@@ -371,10 +377,6 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
                 .anyMatch(prefix -> key.startsWith(prefix) && key.length() > prefix.length());
     }
 
-    private int boundedMillis(final Duration timeout) {
-        long millis = Math.max(1L, Objects.requireNonNull(timeout, "timeout").toMillis());
-        return (int) Math.min(millis, Integer.MAX_VALUE);
-    }
 
     /** Kafka provider 的显式选择和配置解析结果。 */
     record Resolution(

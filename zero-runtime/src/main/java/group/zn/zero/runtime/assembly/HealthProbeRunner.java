@@ -39,6 +39,20 @@ final class HealthProbeRunner {
         } catch (Throwable failure) {
             throw healthFailure(componentId);
         }
+        return await(componentId, stage, deadline);
+    }
+
+    /**
+     * 等待已经开始的 startup probe，并在预算耗尽时取消其 future。
+     *
+     * <p>调用者可以把同步 {@link HealthProbe#check(HealthRequest)} 放入隔离边界，
+     * 防止不受控的 check 实现永久占用 runtime 生命周期线程。</p>
+     */
+    HealthResult await(
+            final ComponentId componentId,
+            final CompletionStage<HealthResult> stage,
+            final RuntimeDeadline deadline) {
+        Duration remaining;
         CompletableFuture<HealthResult> future;
         try {
             future = Objects.requireNonNull(stage.toCompletableFuture(), "health future");

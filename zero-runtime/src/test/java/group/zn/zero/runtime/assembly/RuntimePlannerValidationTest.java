@@ -22,6 +22,15 @@ import org.junit.jupiter.api.Test;
  * planner 缺失、冲突、循环、基数和 policy 失败测试。
  */
 class RuntimePlannerValidationTest {
+    @Test void selfLoopIsRejectedAndDuplicateDependencyEdgesDoNotInflateIndegree() {
+        assertThrows(IllegalArgumentException.class,
+                () -> descriptor(ALPHA_ID).provide(ALPHA).startAfter(ALPHA_ID).build());
+        var alpha = stringProvider(ALPHA_ID, descriptor(ALPHA_ID).provide(ALPHA).build(), ALPHA);
+        var beta = stringProvider(BETA_ID,
+                descriptor(BETA_ID).provide(BETA).require(ALPHA).startAfter(ALPHA_ID).build(), BETA);
+        assertEquals(List.of(ALPHA_ID, BETA_ID), assembler(catalog(alpha, beta)).diagnose().components().stream()
+                .map(component -> component.componentId()).toList());
+    }
 
     private static final ComponentKey<String> ALPHA = ComponentKey.single("validation.alpha", String.class);
     private static final ComponentKey<String> BETA = ComponentKey.single("validation.beta", String.class);

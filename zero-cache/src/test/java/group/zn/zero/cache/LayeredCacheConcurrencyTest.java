@@ -70,7 +70,7 @@ class LayeredCacheConcurrencyTest {
     @Test
     void timedOutLoaderCannotBackfillEitherCache() throws Exception {
         CachePolicy policy = new CachePolicy(Duration.ofMinutes(1), Duration.ofSeconds(1),
-                Duration.ZERO, 8, 1, false, Duration.ofMillis(50));
+                Duration.ZERO, 8, 1, false, Duration.ofMillis(50), CachePolicy.DEFAULT_WRITE_TIMEOUT);
         var cache = new LayeredCacheService<String, String>(policy);
         var late = new CompletableFuture<Optional<String>>();
         var loaded = cache.getOrLoad("key", key -> late).toCompletableFuture();
@@ -91,7 +91,7 @@ class LayeredCacheConcurrencyTest {
     @Test
     void timedOutBackfillIsAbandonedBeforeItCanResurrectCache() throws Exception {
         CachePolicy policy = new CachePolicy(Duration.ofMinutes(1), Duration.ofSeconds(1),
-                Duration.ZERO, 8, 1, false, Duration.ofMillis(50));
+                Duration.ZERO, 8, 1, false, Duration.ofMillis(50), CachePolicy.DEFAULT_WRITE_TIMEOUT);
         DelayedWriteStore store = new DelayedWriteStore();
         var cache = new LayeredCacheService<String, String>(policy, store);
         var loaded = cache.getOrLoad("key", CacheLoader.sync(key -> Optional.of("late"))).toCompletableFuture();

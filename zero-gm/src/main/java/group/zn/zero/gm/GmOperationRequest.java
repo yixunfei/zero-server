@@ -29,4 +29,9 @@ public record GmOperationRequest(
         secondReviewer = secondReviewer == null ? "" : secondReviewer;
         idempotencyKey = idempotencyKey == null ? "" : idempotencyKey;
     }
+    /** @return 固定安全诊断文本；不输出身份、令牌或请求值，线程安全且无变更。 */
+    @Override
+    public String toString() {
+        return "GmOperationRequest{dryRun=" + dryRun + ", request=[REDACTED]}";
+    }
 }

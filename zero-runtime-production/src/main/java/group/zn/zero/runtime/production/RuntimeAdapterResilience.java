@@ -67,7 +67,11 @@ public final class RuntimeAdapterResilience {
     }
 
     public void release() {
-        inFlight.updateAndGet(value -> Math.max(0, value - 1));
+        inFlight.updateAndGet(value -> {
+            if (value == 0) throw group.zn.zero.core.error.ZeroException.of(
+                    group.zn.zero.core.error.SystemErrorCode.SYSTEM_ERROR, "adapter release without acquisition", null);
+            return value - 1;
+        });
     }
 
     public synchronized RuntimeAdapterRecovery.RecoveryDecision onFailure(
@@ -111,12 +115,15 @@ public final class RuntimeAdapterResilience {
 
     public synchronized void drain() {
         RuntimeAdapterStateMachine.Snapshot current = stateMachine.snapshot();
-        if (current.state() != RuntimeAdapterStateMachine.State.DRAIN) {
+        if (current.state() != RuntimeAdapterStateMachine.State.DRAIN
+                && current.state() != RuntimeAdapterStateMachine.State.STOP
+                && current.state() != RuntimeAdapterStateMachine.State.CLOSE) {
             stateMachine.transitionIf(current.state(), RuntimeAdapterStateMachine.State.DRAIN);
         }
     }
 
     public synchronized void stop() {
+        drain();
         RuntimeAdapterStateMachine.Snapshot current = stateMachine.snapshot();
         if (current.state() == RuntimeAdapterStateMachine.State.DRAIN
                 || current.state() == RuntimeAdapterStateMachine.State.READY
@@ -126,6 +133,7 @@ public final class RuntimeAdapterResilience {
     }
 
     public synchronized void close() {
+        stop();
         stateMachine.transitionIf(RuntimeAdapterStateMachine.State.STOP, RuntimeAdapterStateMachine.State.CLOSE);
     }
 }

@@ -1,9 +1,7 @@
 package group.zn.zero.security;
 
 import java.security.MessageDigest;
-import java.security.Signature;
-import java.security.interfaces.RSAPublicKey;
-import java.security.spec.X509EncodedKeySpec;
+import java.time.Clock;
 import java.util.Base64;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -16,10 +14,10 @@ public interface SecurityMetadataAssertion {
     /** Verifies a snapshot signature without trusting fields before verification. */
     boolean verify(SecurityMetadataSnapshot snapshot);
 
-    /** Creates a SHA-256 digest assertion suitable for deterministic local tests. */
+    /** Creates an HMAC-SHA256 assertion for deterministic local tests; application owns key rotation. */
     static SecurityMetadataAssertion digest(byte[] secret) {
         byte[] key = Objects.requireNonNull(secret, "secret").clone();
-        if (key.length == 0) throw new IllegalArgumentException("secret must not be empty");
+        if (key.length < 32) throw new IllegalArgumentException("HMAC-SHA256 secret must contain at least 32 bytes");
         return new SecurityMetadataAssertion() {
             public String sign(final SecurityMetadataSnapshot snapshot) {
                 return Base64.getUrlEncoder().withoutPadding().encodeToString(digest(snapshot, key));
@@ -31,9 +29,10 @@ public interface SecurityMetadataAssertion {
             }
             private byte[] digest(final SecurityMetadataSnapshot snapshot, final byte[] material) {
                 try {
-                    MessageDigest md = MessageDigest.getInstance("SHA-256");
-                    md.update(material); md.update(snapshot.canonicalBytes()); return md.digest();
-                } catch (java.security.NoSuchAlgorithmException ex) { throw new IllegalStateException(ex); }
+                    javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+                    mac.init(new javax.crypto.spec.SecretKeySpec(material, "HmacSHA256"));
+                    return mac.doFinal(snapshot.canonicalBytes());
+                } catch (java.security.GeneralSecurityException ex) { throw new IllegalStateException(ex); }
             }
         };
     }
@@ -51,12 +50,13 @@ public interface SecurityMetadataAssertion {
     static SecurityMetadataVerifier verifier(final SecurityMetadataAssertion assertion) {
         Objects.requireNonNull(assertion, "assertion");
         return (snapshot, receivedAt) -> {
-            if (snapshot == null || snapshot.expired(receivedAt) || !assertion.verify(snapshot)) {
+            if (snapshot == null || snapshot.issuedAt().isAfter(receivedAt) || snapshot.expired(receivedAt) || !assertion.verify(snapshot)) {
                 return CompletableFuture.completedFuture(null);
             }
             return CompletableFuture.completedFuture(new SecurityContext(snapshot.subject(), snapshot.issuedAt(),
                     snapshot.expiresAt(), snapshot.transport(), snapshot.peerAddress(), snapshot.trustedSourceAddress(),
-                    snapshot.traceId(), snapshot.correlationId(), snapshot.permissions(), java.util.Map.of()));
+                    snapshot.traceId(), snapshot.correlationId(), snapshot.permissions(), java.util.Map.of(),
+                    Clock.fixed(receivedAt, java.time.ZoneOffset.UTC), System::nanoTime));
         };
     }
 }

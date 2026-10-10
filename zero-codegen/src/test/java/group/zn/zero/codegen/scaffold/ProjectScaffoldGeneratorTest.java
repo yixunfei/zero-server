@@ -136,6 +136,13 @@ class ProjectScaffoldGeneratorTest {
         assertTrue(Files.readString(output.resolve("pom.xml")).contains("<artifactId>zero-server-starter</artifactId>"));
         assertTrue(Files.readString(output.resolve("src/main/java/group/zn/local/tcp/LocalTcpApplicationServer.java"))
                 .contains("ZeroServerTcpApplication"));
+        assertTrue(Files.readString(output.resolve("src/main/java/group/zn/local/tcp/LocalTcpApplicationServer.java"))
+                .contains("ServerFactory.tcpUnmanaged"));
+        assertTrue(Files.exists(output.resolve("src/main/java/group/zn/local/tcp/LocalGameLifecycle.java")));
+        assertTrue(Files.exists(output.resolve("src/test/java/group/zn/local/tcp/LocalGameServerTest.java")));
+        String manifest = Files.readString(output.resolve("zero-scaffold.json"));
+        assertTrue(manifest.contains("\"connectsExternalMiddleware\": false"));
+        assertTrue(manifest.contains("\"requiresExternalServices\": false"));
     }
 
     @Test

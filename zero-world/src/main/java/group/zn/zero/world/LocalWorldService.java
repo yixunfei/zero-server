@@ -2,9 +2,9 @@ package group.zn.zero.world;
 
 import group.zn.zero.actor.ActorMessage;
 import group.zn.zero.actor.LaneKey;
-import group.zn.zero.actor.handler.ActorHandler;
 import group.zn.zero.actor.scheduler.ActorScheduler;
 import group.zn.zero.actor.scheduler.LocalActorScheduler;
+import group.zn.zero.core.error.ZeroException;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.HashMap;
@@ -40,7 +40,7 @@ public final class LocalWorldService {
     /** 实体状态，受 stateLock 保护。 */
     private final Map<String, Entity> entities = new HashMap<>();
     /** 迁移状态，受 stateLock 保护。 */
-    private final Map<String, Migration> migrations = new HashMap<>();
+    private final MigrationRecords migrations;
     /** 已提交事件历史，受 stateLock 保护。 */
     private final ArrayDeque<WorldEvent> events = new ArrayDeque<>();
 
@@ -50,8 +50,17 @@ public final class LocalWorldService {
     public LocalWorldService(ActorScheduler scheduler) { this(scheduler, e -> { }, WorldMetrics.NOOP); }
     /** @param scheduler 调度器。 @param eventSink 事件观察者。 @param metrics 指标观察者。 */
     public LocalWorldService(ActorScheduler scheduler, Consumer<WorldEvent> eventSink, WorldMetrics metrics) {
+        this(scheduler, eventSink, metrics, 4096);
+    }
+    /** 创建具有显式迁移收据容量的本地服务；不创建线程，不能自动淘汰幂等记录。
+     * @param scheduler 受管调度器。 @param eventSink 短时事件观察者。 @param metrics 短时指标观察者。
+     * @param migrationCapacity 正迁移记录上限，包含在途和终态。
+     * @throws IllegalArgumentException 容量非正。 */
+    public LocalWorldService(ActorScheduler scheduler, Consumer<WorldEvent> eventSink, WorldMetrics metrics,
+            int migrationCapacity) {
+        migrations = new MigrationRecords(migrationCapacity);
         this.scheduler = Objects.requireNonNull(scheduler); this.eventSink = Objects.requireNonNull(eventSink); this.metrics = Objects.requireNonNull(metrics);
-        scheduler.register(Command.class, ActorHandler.sync((context, message) -> ((Command) message.payload()).run()));
+        WorldDispatchRegistry.register(scheduler);
     }
     /** 创建不可变世界配置；线程安全，重复 ID 或分片归属非法时拒绝。
      * @param world 世界。 @param initialShards 初始分片；不会保留可变列表。 */
@@ -71,14 +80,55 @@ public final class LocalWorldService {
     }
     /** @param worldId 世界 ID。 @param initialShardId 初始分片 ID；线程安全。 */
     public void createWorld(String worldId, String initialShardId) { createWorld(new World(worldId, 0), List.of(new Shard(initialShardId, worldId, 0))); }
+    /**
+     * 在实体 lane 离开世界，释放实体目录；迁移未完成时拒绝，防止迟到迁移重新写入。
+     * @param entityId 实体身份。 @return 是否存在并删除；线程安全，重复离开返回 false。
+     */
+    public CompletionStage<Boolean> leaveWorldAsync(final String entityId) {
+        return callAsync(entityLane(entityId), () -> {
+            Entity current = entities.get(entityId);
+            if (current == null) return false;
+            if (current.migrationId() != null || current.status() != EntityStatus.ACTIVE) {
+                throw failure("cannot remove migrating entity");
+            }
+            entities.remove(entityId);
+            return true;
+        });
+    }
+
+    /** 删除空世界及其分片；与进入操作按状态锁线性化，非空时拒绝；线程安全。 */
+    public boolean removeEmptyWorld(final String worldId) {
+        Objects.requireNonNull(worldId, "worldId");
+        synchronized (stateLock) {
+            if (entities.values().stream().anyMatch(entity -> entity.worldId().equals(worldId))) {
+                throw failure("world still contains entities");
+            }
+            shards.values().removeIf(shard -> shard.worldId().equals(worldId));
+            return worlds.remove(worldId) != null;
+        }
+    }
+
+    /**
+     * 确认迁移结果已由应用归档后释放终态收据；线程安全，在途记录使批次原子拒绝。
+     * 迁移请求使用显式单调 long 序号；旧入口仅作为过渡适配。
+     * @param migrationId 已归档的包含边界。 @return 释放数量；不删除实体状态。
+     */
+    public int acknowledgeMigrationsThrough(final String migrationId) {
+        synchronized (stateLock) { return migrations.acknowledgeThrough(migrationId); }
+    }
+    /** 确认单调序号之前的迁移已归档，并释放对应收据。 */
+    public int acknowledgeMigrationsThrough(final long sequence) {
+        synchronized (stateLock) { return migrations.acknowledgeThrough(sequence); }
+    }
     /** 进入世界；线程安全，异步分配分片并发布事件。
      * @param entityId 实体 ID。 @param worldId 世界 ID。 @return 分配后的不可变实体。 */
     public CompletionStage<Entity> enterWorldAsync(String entityId, String worldId) {
         return callAsync(entityLane(entityId), () -> {
             World world = world(worldId);
-            String shard = shards.values().stream()
-                    .filter(candidate -> candidate.worldId().equals(worldId))
-                    .map(Shard::shardId).sorted().findFirst().orElseThrow(() -> failure("no shard"));
+            List<String> candidates = shards.values().stream()
+                    .filter(candidate -> candidate.worldId().equals(worldId)).map(Shard::shardId).sorted().toList();
+            if (candidates.isEmpty()) throw failure("no shard");
+            String shard = candidates.get(Math.floorMod(entityId.hashCode(), candidates.size()));
             Entity entity = new Entity(entityId, worldId, shard, 0, 0, 0,
                     world.routeEpoch(), EntityStatus.ACTIVE, null);
             if (entities.putIfAbsent(entityId, entity) != null) throw failure("entity exists");
@@ -108,24 +158,38 @@ public final class LocalWorldService {
     /** Asynchronously locks the source entity for migration. */
     public CompletionStage<Migration> requestMigrationAsync(
             String migrationId, String entityId, String targetShardId) {
+        return requestMigrationAsync(migrations.legacySequence(migrationId), migrationId, entityId, targetShardId);
+    }
+    /** Asynchronously locks the source entity with an explicit monotonic request sequence. */
+    public CompletionStage<Migration> requestMigrationAsync(
+            long sequence, String migrationId, String entityId, String targetShardId) {
         return callAsync(entityLane(entityId), () -> requestMigrationInLane(migrationId, entityId,
-                targetShardId, world(entity(entityId).worldId()).routeEpoch()));
+                targetShardId, world(entity(entityId).worldId()).routeEpoch(), sequence));
     }
 
     /** Asynchronously locks the source entity using an explicit route epoch. */
     public CompletionStage<Migration> requestMigrationAsync(
             String migrationId, String entityId, String targetShardId, long routeEpoch) {
+        return requestMigrationAsync(migrations.legacySequence(migrationId), migrationId, entityId, targetShardId, routeEpoch);
+    }
+    /** Asynchronously locks the source entity with an explicit sequence and route epoch. */
+    public CompletionStage<Migration> requestMigrationAsync(
+            long sequence, String migrationId, String entityId, String targetShardId, long routeEpoch) {
         return callAsync(entityLane(entityId),
-                () -> requestMigrationInLane(migrationId, entityId, targetShardId, routeEpoch));
+                () -> requestMigrationInLane(migrationId, entityId, targetShardId, routeEpoch, sequence));
     }
 
     private Migration requestMigrationInLane(
-            String migrationId, String entityId, String targetShardId, long routeEpoch) {
+            String migrationId, String entityId, String targetShardId, long routeEpoch, long sequence) {
             Objects.requireNonNull(migrationId);
             Entity current = entity(entityId);
+            if (migrations.isRetired(sequence)) {
+                throw ZeroException.of(WorldErrorCode.MIGRATION_RETIRED,
+                        "migration id is before replay watermark", null);
+            }
             Migration old = migrations.get(migrationId);
             if (old != null) {
-                if (!old.entityId().equals(entityId) || !old.targetShardId().equals(targetShardId)
+                if (old.sequence() != sequence || !old.entityId().equals(entityId) || !old.targetShardId().equals(targetShardId)
                         || old.routeEpoch() != routeEpoch) throw failure("migration id conflict");
                 return old;
             }
@@ -136,7 +200,8 @@ public final class LocalWorldService {
                 throw failure("entity migration already in progress");
             }
             if (current.routeEpoch() != routeEpoch) throw failure("stale route epoch");
-            Migration migration = new Migration(migrationId, entityId, current.ownerShardId(), targetShardId,
+            migrations.requireCapacity();
+            Migration migration = new Migration(sequence, migrationId, entityId, current.ownerShardId(), targetShardId,
                     routeEpoch, MigrationState.SOURCE_LOCKED, EntitySnapshot.of(current));
             entities.put(entityId, current.migrating(migrationId));
             migrations.put(migrationId, migration);
@@ -168,7 +233,6 @@ public final class LocalWorldService {
     private Migration commitMigrationInLane(String migrationId) {
         Migration m = findMigration(migrationId);
         if (m.state() == MigrationState.TARGET_COMMITTED
-                || m.state() == MigrationState.SOURCE_RELEASED
                 || m.state() == MigrationState.COMPLETED) {
             return m;
         }
@@ -234,11 +298,22 @@ public final class LocalWorldService {
                 .thenCompose(committed -> releaseSourceAsync(committed.migrationId()));
     }
 
+    /** 使用调用方提供的单调序号完成迁移；序号贯穿请求和归档重放边界。 */
+    public CompletionStage<Migration> migrateAsync(final long sequence, final String id,
+            final String entity, final String target) {
+        return requestMigrationAsync(sequence, id, entity, target)
+                .thenCompose(requested -> prepareMigrationAsync(requested.migrationId()))
+                .thenCompose(prepared -> commitMigrationAsync(prepared.migrationId()))
+                .thenCompose(committed -> releaseSourceAsync(committed.migrationId()));
+    }
+
     /** 线程安全地读取不可变快照；空表示不存在。 */
     public Optional<EntitySnapshot> queryEntity(String entityId) { synchronized (stateLock) { return Optional.ofNullable(entities.get(entityId)).map(EntitySnapshot::of); } }
     /** 线程安全地读取不可变快照；空表示不存在。 */
     /** 线程安全地读取快照；不存在时抛出 IllegalStateException。 */
     public EntitySnapshot snapshot(String entityId) { return queryEntity(entityId).orElseThrow(()->failure("entity not found")); }
+    /** 返回保留的在途与终态记录数；线程安全，不修改状态。 @return 非负记录数。 */
+    public int migrationCount() { synchronized (stateLock) { return migrations.size(); } }
     /** 线程安全地读取迁移；不存在返回 null。 */
     public Migration migration(String id) { synchronized (stateLock) { return migrations.get(id); } }
     /** 线程安全地读取状态；不存在时抛出 IllegalStateException。 */
@@ -258,7 +333,7 @@ public final class LocalWorldService {
     private <T> CompletionStage<T> callAsync(LaneKey lane, Task<T> task) {
         CompletableFuture<T> result = new CompletableFuture<>();
         try {
-            CompletionStage<Void> dispatched = scheduler.dispatch(new ActorMessage(lane, new Command(() -> {
+            CompletionStage<Void> dispatched = scheduler.dispatch(new ActorMessage(lane, new WorldDispatchRegistry.Command(() -> {
                 try {
                     result.complete(execute(task));
                 } catch (RuntimeException | Error failure) {
@@ -287,12 +362,10 @@ public final class LocalWorldService {
         }
         requireMigrationOwner(m);
         if (!accepted) {
-            migrations.put(migrationId, m.withState(MigrationState.ROLLBACK_SOURCE));
             Entity e = entity(m.entityId());
             Entity unlocked = new Entity(e.entityId(), e.worldId(), e.ownerShardId(), e.x(), e.y(),
                     e.stateVersion(), e.routeEpoch(), EntityStatus.ACTIVE, null);
             entities.put(e.entityId(), unlocked);
-            migrations.put(migrationId, m.withState(MigrationState.SOURCE_UNLOCKED));
             emit(new WorldEvent(WorldEvent.Type.MIGRATION_SOURCE_UNLOCKED, e.worldId(), e.entityId(),
                     m.sourceShardId(), m.targetShardId()));
             Migration failed = m.withState(MigrationState.FAILED);
@@ -311,7 +384,6 @@ public final class LocalWorldService {
 
     private boolean isCommitted(MigrationState state) {
         return state == MigrationState.TARGET_COMMITTED
-                || state == MigrationState.SOURCE_RELEASED
                 || state == MigrationState.COMPLETED;
     }
     private Entity requireMigrationOwner(Migration migration) {
@@ -367,6 +439,4 @@ public final class LocalWorldService {
     private static IllegalStateException failure(String s){return new IllegalStateException(s);}
     /** lane 内的状态操作。 */
     @FunctionalInterface private interface Task<T> { T run(); }
-    /** 不携带跨 lane 可变状态的调度消息。 */
-    private record Command(Runnable action) { void run() { action.run(); } }
 }

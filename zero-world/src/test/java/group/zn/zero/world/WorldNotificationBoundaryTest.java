@@ -11,6 +11,23 @@ import org.junit.jupiter.api.Test;
 
 /** 外部观察者不得持有世界状态锁，通知失败不得撤销已提交状态。 @author zn */
 class WorldNotificationBoundaryTest {
+    @Test void crossEntityReentryKeepsOuterNotificationsAndMetrics() {
+        var reference = new AtomicReference<LocalWorldService>();
+        var observed = new java.util.ArrayList<String>();
+        var metrics = new java.util.concurrent.atomic.AtomicInteger();
+        var service = new LocalWorldService(new LocalActorScheduler(), event -> {
+            observed.add(event.entityId());
+            if (event.entityId().equals("outer")) {
+                reference.get().enterWorldAsync("inner", "w").toCompletableFuture().join();
+            }
+        }, (operation, result, reason) -> metrics.incrementAndGet());
+        reference.set(service);
+        service.createWorld("w", "a");
+        service.enterWorldAsync("outer", "w").toCompletableFuture().join();
+        assertEquals(java.util.List.of("outer", "inner"), observed);
+        assertEquals(2, service.events().size());
+        assertEquals(2, metrics.get());
+    }
     /** 回调等待其他线程查询时，查询必须能立即看到已提交状态。 */
     @Test void callbackCanWaitForCrossThreadQuery() {
         var reference = new AtomicReference<LocalWorldService>();
@@ -25,7 +42,7 @@ class WorldNotificationBoundaryTest {
         }, WorldMetrics.NOOP);
         reference.set(service);
         service.createWorld("w", "a");
-        service.enterWorldAsync("e", "w").toCompletableFuture().join();
+        service.enterWorldAsync("d", "w").toCompletableFuture().join();
     }
 
     /** 通知失败仍向调用方报告，状态和历史已提交。 */
@@ -34,8 +51,8 @@ class WorldNotificationBoundaryTest {
             throw new IllegalStateException("observer unavailable");
         }, WorldMetrics.NOOP);
         service.createWorld("w", "a");
-        assertThrows(RuntimeException.class, () -> service.enterWorldAsync("e", "w").toCompletableFuture().join());
-        assertEquals("a", service.snapshot("e").ownerShardId());
+        assertThrows(RuntimeException.class, () -> service.enterWorldAsync("d", "w").toCompletableFuture().join());
+        assertEquals("a", service.snapshot("d").ownerShardId());
         assertEquals(1, service.events().size());
     }
 }

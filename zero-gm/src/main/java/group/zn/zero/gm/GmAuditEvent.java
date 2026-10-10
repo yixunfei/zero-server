@@ -25,6 +25,12 @@ public final class GmAuditEvent {
     /** 安全说明最大长度。 */
     private static final int MAX_SAFE_MESSAGE_LENGTH = 256;
 
+    /** 单次事件稳定随机标识，不由用户输入派生。 */
+    private final String eventId = java.util.UUID.randomUUID().toString();
+
+    /** 同一次执行各审计阶段共享的随机标识。 */
+    private final String operationId;
+
     /** 审计时间。 */
     private final Instant time;
 
@@ -68,6 +74,7 @@ public final class GmAuditEvent {
     private final String requestFingerprint;
 
     GmAuditEvent(
+            final String operationId,
             final Instant time,
             final GmAuditPhase phase,
             final GmAuditAttribution attribution,
@@ -82,6 +89,7 @@ public final class GmAuditEvent {
             final String safeMessage,
             final String structureFingerprint,
             final String requestFingerprint) {
+        this.operationId = checkedIdentifier(operationId, "operationId");
         this.time = Objects.requireNonNull(time, "time");
         this.phase = Objects.requireNonNull(phase, "phase");
         this.attribution = Objects.requireNonNull(attribution, "attribution");
@@ -269,6 +277,12 @@ public final class GmAuditEvent {
                 + '}';
     }
 
+    /** @return 本事件稳定随机标识；非空、不可变、线程安全；无数据变更。 */
+    public String eventId() { return eventId; }
+
+    /** @return 本次操作各阶段共享标识；非空、不可变、线程安全；无数据变更。 */
+    public String operationId() { return operationId; }
+
     private void validateParameterCount() {
         if (parameterCount < 0 || parameterCount != parameterNames.size()) {
             throw new IllegalArgumentException("gm audit parameter count is invalid");
@@ -287,6 +301,10 @@ public final class GmAuditEvent {
     }
 
     private void validatePhaseAndCommitState() {
+        if (phase == GmAuditPhase.REJECTED || phase == GmAuditPhase.REPLAYED || phase == GmAuditPhase.BOOKKEEPING_FAILED) {
+            validateBoundaryState();
+            return;
+        }
         boolean dryRunPhase = phase == GmAuditPhase.BEFORE_DRY_RUN
                 || phase == GmAuditPhase.AFTER_DRY_RUN
                 || phase == GmAuditPhase.DRY_RUN_FAILED;
@@ -298,6 +316,22 @@ public final class GmAuditEvent {
             return;
         }
         validateExecuteState();
+    }
+
+    private void validateBoundaryState() {
+        boolean unknownExistingOperation = !dryRun && businessCommitState == GmBusinessCommitState.UNKNOWN
+                && (errorCode == GmErrorCode.IDEMPOTENCY_IN_PROGRESS || errorCode == GmErrorCode.IDEMPOTENCY_FAILED);
+        if (phase == GmAuditPhase.REJECTED && (result != LogResult.REJECTED
+                || !unknownExistingOperation && businessCommitState != (dryRun
+                        ? GmBusinessCommitState.NOT_APPLICABLE : GmBusinessCommitState.NOT_COMMITTED))) {
+            throw new IllegalArgumentException("rejected boundary audit state is invalid");
+        }
+        if (phase == GmAuditPhase.BOOKKEEPING_FAILED && (dryRun || result != LogResult.FAILURE)) {
+            throw new IllegalArgumentException("bookkeeping audit state is invalid");
+        }
+        if (phase == GmAuditPhase.REPLAYED && (dryRun || result != LogResult.SUCCESS && result != LogResult.REJECTED)) {
+            throw new IllegalArgumentException("replay audit state is invalid");
+        }
     }
 
     private void validateDryRunState() {

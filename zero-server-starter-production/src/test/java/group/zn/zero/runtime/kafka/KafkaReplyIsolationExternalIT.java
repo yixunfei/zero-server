@@ -72,7 +72,7 @@ class KafkaReplyIsolationExternalIT {
                 }));
                 first.start();
                 second.start();
-                var assertion = SecurityMetadataAssertion.digest("local-test-key".getBytes(StandardCharsets.UTF_8));
+                var assertion = SecurityMetadataAssertion.digest("local-test-key-01234567890123456789012345678901".getBytes(StandardCharsets.UTF_8));
                 firstAdapter.delegate().orElseThrow().securityMetadataVerifier(SecurityMetadataAssertion.verifier(assertion));
                 verifySuccess(firstAdapter, secondAdapter, prefix, assertion, admin, deliveredReplyTopics, logs);
                 firstAdapter.register("echo", "fail", requestTopic, prefix + ".service", RpcHandler.sync(request -> {

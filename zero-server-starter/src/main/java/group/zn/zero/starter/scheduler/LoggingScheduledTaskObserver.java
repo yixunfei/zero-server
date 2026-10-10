@@ -69,7 +69,7 @@ public final class LoggingScheduledTaskObserver implements ScheduledTaskObserver
                     EXECUTION_TOTAL,
                     "Managed scheduler completed executions",
                     "count",
-                    List.of("scheduleType", "result")),
+                    List.of("scheduleType", "result"), group.zn.zero.monitor.MetricType.COUNTER),
             new MetricDefinition(
                     EXECUTION_DURATION_MILLIS,
                     "Managed scheduler execution duration",
@@ -79,12 +79,12 @@ public final class LoggingScheduledTaskObserver implements ScheduledTaskObserver
                     SKIPPED_TOTAL,
                     "Managed scheduler skipped occurrences",
                     "count",
-                    List.of("scheduleType", "reason")),
+                    List.of("scheduleType", "reason"), group.zn.zero.monitor.MetricType.COUNTER),
             new MetricDefinition(
                     REJECTED_TOTAL,
                     "Managed scheduler rejected tasks",
                     "count",
-                    List.of("scheduleType", "reason")));
+                    List.of("scheduleType", "reason"), group.zn.zero.monitor.MetricType.COUNTER));
 
     /**
      * 经过框架安全边界的日志写入端口。

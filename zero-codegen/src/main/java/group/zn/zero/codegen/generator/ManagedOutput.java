@@ -88,6 +88,15 @@ final class ManagedOutput {
         }
     }
 
+    /** 清理已提交日志并通知计划重新预检；未提交日志拒绝自动恢复。 */
+    boolean cleanupCommitted() {
+        try {
+            return new OutputTransaction(root, this::allowed).cleanupCommitted();
+        } catch (IOException ex) {
+            throw failure(ex);
+        }
+    }
+
     private void stale(final Map<Path, GeneratedOutputPlan.Output> outputs,
                        final Map<String, String> previous, final Map<String, String> next, final boolean prune,
                        final List<GeneratedOutputPlan.Change> changes,
@@ -133,7 +142,9 @@ final class ManagedOutput {
     }
 
     private ZeroException failure(final IOException cause) {
-        return ZeroException.of(CodegenErrorCode.OUTPUT_FAILED, cause.getMessage(), cause);
+        return ZeroException.of(cause instanceof OutputTransaction.CommittedCleanupException
+                ? CodegenErrorCode.OUTPUT_COMMITTED_CLEANUP_FAILED : CodegenErrorCode.OUTPUT_FAILED,
+                cause.getMessage(), cause);
     }
 
     /** 内容快照和用户报告；不可变有序集合。 */

@@ -30,7 +30,9 @@ import java.util.zip.CRC32C;
  */
 public final class LocalDurableJournal implements AutoCloseable {
     /** 版本化文件头；此格式不与 Redis 镜像日志混用。 */
-    private static final long MAGIC = 0x5a44555200000001L;
+    private static final long MAGIC = 0x5a44555200000002L;
+    /** v1 不含 replay watermark，读取后在下一次 compact 时升级为 v2。 */
+    private static final long LEGACY_MAGIC = 0x5a44555200000001L;
     /** 单条帧预算，防止损坏长度引发巨量分配。 */
     private static final int MAX_FRAME = 16 * 1024 * 1024;
     /** 日志文件及独占锁的资源。 */
@@ -51,6 +53,8 @@ public final class LocalDurableJournal implements AutoCloseable {
     private boolean poisoned;
     /** 关闭标记。 */
     private boolean closed;
+    /** 与压缩文件原子持久化的重放水位；旧操作 ID 不可再次执行。 */
+    private String retiredThrough;
 
     /** 打开或恢复日志；同步 IO，冷启动调用。拒绝目录并发打开和超预算文件。
      * @param directory 独占目录。 @param maxBytes 最大日志字节数。 @param maxOperations 最大操作数。 */
@@ -83,7 +87,7 @@ public final class LocalDurableJournal implements AutoCloseable {
     public synchronized List<DurableRecord> records() { ensureOpen(); return List.copyOf(records.values()); }
 
     /** @param id 操作 ID。 @return 最新记录或 null；线程安全。 */
-    public synchronized DurableRecord find(final String id) { ensureOpen(); return records.get(id); }
+    public synchronized DurableRecord find(final String id) { ensureOpen(); requireLiveId(id); return records.get(id); }
 
     /** 同一目标/实体不能有两个未解决意图；线程安全，无磁盘 IO。 */
     synchronized boolean hasUnresolved(final String target, final String id) {
@@ -108,6 +112,7 @@ public final class LocalDurableJournal implements AutoCloseable {
     /** 刷盘成功后才更新内存视图；异常表示未知或未提交，调用方须重新打开核验。 */
     synchronized void append(final DurableRecord record) {
         ensureOpen();
+        requireLiveId(record.operationId());
         DurableRecord previous = records.get(record.operationId());
         if (previous != null && !previous.sameIntent(record)) throw error("operation id reused with different intent", null);
         if (previous == null && records.size() >= maxOperations) throw error("journal operation budget exceeded", null);
@@ -131,11 +136,43 @@ public final class LocalDurableJournal implements AutoCloseable {
      * 同步 IO，线程安全；不支持原子替换的文件系统明确失败。 */
     public synchronized void compact() {
         ensureOpen();
+        replace(records.values(), retiredThrough);
+    }
+
+    /**
+     * 确认边界以下结果已归档后原子释放 APPLIED 收据；未解决记录使整批拒绝。
+     * 同步 IO，线程安全；ID 按 String.compareTo 排序，后续新 ID 必须大于水位。
+     * 水位与保留记录在同一文件原子替换，崩溃恢复后旧请求仍被拒绝。
+     * @param operationId 包含归档边界。 @return 释放数；不自动丢弃待写或隔离记录。
+     */
+    public synchronized int acknowledgeThrough(final String operationId) {
+        ensureOpen();
+        if (operationId == null || operationId.isBlank() || operationId.length() > 256
+                || retiredThrough != null && operationId.compareTo(retiredThrough) < 0) {
+            throw new IllegalArgumentException("invalid journal replay watermark");
+        }
+        for (DurableRecord record : records.values()) {
+            if (record.operationId().compareTo(operationId) <= 0 && record.state() != DurableRecord.State.APPLIED) {
+                throw error("cannot retire an unresolved intent", null);
+            }
+        }
+        List<DurableRecord> retained = records.values().stream()
+                .filter(record -> record.operationId().compareTo(operationId) > 0).toList();
+        replace(retained, operationId);
+        int removed = records.size() - retained.size();
+        records.keySet().removeIf(id -> id.compareTo(operationId) <= 0);
+        retiredThrough = operationId;
+        return removed;
+    }
+
+    private void replace(final java.util.Collection<DurableRecord> retained, final String watermark) {
         Path temporary = path.resolveSibling("intents.compact");
         try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
             writeFully(channel, ByteBuffer.allocate(Long.BYTES).putLong(MAGIC).array());
-            for (DurableRecord record : records.values()) writeFully(channel, frame(record));
+            if (watermark != null) writeFully(channel, watermarkFrame(watermark));
+            for (DurableRecord record : retained) writeFully(channel, frame(record));
+            if (channel.size() > maxBytes) throw new IOException("compacted journal exceeds byte budget");
             channel.force(true);
         } catch (IOException failure) {
             throw error("compact durable journal failed", failure);
@@ -143,6 +180,7 @@ public final class LocalDurableJournal implements AutoCloseable {
         try {
             Files.move(temporary, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException failure) {
+            poisoned = true;
             throw error("atomic journal replacement failed", failure);
         }
     }
@@ -163,7 +201,10 @@ public final class LocalDurableJournal implements AutoCloseable {
                 file.setLength(0); file.writeLong(MAGIC); file.getChannel().force(true);
             }
             file.seek(0);
-            if (file.readLong() != MAGIC) throw new IOException("unsupported durable journal format");
+            long format = file.readLong();
+            if (format != MAGIC && format != LEGACY_MAGIC) {
+                throw new IOException("unsupported durable journal format");
+            }
             long boundary = Long.BYTES;
             while (boundary < file.length()) {
                 file.seek(boundary);
@@ -175,14 +216,42 @@ public final class LocalDurableJournal implements AutoCloseable {
                 if (file.length() - file.getFilePointer() < size) break;
                 byte[] payload = new byte[size]; file.readFully(payload);
                 if (checksum(payload) != checksum) throw new IOException("durable journal checksum mismatch");
-                DurableRecord record = decode(payload);
-                DurableRecord previous = records.put(record.operationId(), record);
-                if (previous != null && !previous.sameIntent(record)) throw new IOException("durable intent changed");
-                if (records.size() > maxOperations) throw new IOException("journal exceeds operation budget");
-                index(record);
+                recoverPayload(payload, boundary == Long.BYTES);
                 boundary = file.getFilePointer();
             }
             if (file.length() != boundary) { file.setLength(boundary); file.getChannel().force(true); }
+        }
+    }
+
+    private void recoverPayload(final byte[] payload, final boolean first) throws IOException {
+        try (var in = new DataInputStream(new ByteArrayInputStream(payload))) {
+            if (in.readUTF().isEmpty()) {
+                String watermark = in.readUTF();
+                if (!first || watermark.isBlank() || watermark.length() > 256 || in.available() != 0) {
+                    throw new IOException("invalid durable replay watermark");
+                }
+                retiredThrough = watermark;
+                return;
+            }
+        }
+        DurableRecord record = decode(payload);
+        requireLiveId(record.operationId());
+        DurableRecord previous = records.put(record.operationId(), record);
+        if (previous != null && !previous.sameIntent(record)) throw new IOException("durable intent changed");
+        if (records.size() > maxOperations) throw new IOException("journal exceeds operation budget");
+        index(record);
+    }
+
+    private byte[] watermarkFrame(final String watermark) throws IOException {
+        var bytes = new ByteArrayOutputStream();
+        try (var out = new DataOutputStream(bytes)) { out.writeUTF(""); out.writeUTF(watermark); }
+        return framed(bytes.toByteArray());
+    }
+
+    private void requireLiveId(final String id) {
+        java.util.Objects.requireNonNull(id, "operationId");
+        if (retiredThrough != null && id.compareTo(retiredThrough) <= 0) {
+            throw error("operation is before durable replay watermark", null);
         }
     }
 
@@ -195,7 +264,10 @@ public final class LocalDurableJournal implements AutoCloseable {
             byte[] envelope = new ZeroDataEnvelopeCodec().encode(record.envelope());
             out.writeInt(envelope.length); out.write(envelope);
         }
-        byte[] payload = bytes.toByteArray();
+        return framed(bytes.toByteArray());
+    }
+
+    private byte[] framed(final byte[] payload) {
         if (payload.length > MAX_FRAME) throw error("durable frame budget exceeded", null);
         return ByteBuffer.allocate(payload.length + 12).putInt(payload.length).putInt(~payload.length)
                 .putInt(checksum(payload)).put(payload).array();

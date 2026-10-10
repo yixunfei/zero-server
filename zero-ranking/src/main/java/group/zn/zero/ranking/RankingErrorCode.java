@@ -9,7 +9,9 @@ public enum RankingErrorCode implements ErrorCode {
     RANKING_SEASON_STATE_INVALID("Season state does not allow this operation"),
     RANKING_SCORE_REJECTED("Score was rejected"),
     RANKING_QUERY_LIMIT_EXCEEDED("Query limit exceeded"),
-    SEASON_TRANSITION_REJECTED("Season transition rejected");
+    SEASON_TRANSITION_REJECTED("Season transition rejected"),
+    RANKING_IDEMPOTENCY_CONFLICT("Idempotency key was reused with a different request"),
+    RANKING_IDEMPOTENCY_CAPACITY_EXCEEDED("Idempotency receipt capacity exceeded");
     private final String message;
     RankingErrorCode(String message) { this.message = message; }
     public ErrorCategory category() { return ErrorCategory.CLIENT_REQUEST; }

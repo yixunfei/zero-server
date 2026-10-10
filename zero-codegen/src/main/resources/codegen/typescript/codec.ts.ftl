@@ -38,7 +38,7 @@ ${field.writeCode}</#if>
     const objectEnd = reader.beginObject();
     const message = new ${messageName}();
 <#if hasNullableFields>
-    const presence = reader.hasRemainingInObject(objectEnd) ? reader.readPresenceBits() : [];
+    const presence = reader.hasRemainingInObject(objectEnd) ? reader.readPresenceBits(${nullableFieldCount?c}) : [];
 </#if>
 <#list readFields as field>
 <#if field.nullable>

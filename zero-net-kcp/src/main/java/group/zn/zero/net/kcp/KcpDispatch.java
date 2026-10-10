@@ -25,6 +25,8 @@ final class KcpDispatch {
     private boolean opened;
     /** 生命周期回调的固定预算，防止快速签发/撤销绕过全局上限。 */
     private boolean lifecycleReserved = true;
+    /** 防止同步执行器和同步完成阶段递归推进业务队列。 */
+    private final java.util.concurrent.atomic.AtomicInteger dispatchWork = new java.util.concurrent.atomic.AtomicInteger();
 
     KcpDispatch(final KcpDispatchEndpoint session) {
         this.session = session;
@@ -50,6 +52,15 @@ final class KcpDispatch {
         dispatch();
     }
     private void dispatch() {
+        if (dispatchWork.getAndIncrement() != 0) return;
+        int pending = 1;
+        do {
+            dispatchNext();
+            pending = dispatchWork.addAndGet(-pending);
+        } while (pending != 0);
+    }
+
+    private void dispatchNext() {
         boolean opening;
         boolean closing;
         ProtocolFrame frame;
@@ -83,8 +94,9 @@ final class KcpDispatch {
         }
     }
     private void invoke(final boolean opening, final boolean closing, final ProtocolFrame frame) {
+        var completed = new java.util.concurrent.atomic.AtomicBoolean();
         if (session.inIoThread()) {
-            completed(!opening && !closing, null, ZeroException.of(NetErrorCode.HANDLER_FAILED,
+            completed(completed, null, ZeroException.of(NetErrorCode.HANDLER_FAILED,
                     "KCP business executor must not inline on IO thread", null));
             return;
         }
@@ -93,48 +105,44 @@ final class KcpDispatch {
             else if (closing) session.listener().onClose(session.connection());
             else {
                 if (session.closed() || !session.authorized()) {
-                    completed(true, null, KcpServer.error(NetErrorCode.AUTHENTICATION_EXPIRED, null));
+                    completed(completed, null, KcpServer.error(NetErrorCode.AUTHENTICATION_EXPIRED, null));
                     return;
                 }
                 CompletionStage<List<ProtocolFrame>> result = Objects.requireNonNull(
                         session.handler().handle(session.connection(), frame), "handlerStage");
-                result.whenComplete((responses, cause) -> completed(true, responses, cause));
+                result.whenComplete((responses, cause) -> completed(completed, responses, cause));
                 return;
             }
-            completed(false, List.of(), null);
+            completed(completed, List.of(), null);
         } catch (RuntimeException | Error failure) {
-            completed(!opening && !closing, null, failure);
+            completed(completed, null, failure);
         }
     }
-    private void completed(final boolean handled, final List<ProtocolFrame> responses, final Throwable failure) {
-        boolean respond;
-        synchronized (this) {
-            if (handled) releaseActive();
-            respond = !closed && failure == null;
-        }
-        Throwable terminalFailure = failure;
+    private void completed(final java.util.concurrent.atomic.AtomicBoolean completed,
+            final List<ProtocolFrame> responses, final Throwable failure) {
+        if (!completed.compareAndSet(false, true)) return;
+        if (failure != null) { finish(NetErrorCode.HANDLER_FAILED, failure); return; }
         try {
-            if (respond) sendResponses(responses);
+            if (responses == null || responses.size() > session.options().maxQueuedFrames()) {
+                throw KcpServer.error(NetErrorCode.HANDLER_FAILED, null);
+            }
+            new KcpResponseBatch(session, List.copyOf(responses), this::isClosed).start()
+                    .whenComplete((ignored, sendFailure) -> finish(NetErrorCode.SEND_FAILED, sendFailure));
         } catch (RuntimeException | Error sendFailure) {
-            terminalFailure = sendFailure;
+            finish(NetErrorCode.HANDLER_FAILED, sendFailure);
         }
+    }
+    private synchronized boolean isClosed() { return closed; }
+
+    private void finish(final NetErrorCode code, final Throwable failure) {
         synchronized (this) {
+            releaseActive();
             busy = false;
-            if (terminalFailure != null) { closed = true; discardPending(); }
+            if (failure != null) { closed = true; discardPending(); }
         }
         try {
-            if (terminalFailure != null) session.closeWithFailure(NetErrorCode.HANDLER_FAILED, terminalFailure);
+            if (failure != null) session.closeWithFailure(code, failure);
         } finally { dispatch(); }
-    }
-    private void sendResponses(final List<ProtocolFrame> responses) {
-        if (responses == null || responses.size() > session.options().maxQueuedFrames()) {
-            throw KcpServer.error(NetErrorCode.HANDLER_FAILED, null);
-        }
-        for (ProtocolFrame frame : responses) {
-            session.respond(frame).whenComplete((ignored, failure) -> {
-                if (failure != null) session.closeWithFailure(NetErrorCode.SEND_FAILED, failure);
-            });
-        }
     }
     private void discardPending() {
         Pending frame;

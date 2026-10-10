@@ -2,10 +2,13 @@ package group.zn.zero.room;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -46,27 +49,31 @@ class LocalRoomServiceTest {
     /** 创建提交与首个 join 线性化，首条房间事件始终先于加入事件。 */
     @Test
     void concurrentCreateAndJoinPreserveCreatedBeforeJoined() throws Exception {
-        List<RoomEvent.Type> events = new ArrayList<>();
+        List<RoomEvent.Type> events = java.util.Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch published = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
         LocalRoomService service = new LocalRoomService(new group.zn.zero.actor.scheduler.LocalActorScheduler(),
-                event -> events.add(event.type()));
+                event -> {
+                    events.add(event.type());
+                    if (event.type() == RoomEvent.Type.CREATED) {
+                        published.countDown();
+                        try { assertTrue(release.await(2, TimeUnit.SECONDS)); }
+                        catch (InterruptedException failure) {
+                            Thread.currentThread().interrupt();
+                            throw new AssertionError(failure);
+                        }
+                    }
+                });
         RoomId id = new RoomId("ordered-create");
-        CountDownLatch started = new CountDownLatch(1);
-        Thread creator = new Thread(() -> {
-            started.countDown();
-            service.create(id, 1, 0);
-        });
-        Thread joiner = new Thread(() -> {
-            try {
-                started.await(1, TimeUnit.SECONDS);
-                service.join(id, "p").toCompletableFuture().join();
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-            }
-        });
-        creator.start();
-        joiner.start();
-        creator.join(2000);
-        joiner.join(2000);
+        CompletableFuture<Void> creator = CompletableFuture.runAsync(() -> service.create(id, 1, 0));
+        try {
+            assertTrue(published.await(1, TimeUnit.SECONDS));
+            var joined = service.join(id, "p").toCompletableFuture();
+            assertFalse(joined.isDone());
+            release.countDown();
+            joined.get(2, TimeUnit.SECONDS);
+            creator.get(2, TimeUnit.SECONDS);
+        } finally { release.countDown(); }
         assertEquals(List.of(RoomEvent.Type.CREATED, RoomEvent.Type.JOINED), events);
     }
 }

@@ -13,11 +13,7 @@ import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.CountOptions;
 import com.mongodb.client.model.ReplaceOptions;
-import com.mongodb.client.model.BulkWriteOptions;
-import com.mongodb.client.model.InsertOneModel;
-import com.mongodb.client.model.ReplaceOneModel;
 import com.mongodb.client.model.Sorts;
-import com.mongodb.client.model.WriteModel;
 import com.mongodb.client.result.UpdateResult;
 import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.data.envelope.ZeroDataEnvelope;
@@ -179,42 +175,21 @@ public final class MongoDriverEnvelopeStore implements ZeroDataEnvelopeStore {
     }
 
     /**
-     * 有界 bulk CAS；成功返回按输入顺序的不可变 true 列表。
-     * 任一冲突抛 VERSION_CONFLICT；Mongo 的聚合结果不能定位未匹配更新，不虚构逐项结果。
-     * 批次不是事务，冲突或驱动错误可能已有部分写入；调用方应重新读取后重试。
+     * 按输入顺序逐项原子 CAS；返回不可变有序结果，false 为该项冲突，不中止后续项。
+     * 相同 ID 的多次更新保持顺序；批次不是事务，IO 失败可能已有部分提交。
+     * collection bulkWrite 的聚合 matchedCount 无法准确定位版本冲突，故不推测结果。
+     * @param writes 条件写集合；不可为空，允许空集合。
+     * @return 与输入等长的逐项结果；线程安全性由 driver 保证。
      */
     @Override
     public List<Boolean> saveIfVersionBatch(final Collection<ConditionalWrite> writes) {
         List<ConditionalWrite> current = List.copyOf(writes);
         for (ConditionalWrite write : current) validateEnvelope(write.envelope());
-        try {
-            for (int offset = 0; offset < current.size(); offset += BATCH_SIZE) {
-                writeBatch(current.subList(offset, Math.min(offset + BATCH_SIZE, current.size())));
-            }
-            return List.copyOf(java.util.Collections.nCopies(current.size(), Boolean.TRUE));
-        } catch (RuntimeException failure) {
-            if (failure instanceof ZeroException zero) throw zero;
-            throw ZeroException.of(classifyWriteFailure(failure), "mongo batch conditional write failed", failure);
+        List<Boolean> results = new ArrayList<>(current.size());
+        for (ConditionalWrite write : current) {
+            results.add(saveIfVersion(write.envelope(), write.expectedVersion()));
         }
-    }
-
-    private void writeBatch(final List<ConditionalWrite> writes) {
-        List<WriteModel<Document>> operations = new ArrayList<>(writes.size());
-        int updates = 0;
-        for (ConditionalWrite write : writes) {
-            MongoDataDocument document = MongoDataDocument.fromEnvelope(write.envelope());
-            if (write.expectedVersion() == 0L) {
-                operations.add(new InsertOneModel<>(document.toBson()));
-            } else {
-                operations.add(new ReplaceOneModel<>(and(matchId(document.id()), eq("version", write.expectedVersion())),
-                        document.toBson()));
-                updates++;
-            }
-        }
-        var result = mongoCollection.bulkWrite(operations, new BulkWriteOptions().ordered(true));
-        if (result.getMatchedCount() != updates || result.getInsertedCount() != writes.size() - updates) {
-            throw ZeroException.of(DataErrorCode.VERSION_CONFLICT, "mongo batch contains version conflicts; partial writes possible", null);
-        }
+        return List.copyOf(results);
     }
 
     /** $in 批量删除；有界请求，不承诺跨批次事务原子性。 */

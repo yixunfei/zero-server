@@ -22,8 +22,12 @@ import redis.clients.jedis.RedisClient;
 class RedisKcpSessionStoreTest {
     @Test void completesAtomicMigrationWhenRedisIsAvailable() throws Exception {
         RedisClient client;
-        try { client = RedisClient.create("redis://127.0.0.1:6388"); client.ping(); }
-        catch (RuntimeException unavailable) { Assumptions.assumeTrue(false, "KCP Redis environment unavailable"); return; }
+        String configured = System.getenv("ZERO_REDIS_URI");
+        try { client = RedisClient.create(configured == null ? "redis://127.0.0.1:6388" : configured); client.ping(); }
+        catch (RuntimeException unavailable) {
+            if (configured != null) throw unavailable;
+            Assumptions.assumeTrue(false, "KCP Redis environment unavailable"); return;
+        }
         ExecutorService io = Executors.newFixedThreadPool(2);
         try (client; io) {
             var store = new RedisKcpSessionStore(client, "zkcp-test-" + System.nanoTime(), io, 32);

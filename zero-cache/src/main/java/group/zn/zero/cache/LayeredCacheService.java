@@ -67,7 +67,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
     private final CacheLoadCoordinator<CacheKeyOperations.Token<K>, V> loadCoordinator;
 
     /** 同键写顺序和在途读取代际；后端调用不在其锁内执行。 */
-    private final CacheKeyOperations<K> operations = new CacheKeyOperations<>();
+    private final CacheKeyOperations<K> operations;
 
     /**
      * 缓存版本生成器。
@@ -125,7 +125,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
     /**
      * 是否降级。
      */
-    private volatile boolean degraded;
+    private final CacheRecoveryState recovery = new CacheRecoveryState();
 
     /**
      * 创建仅本地缓存的分层缓存服务。
@@ -179,6 +179,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
     public LayeredCacheService(final CachePolicy policy, final CacheStore<K, V> l2Store,
             final boolean cacheLoadedValueOnBackendFailure, final Duration l2FailureCooldown) {
         this.policy = Objects.requireNonNull(policy, "policy");
+        this.operations = new CacheKeyOperations<>(policy.writeTimeout());
         this.l1Cache = new InMemoryCacheService<>(policy);
         this.l2Store = l2Store;
         this.cacheLoadedValueOnBackendFailure = cacheLoadedValueOnBackendFailure;
@@ -204,9 +205,12 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
             hitCount.incrementAndGet();
             return CompletableFuture.completedFuture(l1Entry.orElseThrow().optionalValue());
         }
-        missCount.incrementAndGet();
         var token = operations.read(key);
-        return readL2Entry(key, token).thenApply(entry -> entry.flatMap(CacheStoreEntry::optionalValue))
+        return readL2Entry(key, token).thenApply(entry -> {
+                    if (entry.isPresent()) hitCount.incrementAndGet();
+                    else missCount.incrementAndGet();
+                    return entry.flatMap(CacheStoreEntry::optionalValue);
+                })
                 .whenComplete((value, failure) -> operations.release(token)).toCompletableFuture().copy();
     }
 
@@ -297,7 +301,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
             return backend(() -> l2Store == null ? CompletableFuture.completedFuture(true)
                     : l2Store.invalidateIfVersion(key, entityVersion)).thenApply(invalidated ->
                             Boolean.TRUE.equals(invalidated) && operations.commit(token,
-                                    () -> l1Cache.invalidateEntry(key, expected, entityVersion)));
+                                    () -> l1Cache.invalidateEntry(key, entityVersion)));
         });
     }
 
@@ -341,8 +345,28 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
      * @return 当前写回失败次数；线程安全。
      */
     public long markWriteBackFailure() {
-        degraded = true;
-        return writeBackFailureCount.incrementAndGet();
+        synchronized (recovery) {
+            long ticket = writeBackFailureCount.incrementAndGet();
+            recovery.externalFailure(ticket);
+            return ticket;
+        }
+    }
+
+    /**
+     * 调用方在对应外部写回实际成功后确认恢复；线程安全，只确认最新外部故障。
+     * @param failureTicket markWriteBackFailure 返回的正数累计故障凭据。
+     * @return true 表示该凭据匹配并被确认；不表示 L2、冷却或积压已全部恢复。
+     */
+    public boolean confirmWriteBackRecovery(final long failureTicket) {
+        return recovery.confirmExternal(failureTicket);
+    }
+
+    /** 内部补偿失败归属后端域，不能制造需要外部确认的故障凭据。 */
+    void markInternalWriteBackFailure() {
+        synchronized (recovery) {
+            writeBackFailureCount.incrementAndGet();
+            recovery.failure();
+        }
     }
 
     /**
@@ -377,6 +401,9 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
 
     /** @return 写回队列超限拒绝次数；线程安全，拒绝不会淘汰已有条目。 */
     public long writeBackRejectedCount() { return writeBackRejectedCount.get(); }
+
+    /** 返回物理写屏障数、超龄数和最长等待；线程安全，不释放任何在途写或泄露业务键。 */
+    public CacheWriteDiagnostics writeDiagnostics() { return operations.diagnostics(); }
 
     /**
      * 重试此前因后端故障而保留的写回项。
@@ -428,7 +455,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
      */
     public CacheHealthSnapshot healthSnapshot() {
         return new CacheHealthSnapshot(
-                degraded,
+                degraded(),
                 backendFailureCount.get(),
                 writeBackFailureCount.get(),
                 backlogCount.get());
@@ -440,7 +467,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
      * @return true 表示降级；线程安全。
      */
     public boolean degraded() {
-        return degraded;
+        return recovery.degraded(backlogCount.get(), l2CircuitOpen());
     }
 
     /**
@@ -519,20 +546,26 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
             return CompletableFuture.completedFuture(localValue(key));
         }
         CompletionStage<Boolean> write;
+        long revision = recovery.begin();
         try {
             write = l2Store == null ? CompletableFuture.completedFuture(true)
                     : Objects.requireNonNull(l2Store.putIfVersion(key, entry), "backend result");
         } catch (RuntimeException failure) {
             markBackendFailure();
-            enqueueWriteBack(key, entry, token);
-            if (cacheLoadedValueOnBackendFailure) {
-                storeL1IfCurrent(key, entry, token);
+            try {
+                enqueueWriteBack(key, entry, token);
+                if (cacheLoadedValueOnBackendFailure) {
+                    storeL1IfCurrent(key, entry, token);
+                }
+                return CompletableFuture.completedFuture(value);
+            } catch (RuntimeException rejected) {
+                return CompletableFuture.failedFuture(rejected);
             }
-            return CompletableFuture.completedFuture(value);
         }
         CompletableFuture<Optional<V>> result = new CompletableFuture<>();
         write.whenComplete((saved, failure) -> {
             try {
+            if (failure == null && l2Store != null) recovery.success(revision);
             if (failure != null && !(failure instanceof java.util.concurrent.CancellationException)) {
                 markBackendFailure();
                 enqueueWriteBack(key, entry, token);
@@ -563,7 +596,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
         return operations.backfill(pending.token(),
                 () -> backend(() -> l2Store.putIfVersion(pending.key(), pending.entry())),
                 () -> CompletableFuture.completedFuture(false)).handle((saved, failure) -> {
-                    if (failure != null) { markWriteBackFailure(); return false; }
+                    if (failure != null) { markInternalWriteBackFailure(); return false; }
                     removePending(pending);
                     return Boolean.TRUE.equals(saved);
                 });
@@ -587,7 +620,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
             if (replaced == null && writeBackQueue.size() >= MAX_WRITE_BACK_QUEUE) {
                 operations.release(token);
                 writeBackRejectedCount.incrementAndGet();
-                markWriteBackFailure();
+                markInternalWriteBackFailure();
                 throw ZeroException.of(CacheErrorCode.BACKPRESSURE_REJECTED, "cache write-back queue is full", null);
             }
             if (replaced != null && replaced.entry().cacheVersion() >= entry.cacheVersion()) {
@@ -603,13 +636,17 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
     private record PendingWrite<K, V>(K key, CacheStoreEntry<V> entry, CacheKeyOperations.Token<K> token) { }
 
     private <T> CompletionStage<T> backend(final java.util.function.Supplier<CompletionStage<T>> operation) {
+        long revision = recovery.begin();
         CompletionStage<T> stage;
         try {
             stage = Objects.requireNonNull(operation.get(), "backend result");
         } catch (RuntimeException failure) {
             stage = CompletableFuture.failedFuture(failure);
         }
-        return stage.whenComplete((ignored, failure) -> { if (failure != null) markBackendFailure(); });
+        return stage.whenComplete((ignored, failure) -> {
+            if (failure != null) markBackendFailure();
+            else if (l2Store != null) recovery.success(revision);
+        });
     }
 
     private CacheStoreEntry<V> normalStoreEntry(final V value, final long entityVersion) {
@@ -638,7 +675,7 @@ public class LayeredCacheService<K, V> implements CacheService<K, V> {
     }
 
     private void markBackendFailure() {
-        degraded = true;
+        recovery.failure();
         backendFailureCount.incrementAndGet();
         if (l2FailureCooldownNanos > 0L) {
             long until;

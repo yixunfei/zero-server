@@ -12,6 +12,38 @@ import org.junit.jupiter.api.Test;
 
 /** 用受控完成顺序验证失效、回源和写入之间的代际隔离。 @author zn */
 class LayeredCacheMutationRaceTest {
+    @Test void conditionalInvalidationRemovesConcurrentSameVersionRefill() {
+        for (long version : new long[]{1, 2, 3}) {
+            var store = new Store();
+            var cache = new LayeredCacheService<String, String>(CachePolicy.defaults(), store);
+            store.delayedInvalidation = new CompletableFuture<>();
+            var invalidated = cache.invalidateIfVersion("k", 2).toCompletableFuture();
+            store.current = entry("refill", version);
+            cache.get("k").toCompletableFuture().join();
+            store.current = null;
+            store.delayedInvalidation.complete(true);
+            assertEquals(version <= 2, invalidated.join());
+            assertEquals(version > 2 ? Optional.of("refill") : Optional.empty(), cache.get("k").toCompletableFuture().join());
+        }
+    }
+
+    @Test void backendRecoveryNeedsSuccessAfterLatestFailure() {
+        var store = new Store();
+        var cache = new LayeredCacheService<String, String>(CachePolicy.defaults(), store);
+        store.delayedRead = new CompletableFuture<>();
+        var old = cache.get("old");
+        var earlier = store.delayedRead;
+        store.delayedRead = CompletableFuture.failedFuture(new IllegalStateException("failed"));
+        cache.get("failure").toCompletableFuture().join();
+        assertTrue(cache.degraded());
+        earlier.complete(Optional.empty());
+        old.toCompletableFuture().join();
+        assertTrue(cache.degraded());
+        store.delayedRead = null;
+        cache.get("recovered").toCompletableFuture().join();
+        assertFalse(cache.degraded());
+        assertEquals(1, cache.healthSnapshot().backendFailureCount());
+    }
     /** 失效完成后，先前读取到的 L2 值不可复活。 */
     @Test void oldReadCannotRefillAfterInvalidation() {
         Store store = new Store();
@@ -93,6 +125,8 @@ class LayeredCacheMutationRaceTest {
         private CompletableFuture<Optional<CacheStoreEntry<String>>> delayedRead;
         /** 可控写。 */
         private CompletableFuture<Boolean> delayedWrite;
+        /** 可控条件删除。 */
+        private CompletableFuture<Boolean> delayedInvalidation;
         /** 模拟其他实例赢得条件写。 */
         private boolean rejectWrite;
         /** 返回当前值或延迟读取。 */
@@ -118,6 +152,7 @@ class LayeredCacheMutationRaceTest {
         }
         /** 测试用条件删除。 */
         @Override public CompletionStage<Boolean> invalidateIfVersion(String key, long version) {
+            if (delayedInvalidation != null) return delayedInvalidation;
             current = null;
             return CompletableFuture.completedFuture(true);
         }

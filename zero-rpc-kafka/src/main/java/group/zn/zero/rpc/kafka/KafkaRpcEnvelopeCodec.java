@@ -43,6 +43,9 @@ public final class KafkaRpcEnvelopeCodec {
      */
     private static final int MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
 
+    /** 单 envelope 接受上限；不代表 Kafka 原始拉取批次的内存上界。 */
+    static final int MAX_ENVELOPE_BYTES = 32 * 1024 * 1024;
+
     /**
      * 编码请求 envelope。
      *
@@ -53,7 +56,7 @@ public final class KafkaRpcEnvelopeCodec {
     public byte[] encodeRequest(final RpcRequest request) {
         RpcRequest current = Objects.requireNonNull(request, "request");
         try {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            ByteArrayOutputStream bytes = new BoundedEnvelopeOutput();
             DataOutputStream out = new DataOutputStream(bytes);
             writeHeader(out, KafkaRpcEnvelopeKind.REQUEST);
             writeString(out, current.correlationId());
@@ -85,7 +88,7 @@ public final class KafkaRpcEnvelopeCodec {
     public byte[] encodeResponse(final RpcResponse response) {
         RpcResponse current = Objects.requireNonNull(response, "response");
         try {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            ByteArrayOutputStream bytes = new BoundedEnvelopeOutput();
             DataOutputStream out = new DataOutputStream(bytes);
             writeHeader(out, KafkaRpcEnvelopeKind.RESPONSE);
             writeString(out, current.correlationId());
@@ -111,6 +114,7 @@ public final class KafkaRpcEnvelopeCodec {
     public KafkaRpcEnvelope decode(final byte[] payload) {
         Objects.requireNonNull(payload, "payload");
         try {
+            if (payload.length > MAX_ENVELOPE_BYTES) throw new IllegalArgumentException("kafka rpc envelope is too large");
             DataInputStream in = new DataInputStream(new ByteArrayInputStream(payload));
             KafkaRpcEnvelopeKind kind = readHeader(in);
             KafkaRpcEnvelope envelope = kind == KafkaRpcEnvelopeKind.REQUEST
@@ -245,5 +249,28 @@ public final class KafkaRpcEnvelopeCodec {
         }
         out.writeInt(bytes.length);
         out.write(bytes);
+    }
+
+    /** 仅编码调用栈持有的有界输出；每次增长前校验，禁止先分配再拒绝。 @author zn */
+    private static final class BoundedEnvelopeOutput extends ByteArrayOutputStream {
+        @Override public synchronized void write(final int value) {
+            requireRemaining(1);
+            buf[count++] = (byte) value;
+        }
+
+        @Override public synchronized void write(final byte[] bytes, final int offset, final int length) {
+            Objects.checkFromIndexSize(offset, length, bytes.length);
+            requireRemaining(length);
+            System.arraycopy(bytes, offset, buf, count, length);
+            count += length;
+        }
+
+        private void requireRemaining(final int length) {
+            if (length > MAX_ENVELOPE_BYTES - count) throw new IllegalArgumentException("kafka rpc envelope is too large");
+            int required = count + length;
+            if (required > buf.length) {
+                buf = java.util.Arrays.copyOf(buf, Math.max(required, Math.min(MAX_ENVELOPE_BYTES, buf.length * 2)));
+            }
+        }
     }
 }

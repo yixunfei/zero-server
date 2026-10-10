@@ -22,26 +22,26 @@ class WorldHandoffSerialTest {
     /** 目标提交不提前解除独占；完成的旧释放不能干扰下一次迁移。 */
     @Test void ownershipTokenSurvivesUntilSourceRelease() {
         var service = world(new group.zn.zero.actor.scheduler.LocalActorScheduler());
-        service.enterWorldAsync("e", "w").toCompletableFuture().join();
-        service.requestMigrationAsync("first", "e", "b").toCompletableFuture().join();
+        service.enterWorldAsync("d", "w").toCompletableFuture().join();
+        service.requestMigrationAsync("first", "d", "b").toCompletableFuture().join();
         assertThrows(RuntimeException.class, () -> service.releaseSourceAsync("first").toCompletableFuture().join());
         assertThrows(RuntimeException.class, () -> service.commitMigrationAsync("first").toCompletableFuture().join());
         service.prepareMigrationAsync("first").toCompletableFuture().join();
         service.commitMigrationAsync("first").toCompletableFuture().join();
-        assertEquals("b", service.snapshot("e").ownerShardId());
-        assertThrows(RuntimeException.class, () -> service.moveEntityAsync("e", "b", 1, 1).toCompletableFuture().join());
-        assertThrows(RuntimeException.class, () -> service.requestMigrationAsync("second", "e", "a").toCompletableFuture().join());
+        assertEquals("b", service.snapshot("d").ownerShardId());
+        assertThrows(RuntimeException.class, () -> service.moveEntityAsync("d", "b", 1, 1).toCompletableFuture().join());
+        assertThrows(RuntimeException.class, () -> service.requestMigrationAsync("second", "d", "a").toCompletableFuture().join());
         service.releaseSourceAsync("first").toCompletableFuture().join();
-        service.moveEntityAsync("e", "b", 2, 2).toCompletableFuture().join();
-        service.requestMigrationAsync("second", "e", "a").toCompletableFuture().join();
+        service.moveEntityAsync("d", "b", 2, 2).toCompletableFuture().join();
+        service.requestMigrationAsync("second", "d", "a").toCompletableFuture().join();
         service.releaseSourceAsync("first").toCompletableFuture().join();
-        assertEquals(EntityStatus.MIGRATING_OUT, service.entityStatus("e"));
+        assertEquals(EntityStatus.MIGRATING_OUT, service.entityStatus("d"));
         service.prepareMigrationAsync("second").toCompletableFuture().join();
         service.commitMigrationAsync("second").toCompletableFuture().join();
         service.releaseSourceAsync("first").toCompletableFuture().join();
-        assertThrows(RuntimeException.class, () -> service.moveEntityAsync("e", "a", 3, 3).toCompletableFuture().join());
+        assertThrows(RuntimeException.class, () -> service.moveEntityAsync("d", "a", 3, 3).toCompletableFuture().join());
         service.releaseSourceAsync("second").toCompletableFuture().join();
-        assertEquals("a", service.moveEntityAsync("e", "a", 3, 3).toCompletableFuture().join().ownerShardId());
+        assertEquals("a", service.moveEntityAsync("d", "a", 3, 3).toCompletableFuture().join().ownerShardId());
     }
 
     /** 真实异步执行器上的完整迁移不自等；全部步骤使用同一个 entity lane。 */
@@ -61,13 +61,13 @@ class WorldHandoffSerialTest {
                 }
             };
             var service = world(scheduler);
-            service.enterWorldAsync("e", "w").toCompletableFuture().join();
-            service.moveEntityAsync("e", "a", 1, 1).toCompletableFuture().join();
+            service.enterWorldAsync("d", "w").toCompletableFuture().join();
+            service.moveEntityAsync("d", "a", 1, 1).toCompletableFuture().join();
             assertEquals(MigrationState.COMPLETED,
-                    service.migrateAsync("m", "e", "b").toCompletableFuture().get(3, TimeUnit.SECONDS).state());
-            assertEquals("b", service.snapshot("e").ownerShardId());
+                    service.migrateAsync("m", "d", "b").toCompletableFuture().get(3, TimeUnit.SECONDS).state());
+            assertEquals("b", service.snapshot("d").ownerShardId());
             assertTrue(lanes.size() >= 6);
-            assertTrue(lanes.stream().allMatch(LaneKey.entity("e")::equals));
+            assertTrue(lanes.stream().allMatch(LaneKey.entity("d")::equals));
         }
     }
 

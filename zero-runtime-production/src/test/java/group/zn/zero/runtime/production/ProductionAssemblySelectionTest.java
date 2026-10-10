@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.core.lifecycle.LifecycleState;
@@ -46,7 +47,7 @@ class ProductionAssemblySelectionTest {
         var failure = assertThrows(ProductionAdapterException.class, assembly::plan);
 
         assertEquals(ProductionAdapterFailurePhase.CONFIG_VALIDATION, failure.failurePhase());
-        assertEquals(ProductionAdapterErrorCode.CONFIG_INVALID, failure.errorCode());
+        assertEquals(group.zn.zero.runtime.diagnostics.RuntimeErrorCode.RUNTIME_POLICY_REJECTED, failure.errorCode());
         assertEquals(0, localCreated.get());
         assertEquals(0, externalCreated.get());
     }
@@ -64,7 +65,7 @@ class ProductionAssemblySelectionTest {
         ProductionAssembly assembly = assembly(localCreated, external);
         var failure = assertThrows(ProductionAdapterException.class, assembly::build);
 
-        assertEquals(ProductionAdapterErrorCode.CLIENT_CREATION_FAILED, failure.errorCode());
+        assertEquals(group.zn.zero.runtime.diagnostics.RuntimeErrorCode.RUNTIME_COMPONENT_CREATE_FAILED, failure.errorCode());
         assertEquals(0, localCreated.get());
         assertEquals(1, closed.get());
         assertNull(failure.getCause());
@@ -89,7 +90,10 @@ class ProductionAssemblySelectionTest {
         try (var runtime = assembly(localCreated, external).build()) {
             assertEquals("external", runtime.require(SERVICE));
             var failure = assertThrows(ProductionAdapterException.class, runtime::start);
-            assertEquals(ProductionAdapterErrorCode.STARTUP_FAILED, failure.errorCode());
+            assertEquals(group.zn.zero.runtime.diagnostics.RuntimeErrorCode.RUNTIME_COMPONENT_HEALTH_FAILED, failure.errorCode());
+            assertEquals(group.zn.zero.runtime.diagnostics.RuntimeFailurePhase.HEALTH, failure.runtimePhase().orElseThrow());
+            assertTrue(failure.componentId().isPresent());
+            assertTrue(failure.runtimeReport().isPresent());
             assertFalse(runtime.state() == LifecycleState.RUNNING);
             assertEquals(1, probes.get());
             assertEquals(1, closed.get());

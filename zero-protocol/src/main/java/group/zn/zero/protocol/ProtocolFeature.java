@@ -31,7 +31,10 @@ public enum ProtocolFeature {
     /**
      * frame 携带扩展头。
      */
-    EXTENSION_HEADER(1 << 3);
+    EXTENSION_HEADER(1 << 3),
+
+    /** 通用失败响应；payload 使用 ProtocolErrorFrames 的安全错误码文本，独立于压缩/加密。 */
+    ERROR(1 << 4);
 
     /**
      * 特性位掩码。

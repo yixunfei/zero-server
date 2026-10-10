@@ -117,6 +117,9 @@ public final class ScaffoldUpgradeService {
     public ScaffoldChangePlan plan(final ProjectScaffoldRequest request) throws IOException {
         Objects.requireNonNull(request, "request");
         Path target = request.outputDirectory();
+        if (Files.exists(target.resolve(ScaffoldCreationTransaction.JOURNAL))) {
+            throw new ScaffoldUpgradeException("SCAFFOLD-CREATE-RECOVERY-REQUIRED", "先使用 --rollback 完成首建恢复");
+        }
         if (!Files.isDirectory(target) || !Files.isRegularFile(target.resolve(ScaffoldOwnershipManifest.PATH))) {
             return ScaffoldChangePlan.migrationRequired(
                     "zero-scaffold.json 不存在；请在新目录初始化，或先执行显式 migrate");
@@ -136,7 +139,7 @@ public final class ScaffoldUpgradeService {
         try {
             Path rendered = scratch.resolve("rendered");
             new ProjectScaffoldGenerator(components)
-                    .generate(copyTo(request, rendered));
+                    .renderProject(copyTo(request, rendered));
             return compare(target, rendered, manifest);
         } finally {
             deleteTree(scratch);
@@ -171,10 +174,11 @@ public final class ScaffoldUpgradeService {
             try {
                 snapshot(target, before, paths);
                 stage(after, plan, paths);
+                // 目标改写前先发布可恢复指针；之后任意崩溃均可定位原始快照。
+                atomicWriteString(target.resolve(LATEST), transaction.getFileName() + System.lineSeparator());
                 writeState(transaction, "COMMITTING");
                 commit(after, target, paths);
                 writeState(transaction, "COMMITTED");
-                atomicWriteString(target.resolve(LATEST), transaction.getFileName() + System.lineSeparator());
                 return new ScaffoldTransaction(transaction.getFileName().toString(), transaction, "COMMITTED", paths);
             } catch (IOException | RuntimeException failure) {
                 writeState(transaction, "RECOVERY_REQUIRED");
@@ -192,6 +196,7 @@ public final class ScaffoldUpgradeService {
      */
     public String rollback(final Path target) throws IOException {
         try (UpgradeLock ignored = acquireLock(target)) {
+            if (ScaffoldCreationTransaction.recoverLocked(target)) return "creation-recovered";
             return rollbackLocked(target);
         }
     }
@@ -427,7 +432,7 @@ public final class ScaffoldUpgradeService {
         }
     }
 
-    private static void atomicWriteString(final Path destination, final String value) throws IOException {
+    static void atomicWriteString(final Path destination, final String value) throws IOException {
         Files.createDirectories(destination.getParent());
         Path staged = Files.createTempFile(destination.getParent(), ".zero-atomic-", ".tmp");
         try {
@@ -438,8 +443,9 @@ public final class ScaffoldUpgradeService {
         }
     }
 
-    private static UpgradeLock acquireLock(final Path target) throws IOException {
+    static UpgradeLock acquireLock(final Path target) throws IOException {
         Path path = target.resolve(LOCK);
+        ScaffoldCreationTransaction.validate(path);
         Files.createDirectories(path.getParent());
         FileChannel channel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
         try {
@@ -463,7 +469,8 @@ public final class ScaffoldUpgradeService {
         }
     }
 
-    private record UpgradeLock(FileChannel channel, FileLock lock) implements AutoCloseable {
+    /** 首建与升级共用的工程锁。 */
+    record UpgradeLock(FileChannel channel, FileLock lock) implements AutoCloseable {
         @Override
         public void close() throws IOException {
             try {

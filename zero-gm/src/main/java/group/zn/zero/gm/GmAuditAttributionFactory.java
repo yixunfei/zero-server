@@ -76,7 +76,8 @@ public final class GmAuditAttributionFactory {
     public GmAuditAttribution create(final GmCommandExecutionRequest request) {
         GmCommandExecutionRequest checkedRequest = Objects.requireNonNull(request, "request");
         GmCommandContext context = checkedRequest.context();
-        boolean approvalRequired = checkedRequest.definition().approvalRequired();
+        boolean approvalRequired = checkedRequest.definition().approvalRequired()
+                || checkedRequest.definition().risk().requiresApproval();
         String targetType = targetType(checkedRequest.definition().targetParameterName());
         String targetValue = checkedRequest.targetValue().orElse("");
         return GmAuditAttribution.safeReferences(
@@ -87,6 +88,13 @@ public final class GmAuditAttributionFactory {
                 redactOptional(APPROVAL_DOMAIN, context.approvalId()),
                 targetType,
                 redactOptional(TARGET_DOMAIN, targetValue));
+    }
+
+    /** 边界拒绝/重放只归因上下文和声明目标，不构造或保存未解析请求。 */
+    GmAuditAttribution boundary(GmCommandContext context, String target) {
+        return GmAuditAttribution.safeReferences(redact(OPERATOR_DOMAIN, context.operator()),
+                redact(SOURCE_DOMAIN, context.operatorIp()), false, GmApprovalState.NOT_REQUIRED,
+                redactOptional(APPROVAL_DOMAIN, context.approvalId()), "operation", redactOptional(TARGET_DOMAIN, target));
     }
 
     private String redactOptional(final String domain, final String rawValue) {
@@ -102,7 +110,7 @@ public final class GmAuditAttributionFactory {
         if (reference == null
                 || reference.isBlank()
                 || reference.length() > MAX_REFERENCE_LENGTH
-                || reference.equals(checkedRawValue)
+                || reference.equals(checkedRawValue) && !(identifierRedactor instanceof FixedLogIdentifierRedactor)
                 || containsControlCharacter(reference)) {
             throw new IllegalStateException("gm audit redactor returned an unsafe reference");
         }

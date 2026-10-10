@@ -1,6 +1,7 @@
 package group.zn.zero.data.persistence.durable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -28,6 +29,65 @@ import org.junit.jupiter.api.io.TempDir;
 class DurablePersistenceServiceTest {
     /** 每个测试独占目录。 */
     @TempDir Path directory;
+
+    /** v1 日志的记录帧无需迁移即可恢复；写入 v2 水位前仍保持原有读取兼容。 */
+    @Test void legacyV1JournalRemainsReadable() throws Exception {
+        var record = new DurableRecord("legacy", "players", 0, envelope(1, 1), DurableRecord.State.APPLIED, 0, 0, "");
+        try (var journal = new LocalDurableJournal(directory, 1_000_000, 2)) {
+            journal.append(record);
+        }
+        try (var channel = java.nio.channels.FileChannel.open(directory.resolve("intents.zwal"), StandardOpenOption.WRITE)) {
+            var legacyHeader = java.nio.ByteBuffer.allocate(Long.BYTES);
+            legacyHeader.putLong(0x5a44555200000001L).flip();
+            channel.write(legacyHeader);
+        }
+        try (var journal = new LocalDurableJournal(directory, 1_000_000, 2)) {
+            DurableRecord restored = journal.find("legacy");
+            assertEquals(record.operationId(), restored.operationId());
+            assertEquals(record.target(), restored.target());
+            assertEquals(record.state(), restored.state());
+            assertEquals(record.envelope().id(), restored.envelope().id());
+            assertArrayEquals(record.envelope().payload(), restored.envelope().payload());
+        }
+    }
+
+    /** 显式归档释放容量；水位与收据同文件恢复，不允许重启后重做旧请求。 */
+    @Test void acknowledgedReceiptsReleaseCapacityAndPersistReplayFence() {
+        var first = new DurableRecord("001", "players", 0, envelope(1, 1), DurableRecord.State.PENDING, 0, 0, "");
+        try (var journal = new LocalDurableJournal(directory, 1_000_000, 1)) {
+            journal.append(first);
+            assertThrows(ZeroException.class, () -> journal.acknowledgeThrough("001"));
+            assertEquals(1, journal.records().size());
+            journal.append(first.result(DurableRecord.State.APPLIED, 0, 0, ""));
+            assertEquals(1, journal.acknowledgeThrough("001"));
+            assertEquals(0, journal.records().size());
+        }
+        try (var journal = new LocalDurableJournal(directory, 1_000_000, 1)) {
+            assertThrows(ZeroException.class, () -> journal.append(first));
+            assertThrows(ZeroException.class, () -> journal.find("001"));
+            journal.append(new DurableRecord("002", "players", 0, envelope(1, 2), DurableRecord.State.PENDING, 0, 0, ""));
+            assertEquals(1, journal.records().size());
+            assertThrows(IllegalArgumentException.class, () -> journal.acknowledgeThrough("000"));
+        }
+    }
+
+    @Test void appliedReceiptStillConsumesCapacityAfterCompactionAndRestart() {
+        var intent = new DurableRecord("first", "players", 0, envelope(1, 1), DurableRecord.State.PENDING, 0, 0, "");
+        var applied = intent.result(DurableRecord.State.APPLIED, 0, 0, "");
+        try (var journal = new LocalDurableJournal(directory, 1_000_000, 1)) {
+            journal.append(intent);
+            journal.append(applied);
+            journal.compact();
+        }
+        try (var journal = new LocalDurableJournal(directory, 1_000_000, 1)) {
+            assertEquals(DurableRecord.State.APPLIED, journal.records().getFirst().state());
+            journal.append(applied);
+            assertThrows(ZeroException.class, () -> journal.append(new DurableRecord("second", "players", 0,
+                    envelope(1, 2), DurableRecord.State.PENDING, 0, 0, "")));
+            assertThrows(ZeroException.class, () -> journal.append(new DurableRecord("first", "players", 0,
+                    envelope(1, 2), DurableRecord.State.PENDING, 0, 0, "")));
+        }
+    }
 
     /** 确認成功但未落库的子 JVM 立即退出，父 JVM 从日志恢复 CAS。 */
     @Test void acknowledgedIntentSurvivesAbruptJvmExit() throws Exception {

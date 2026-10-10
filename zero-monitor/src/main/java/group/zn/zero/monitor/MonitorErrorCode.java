@@ -10,6 +10,9 @@ import group.zn.zero.core.error.ErrorCode;
  */
 public enum MonitorErrorCode implements ErrorCode {
 
+    /** 告警 sink 发布失败，未成功的 sink 可以重试。 */
+    ALERT_DELIVERY_FAILED("ZERO-MONITOR-ALERT-DELIVERY-FAILED", "alert publication failed"),
+
     /**
      * 指标定义非法。
      */

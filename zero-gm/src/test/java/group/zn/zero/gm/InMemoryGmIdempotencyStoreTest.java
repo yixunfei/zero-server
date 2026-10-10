@@ -33,7 +33,7 @@ class InMemoryGmIdempotencyStoreTest {
     void completedResponseIsReplayedUntilTtl() {
         InMemoryGmIdempotencyStore store = new InMemoryGmIdempotencyStore();
         store.claim("key", "fingerprint", NOW, TTL);
-        GmOperationResponse response = new GmOperationResponse("ZERO-OK", "success", null, "trace");
+        GmOperationResponse response = new GmOperationResponse("ZERO-OK", "success", null, "trace", GmBusinessCommitState.COMMITTED, false, false);
         store.complete("key", "fingerprint", response, NOW.plus(TTL));
         assertEquals(GmIdempotencyStore.State.COMPLETED,
                 store.claim("key", "fingerprint", NOW.plusSeconds(1), TTL).state());
@@ -48,6 +48,6 @@ class InMemoryGmIdempotencyStoreTest {
         InMemoryGmIdempotencyStore store = new InMemoryGmIdempotencyStore();
         assertThrows(IllegalStateException.class,
                 () -> store.complete("missing", "fingerprint",
-                        new GmOperationResponse("ZERO-OK", "success", null, "trace"), NOW.plus(TTL)));
+                        new GmOperationResponse("ZERO-OK", "success", null, "trace", GmBusinessCommitState.COMMITTED, false, false), NOW.plus(TTL)));
     }
 }

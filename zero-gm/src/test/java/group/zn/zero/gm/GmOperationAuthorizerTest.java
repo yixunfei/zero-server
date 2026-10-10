@@ -18,10 +18,16 @@ class GmOperationAuthorizerTest {
                 new GmOperationAuthorizationPolicy(Set.of("gm-admin"), Set.of("gm:mail"),
                         Set.of("192.0.2.0/24"), true, true),
                 GmSourceIpPolicy.of(Set.of("192.0.2.0/24")),
-                GmApprovalVerifier.contextState(), audit::set);
+                GmApprovalVerifier.contextState(), (request, target, token, reviewer) -> "bob", audit::set);
         GmCommandContext context = new GmCommandContext("alice", "192.0.2.10", "trace",
                 Set.of("gm-admin"), Set.of("gm:mail"), "approval", "APPROVED", Map.of());
-        authorizer.authorize(context, "player-1", "token", "bob");
+        GmCommandHandler handler = new GmCommandHandler() {
+            public GmDryRunResult dryRun(GmCommandExecutionRequest request) { throw new AssertionError(); }
+            public GmCommandExecutionResult execute(GmCommandExecutionRequest request) { throw new AssertionError(); }
+        };
+        var resolution = new GmCommandResolution(new GmCommandDefinition(java.util.List.of("ping"),
+                java.util.List.of(), "ping", GmCommandRisk.LOW, "", false), handler, "/ping", java.util.List.of(), Map.of());
+        authorizer.authorize(context, resolution, "player-1", "token", "bob");
         assertEquals(null, audit.get());
     }
 
@@ -37,7 +43,7 @@ class GmOperationAuthorizerTest {
                 () -> authorizer.authorize(context, "secret-target", null, null));
         assertEquals(GmErrorCode.OPERATION_AUTHORIZATION_DENIED, error.errorCode());
         assertEquals(GmAuthorizationFailureReason.ROLE_PERMISSION_DENIED, audit.get().reason());
-        assertTrue(audit.get().toString().contains("redacted:"));
+        assertTrue(audit.get().toString().contains("[REDACTED]"));
         assertTrue(!audit.get().toString().contains("secret-operator"));
         assertTrue(!audit.get().toString().contains("secret-target"));
     }
@@ -58,7 +64,7 @@ class GmOperationAuthorizerTest {
     void supportsApplicationApprovalVerifierAndRejectsSameReviewer() {
         AtomicReference<GmAuthorizationFailureReason> reason = new AtomicReference<>();
         GmOperationAuthorizer authorizer = new GmOperationAuthorizer(
-                new GmOperationAuthorizationPolicy(Set.of(), Set.of(), Set.of(), true, true),
+                new GmOperationAuthorizationPolicy(Set.of(), Set.of(), Set.of("192.0.2.10"), true, true),
                 GmSourceIpPolicy.allowAll(), (context, target, token) ->
                         "opaque-approved".equals(token) ? GmApprovalDecision.APPROVED : GmApprovalDecision.INVALID,
                 event -> reason.set(event.reason()));

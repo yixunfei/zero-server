@@ -4,7 +4,6 @@ import group.zn.zero.actor.ActorMessage;
 import group.zn.zero.actor.LaneKey;
 import group.zn.zero.actor.scheduler.ActorScheduler;
 import group.zn.zero.actor.scheduler.LocalActorScheduler;
-import group.zn.zero.actor.handler.ActorHandler;
 import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.List;
@@ -24,8 +23,6 @@ public final class LocalRoomService {
     private final Consumer<RoomEvent> eventConsumer;
     /** 每个房间内存历史容量；不限制实时事件交付。 */
     private final int eventHistoryCapacity;
-    /** 创建提交与首个房间命令的线性化监视器；不保护房间内部状态。 */
-    private final Object creationMonitor = new Object();
 
     public LocalRoomService() { this(new LocalActorScheduler(), ignored -> { }, DEFAULT_EVENT_HISTORY_CAPACITY); }
     public LocalRoomService(ActorScheduler scheduler) { this(scheduler, ignored -> { }, DEFAULT_EVENT_HISTORY_CAPACITY); }
@@ -50,18 +47,21 @@ public final class LocalRoomService {
             throw new IllegalArgumentException("eventHistoryCapacity must be positive");
         }
         this.eventHistoryCapacity = eventHistoryCapacity;
-        scheduler.register(Command.class, ActorHandler.sync((context, message) -> apply((Command) message.payload())));
+        RoomDispatchRegistry.register(scheduler);
     }
+    /** 创建并发布初始快照，锁外通知 CREATED；回调可提交后续命令但不能同步等待同房间。
+     * @param id 房间身份。 @param capacity 正成员容量。 @param reconnectWindowMillis 非负重连窗口。
+     * @return 不可变初始快照；线程安全。 @throws RuntimeException 配置/重复身份或提交后的通知失败。 */
     public RoomSnapshot create(RoomId id, int capacity, long reconnectWindowMillis) {
-        synchronized (creationMonitor) {
-            Objects.requireNonNull(id, "id");
-            if (capacity < 1 || reconnectWindowMillis < 0) throw new IllegalArgumentException("invalid room configuration");
-            MutableRoom room = new MutableRoom(id, capacity, reconnectWindowMillis, eventHistoryCapacity);
-            RoomEvent created = room.events.getFirst();
-            if (rooms.putIfAbsent(id, room) != null) throw failure("room already exists");
-            room.deliver(created);
-            return room.view.snapshot();
-        }
+        Objects.requireNonNull(id, "id");
+        if (capacity < 1 || reconnectWindowMillis < 0) throw new IllegalArgumentException("invalid room configuration");
+        MutableRoom room = new MutableRoom(id, capacity, reconnectWindowMillis, eventHistoryCapacity);
+        RoomEvent created = room.events.getFirst();
+        RoomSnapshot initial = room.view.snapshot();
+        if (rooms.putIfAbsent(id, room) != null) throw failure("room already exists");
+        try { room.deliver(created); }
+        finally { room.admission.start(); }
+        return initial;
     }
     /** 读取最近一次完整提交的不可变快照；线程安全，不会观察到部分成员变更。 */
     public RoomSnapshot snapshot(RoomId id) { return room(id).view.snapshot(); }
@@ -128,16 +128,14 @@ public final class LocalRoomService {
     }
     private CompletionStage<Void> dispatch(RoomId id, Operation operation) {
         Objects.requireNonNull(id, "id");
-        synchronized (creationMonitor) {
-            try { MutableRoom expected = room(id); return scheduler.dispatch(new ActorMessage(
-                    "room-" + id.value(),
-                    LaneKey.custom(id.value()),
-                    "room",
-                    new Command(id, expected, operation))); } catch (RuntimeException ex) {
-                CompletableFuture<Void> f = new CompletableFuture<>();
-                f.completeExceptionally(ex);
-                return f;
-            }
+        try {
+            MutableRoom expected = room(id);
+            Command command = new Command(id, expected, operation);
+            return expected.admission.submit(() -> scheduler.dispatch(new ActorMessage(
+                    "room-" + id.value(), LaneKey.custom(id.value()), "room",
+                    new RoomDispatchRegistry.Command(() -> apply(command)))));
+        } catch (RuntimeException | Error failure) {
+            return CompletableFuture.failedFuture(failure);
         }
     }
     private void apply(Command command) {
@@ -175,6 +173,8 @@ public final class LocalRoomService {
         public void apply(MutableRoom r) { value = r.settle(key, result); }
     }
     private final class MutableRoom {
+        /** 创建通知后按提交顺序转交 scheduler；不跨用户代码持锁。 */
+        final RoomCommandAdmission admission = new RoomCommandAdmission();
         final RoomId id; final int capacity; final long window; final int historyCapacity; final ConcurrentMap<String,RoomMember> members=new ConcurrentHashMap<>(); final ArrayDeque<RoomEvent> events=new ArrayDeque<>(); long droppedEvents; RoomState state=RoomState.WAITING; long seq; String settlementId, settlementResult; RoomStats stats=new RoomStats(0,0,0,0,0,0);
         /** 一次 volatile 发布覆盖全部查询状态；外部线程禁止读取 lane 内的可变字段。 */
         volatile RoomView view;
@@ -183,17 +183,18 @@ public final class LocalRoomService {
             events.add(new RoomEvent(id, 0, RoomEvent.Type.CREATED, null, System.currentTimeMillis()));
             publish();
         }
-        void join(String p){ if(state==RoomState.CLOSED) throw failure("room closed"); if(members.containsKey(p)&&members.get(p).slot()!=PlayerSlot.LEFT) return; if(state!=RoomState.WAITING) throw failure("room not accepting joins"); if(members.values().stream().filter(m->m.slot()!=PlayerSlot.LEFT).count()>=capacity) throw failure("room full"); members.put(p,new RoomMember(p,PlayerSlot.JOINED,0)); stats=new RoomStats(stats.joins()+1,stats.leaves(),stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements()); emit(RoomEvent.Type.JOINED,p); }
-        void leave(String p){ if(members.remove(p)==null)return; stats=new RoomStats(stats.joins(),stats.leaves()+1,stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements());emit(RoomEvent.Type.LEFT,p); }
-        void disconnect(String p,long now){ RoomMember m=member(p); if(m.slot()==PlayerSlot.LEFT)return; members.put(p,new RoomMember(p,PlayerSlot.DISCONNECTED,now)); emit(RoomEvent.Type.DISCONNECTED,p); }
-        void reconnect(String p,long now){ RoomMember m=member(p); if(!m.reconnectable(now,window)) throw failure("reconnect window expired"); members.put(p,new RoomMember(p,state==RoomState.RUNNING?PlayerSlot.PLAYING:PlayerSlot.JOINED,0)); stats=new RoomStats(stats.joins(),stats.leaves(),stats.reconnects()+1,stats.readyChanges(),stats.starts(),stats.settlements());emit(RoomEvent.Type.RECONNECTED,p); }
-        void ready(String p){ RoomMember m=member(p); if(m.slot()!=PlayerSlot.JOINED) return; members.put(p,new RoomMember(p,PlayerSlot.READY,0));stats=new RoomStats(stats.joins(),stats.leaves(),stats.reconnects(),stats.readyChanges()+1,stats.starts(),stats.settlements());emit(RoomEvent.Type.READY_CHANGED,p); }
+        void requireOpen() { if (state == RoomState.CLOSED) throw failure("room closed"); }
+        void join(String p){ if(state==RoomState.CLOSED) throw failure("room closed"); if(members.containsKey(p)&&members.get(p).slot()==PlayerSlot.DISCONNECTED) throw failure("disconnected member must reconnect"); if(members.containsKey(p)&&members.get(p).slot()!=PlayerSlot.LEFT) return; if(state!=RoomState.WAITING) throw failure("room not accepting joins"); if(members.values().stream().filter(m->m.slot()!=PlayerSlot.LEFT).count()>=capacity) throw failure("room full"); members.put(p,new RoomMember(p,PlayerSlot.JOINED,0)); stats=new RoomStats(stats.joins()+1,stats.leaves(),stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements()); emit(RoomEvent.Type.JOINED,p); }
+        void leave(String p){ requireOpen(); if(members.remove(p)==null)return; stats=new RoomStats(stats.joins(),stats.leaves()+1,stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements());emit(RoomEvent.Type.LEFT,p); }
+        void disconnect(String p,long now){ requireOpen(); RoomMember m=member(p); if(m.slot()==PlayerSlot.LEFT)return; members.put(p,new RoomMember(p,PlayerSlot.DISCONNECTED,now)); emit(RoomEvent.Type.DISCONNECTED,p); }
+        void reconnect(String p,long now){ requireOpen(); RoomMember m=member(p); if(!m.reconnectable(now,window)) throw failure("reconnect window expired"); members.put(p,new RoomMember(p,state==RoomState.RUNNING?PlayerSlot.PLAYING:PlayerSlot.JOINED,0)); stats=new RoomStats(stats.joins(),stats.leaves(),stats.reconnects()+1,stats.readyChanges(),stats.starts(),stats.settlements());emit(RoomEvent.Type.RECONNECTED,p); }
+        void ready(String p){ requireOpen(); RoomMember m=member(p); if(m.slot()!=PlayerSlot.JOINED) return; members.put(p,new RoomMember(p,PlayerSlot.READY,0));stats=new RoomStats(stats.joins(),stats.leaves(),stats.reconnects(),stats.readyChanges()+1,stats.starts(),stats.settlements());emit(RoomEvent.Type.READY_CHANGED,p); }
         void start(){ if(state!=RoomState.WAITING||members.isEmpty()||members.values().stream().anyMatch(m->m.slot()!=PlayerSlot.READY)) throw failure("room not ready"); state=RoomState.RUNNING; members.replaceAll((p,m)->new RoomMember(p,PlayerSlot.PLAYING,0));stats=new RoomStats(stats.joins(),stats.leaves(),stats.reconnects(),stats.readyChanges(),stats.starts()+1,stats.settlements());emit(RoomEvent.Type.STARTED,null); }
         void close(){ if(state==RoomState.CLOSED)return; state=RoomState.CLOSED; emit(RoomEvent.Type.CLOSED,null); }
         Settlement settle(String k,String result){ Objects.requireNonNull(k);Objects.requireNonNull(result);if(settlementId!=null){if(settlementId.equals(k)&&settlementResult.equals(result))return new Settlement(k,settlementResult);throw failure("settlement already submitted");}if(state!=RoomState.RUNNING)throw failure("room not running");settlementId=k;settlementResult=result;state=RoomState.SETTLED;stats=new RoomStats(stats.joins(),stats.leaves(),stats.reconnects(),stats.readyChanges(),stats.starts(),stats.settlements()+1);emit(RoomEvent.Type.SETTLED,null);return new Settlement(k,result); }
         RoomMember member(String p){RoomMember m=members.get(p);if(m==null)throw failure("member not found");return m;}
         void emit(RoomEvent.Type type, String player) {
-            long eventSequence = type == RoomEvent.Type.CREATED ? seq : ++seq;
+            long eventSequence = ++seq;
             RoomEvent event = new RoomEvent(id, eventSequence, type, player, System.currentTimeMillis());
             // 先物化所有可能失败的快照；历史只在下一快照就绪后进入不可回滚的提交点。
             RoomView next = snapshotView();

@@ -39,8 +39,9 @@ final class SyncPayloadHash {
         if (value == null) {
             target.append("null");
         } else if (value instanceof Map<?, ?> map) {
+            // 键序列化携带类型标签，避免 Long 1 与 "1" 等不同类型的相同 toString 互相覆盖。
             TreeMap<String, Object> sorted = new TreeMap<>();
-            map.forEach((key, entry) -> sorted.put(String.valueOf(key), entry));
+            map.forEach((key, entry) -> sorted.put(canonicalKey(key), entry));
             target.append('{');
             boolean first = true;
             for (Map.Entry<String, Object> entry : sorted.entrySet()) {
@@ -64,6 +65,41 @@ final class SyncPayloadHash {
             escape(target, value.getClass().isArray()
                     ? Arrays.deepToString(new Object[] {value}) : Objects.toString(value));
         }
+    }
+
+    /** 为 Map 键生成带类型标签的 canonical 表示，保证不同类型不碰撞。 */
+    private static String canonicalKey(final Object key) {
+        if (key == null) {
+            return "null:";
+        }
+        if (key instanceof String string) {
+            return "string:" + string;
+        }
+        if (key instanceof Integer integer) {
+            return "int:" + integer;
+        }
+        if (key instanceof Long longValue) {
+            return "long:" + longValue;
+        }
+        if (key instanceof Short shortValue) {
+            return "short:" + shortValue;
+        }
+        if (key instanceof Byte byteValue) {
+            return "byte:" + byteValue;
+        }
+        if (key instanceof Boolean bool) {
+            return "bool:" + bool;
+        }
+        if (key instanceof Double doubleValue) {
+            return "double:" + doubleValue;
+        }
+        if (key instanceof Float floatValue) {
+            return "float:" + floatValue;
+        }
+        // 其它类型用完整 canonical 表示作为键，保证唯一性。
+        StringBuilder nested = new StringBuilder();
+        append(nested, key);
+        return "object:" + key.getClass().getName() + ":" + nested;
     }
 
     /** 只转义反斜杠与双引号，保持已有摘要字节格式。 */

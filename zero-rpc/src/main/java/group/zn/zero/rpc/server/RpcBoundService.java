@@ -1,7 +1,8 @@
 package group.zn.zero.rpc.server;
 
 import group.zn.zero.rpc.descriptor.RpcServiceDescriptor;
-import group.zn.zero.rpc.spi.RpcHandlerRegistry;
+import group.zn.zero.rpc.spi.RpcHandlerRegistration;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -14,7 +15,7 @@ public final class RpcBoundService implements AutoCloseable {
     /**
      * handler 注册表。
      */
-    private final RpcHandlerRegistry registry;
+    private final List<RpcHandlerRegistration> registrations;
 
     /**
      * 服务描述符。
@@ -29,12 +30,12 @@ public final class RpcBoundService implements AutoCloseable {
     /**
      * 创建已绑定 RPC 服务。
      *
-     * @param registry handler 注册表；不可为空。
+     * @param registrations 本次绑定独占的注册句柄；不可为空。
      * @param descriptor 服务描述符；不可为空。
      * @throws NullPointerException 当注册表或描述符为空时抛出。
      */
-    public RpcBoundService(final RpcHandlerRegistry registry, final RpcServiceDescriptor descriptor) {
-        this.registry = Objects.requireNonNull(registry, "registry");
+    public RpcBoundService(final List<RpcHandlerRegistration> registrations, final RpcServiceDescriptor descriptor) {
+        this.registrations = List.copyOf(registrations);
         this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
     }
 
@@ -62,12 +63,19 @@ public final class RpcBoundService implements AutoCloseable {
      * @throws RuntimeException 当底层注册表取消注册失败时抛出。
      */
     @Override
-    public void close() {
+    public synchronized void close() {
         if (!bound) {
             return;
         }
-        descriptor.methods().forEach(method ->
-                registry.unregister(method.routeServiceName(), method.routeMethodName()));
+        RuntimeException first = null;
+        for (RpcHandlerRegistration registration : registrations) {
+            try { registration.close(); }
+            catch (RuntimeException failure) {
+                if (first == null) first = failure;
+                else if (first != failure) first.addSuppressed(failure);
+            }
+        }
+        if (first != null) throw first;
         bound = false;
     }
 }

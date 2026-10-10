@@ -1,20 +1,15 @@
 package __PACKAGE__;
 
 import __PACKAGE__.generated.protocol.ProtocolIds;
-import __PACKAGE__.generated.protocol.dispatch.GeneratedProtocolDispatcher;
 import group.zn.zero.core.config.ZeroConfig;
 import group.zn.zero.core.config.ZeroConfigLoader;
-import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.log.LogAppender;
 import group.zn.zero.log.LogLevel;
 import group.zn.zero.log.LogOperation;
-import group.zn.zero.log.LogPipeline;
 import group.zn.zero.log.LogResult;
 import group.zn.zero.log.LogSource;
 import group.zn.zero.log.LogType;
 import group.zn.zero.log.ZeroLogRecord;
-import group.zn.zero.monitor.MetricDefinition;
-import group.zn.zero.monitor.MetricSample;
 import group.zn.zero.monitor.MonitorRuntime;
 import group.zn.zero.net.ConnectionListener;
 import group.zn.zero.net.IConnection;
@@ -22,7 +17,6 @@ import group.zn.zero.net.IServer;
 import group.zn.zero.net.ServerFactory;
 import group.zn.zero.net.ServerFrameHandler;
 import group.zn.zero.net.ServerOptions;
-import group.zn.zero.player.LocalPlayerService;
 import group.zn.zero.protocol.ProtocolFrame;
 import group.zn.zero.protocol.codec.ZeroBinaryFrameCodec;
 import group.zn.zero.runtime.actor.ActorRuntime;
@@ -32,7 +26,6 @@ import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
 import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
 import group.zn.zero.runtime.log.LogRuntime;
 import group.zn.zero.runtime.monitor.MonitorRuntimeComponent;
-import group.zn.zero.scene.LocalSceneService;
 import group.zn.zero.starter.ZeroServerTcpApplication;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -42,8 +35,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -102,11 +93,6 @@ public final class __SERVER_CLASS__ {
     private static final LogSource LOG_SOURCE = new LogSource("__PROJECT_NAME__", "__RUNTIME_PROFILE__", "server");
 
     /**
-     * Response flag marking a frame that could not be dispatched to business code.
-     */
-    private static final int FLAG_DISPATCH_FAILED = 1;
-
-    /**
      * Business thread name; the executor is created and owned by this class.
      */
     private static final String LOGIC_THREAD_NAME = "__PROJECT_NAME__-logic";
@@ -136,7 +122,7 @@ public final class __SERVER_CLASS__ {
                         server.bindAddress(), server.runtime());
                 System.out.println(result.summaryLine());
             } else {
-                awaitShutdown(appender);
+                LocalGameLifecycle.await(server, server.bindAddress());
             }
         }
     }
@@ -169,16 +155,14 @@ public final class __SERVER_CLASS__ {
     public static ZeroConfig overrides(final Map<String, String> overrides) {
         Objects.requireNonNull(overrides, "overrides");
         Map<String, String> values = new HashMap<>();
+        values.putAll(Map.ofEntries(__CONFIG_DEFAULTS__));
         values.put(ZeroRuntimeConfigKeys.ZERO_NAME, "__PROJECT_NAME__");
+        values.put(HOST_KEY, DEFAULT_HOST);
+        values.put(PORT_KEY, Integer.toString(DEFAULT_PORT));
+        values.put(MAX_FRAME_KEY, Integer.toString(DEFAULT_MAX_FRAME_LENGTH));
+        values.putAll(ZeroConfigLoader.loadStandard(values).asMap());
         values.putAll(overrides);
-        return ZeroConfigLoader.loadStandard(values);
-    }
-
-    private static void awaitShutdown(final LogAppender appender) throws InterruptedException {
-        CountDownLatch stop = new CountDownLatch(1);
-        Runtime.getRuntime().addShutdownHook(new Thread(stop::countDown, "zero-scaffold-shutdown"));
-        appender.append(log("run", "tcp listener running; stop the process to exit", "run"));
-        stop.await();
+        return new group.zn.zero.core.config.MapZeroConfig(values);
     }
 
     private static ZeroLogRecord log(final String operation, final String message, final String action) {
@@ -213,7 +197,8 @@ public final class __SERVER_CLASS__ {
          */
         private static final String MAX_FRAME_KEY = "zero.net.maxFrameLength";
 
-        private final LocalGameFixture fixture;
+        /** 本地业务服务资源，构造失败时也必须关闭。 */
+        private LocalGameFixture fixture;
 
         /** Executors created and owned by this composition. */
         private final ZeroRuntimeExecutors executors;
@@ -221,23 +206,22 @@ public final class __SERVER_CLASS__ {
         /**
          * Business runtime graph.
          */
-        private final GameRuntime runtime;
+        private GameRuntime runtime;
 
         /**
          * Generated dispatcher bound to the handwritten BO.
          */
-        private final GeneratedProtocolDispatcher dispatcher;
+        private final LocalGameFlow flow;
 
         /**
          * Network listener owned by this composition.
          */
         private final IServer listener;
-
-        /**
-         * Start/stop facade provided by the starter.
-         */
+        /** 复用框架启停事务。 */
         private final ZeroServerTcpApplication application;
 
+        /** 受同步生命周期方法保护，避免主线程和 shutdown hook 重复释放。 */
+        private boolean closed;
         /**
          * Handled frame counter.
          */
@@ -250,57 +234,40 @@ public final class __SERVER_CLASS__ {
 
         private Server(final ZeroConfig config) {
             Objects.requireNonNull(config, "config");
+            String host = config.get(HOST_KEY).orElse(DEFAULT_HOST);
+            if (!host.equals("127.0.0.1") && !host.equals("::1")) {
+                throw new IllegalArgumentException("local prototype accepts only literal loopback addresses");
+            }
             this.executors = ZeroRuntimeExecutors.singleThreaded(LOGIC_THREAD_NAME);
             try {
-                this.runtime = LocalGameFlow.createRuntime(config, new LogPipeline(List.of(), new InMemoryLogSink()));
+                this.runtime = LocalGameFlow.createRuntime(config, LocalGameObservation.consoleAppender());
                 MonitorRuntime monitor = runtime.require(MonitorRuntimeComponent.MONITOR_RUNTIME);
-                registerMetrics(monitor);
+
                 this.fixture = new LocalGameFixture(
                         runtime.require(ActorRuntime.ACTOR_SCHEDULER), uid -> "profile-" + uid);
-                this.dispatcher = dispatcher(fixture.playerService(), fixture.sceneService(), runtime, monitor);
-                this.listener = listener(config, dispatcher);
+                this.flow = new LocalGameFlow(fixture.playerService(), fixture.sceneService(),
+                        new LocalGameObservation(runtime.require(LogRuntime.LOG_APPENDER), monitor, LOG_SOURCE));
+                this.listener = listener(config, flow);
                 this.application = new ZeroServerTcpApplication(runtime, listener);
+
             } catch (RuntimeException failure) {
-                executors.close();
+                try { if (fixture != null) fixture.close(); } catch (RuntimeException cleanup) { failure.addSuppressed(cleanup); }
+                try { if (runtime != null) runtime.close(); } catch (RuntimeException cleanup) { failure.addSuppressed(cleanup); }
+                try { executors.close(); } catch (RuntimeException cleanup) { failure.addSuppressed(cleanup); }
                 throw failure;
             }
         }
 
-        private static void registerMetrics(final MonitorRuntime monitor) {
-            monitor.registry().register(new MetricDefinition(
-                    LocalGameObservation.commandMetric(),
-                    "local game command count",
-                    "count",
-                    List.of("action")));
-        }
-
-        private static GeneratedProtocolDispatcher dispatcher(
-                final LocalPlayerService players,
-                final LocalSceneService scenes,
-                final GameRuntime runtime,
-                final MonitorRuntime monitor) {
-            LogAppender appender = runtime.require(LogRuntime.LOG_APPENDER);
-            LocalGameBO business = LocalGameBO.forClientAdapter(players, scenes, (action, traceId) -> {
-                appender.append(ZeroLogRecord.create(Instant.now(), LogLevel.INFO, LogType.BUSINESS, LOG_SOURCE,
-                        new LogOperation(action, LogResult.SUCCESS, null), traceId,
-                        "tcp business event handled", Map.of("action", action)));
-                monitor.registry().record(new MetricSample(
-                        LocalGameObservation.commandMetric(), 1D, Map.of("action", action), Instant.now()));
-            });
-            GeneratedProtocolDispatcher generated = new GeneratedProtocolDispatcher();
-            generated.registerGameLoginEventBO(business);
-            generated.registerGameEnterSceneEventBO(business);
-            generated.registerGameMoveEventBO(business);
-            return generated;
-        }
-
-        private IServer listener(final ZeroConfig config, final GeneratedProtocolDispatcher generated) {
+        private IServer listener(final ZeroConfig config, final LocalGameFlow generated) {
             String host = config.get(HOST_KEY).orElse(DEFAULT_HOST);
+            if (!host.equals("127.0.0.1") && !host.equals("::1")) {
+                throw new IllegalArgumentException("local prototype accepts only literal loopback addresses");
+            }
             int port = config.get(PORT_KEY).map(Integer::parseInt).orElse(DEFAULT_PORT);
             int maxFrameLength = config.get(MAX_FRAME_KEY).map(Integer::parseInt)
                     .orElse(DEFAULT_MAX_FRAME_LENGTH);
             Executor executor = executors.logicExecutor();
-            return ServerFactory.tcp(
+            return ServerFactory.tcpUnmanaged(
                     ServerOptions.tcp(host, port).withIoThreads(1, 1).withMaxFrameLength(maxFrameLength),
                     new ZeroBinaryFrameCodec(),
                     frameHandler(generated),
@@ -314,27 +281,22 @@ public final class __SERVER_CLASS__ {
                     executor);
         }
 
-        private ServerFrameHandler frameHandler(final GeneratedProtocolDispatcher generated) {
+        private ServerFrameHandler frameHandler(final LocalGameFlow generated) {
             return (connection, frame) -> {
                 handled.incrementAndGet();
-                try {
-                    if (!generated.dispatch(frame.protocolId(), frame.payload())) {
+                return generated.dispatch(frame.protocolId(), frame.payload()).handle((value, failure) -> {
+                    if (failure != null) {
                         dispatchFailures.incrementAndGet();
-                        return CompletableFuture.completedFuture(List.of(errorFrame(frame, "no-handler")));
+                        return List.of(errorFrame(frame, LocalGameObservation.error(failure).code()));
                     }
-                } catch (RuntimeException failure) {
-                    dispatchFailures.incrementAndGet();
-                    return CompletableFuture.completedFuture(List.of(errorFrame(frame, "handler-failed")));
-                }
-                return CompletableFuture.completedFuture(List.of(frame));
+                    // 演示回包在业务真正完成后发出；协议仍是既有 DTO 回显。
+                    return List.of(frame);
+                });
             };
         }
 
         private static ProtocolFrame errorFrame(final ProtocolFrame request, final String reason) {
-            String message = "error|protocol=" + request.protocolId() + "|reason=" + reason;
-            return new ProtocolFrame(request.protocolId(), request.protocolVersion(),
-                    request.flags() | FLAG_DISPATCH_FAILED, request.extension(),
-                    message.getBytes(StandardCharsets.UTF_8));
+            return group.zn.zero.protocol.ProtocolErrorFrames.response(request, reason);
         }
 
         /**
@@ -361,7 +323,7 @@ public final class __SERVER_CLASS__ {
          * @return true while listening; thread-safe; read-only probe without side effects.
          */
         public boolean running() {
-            return application.probe();
+            return runtime.running() && application.probe();
         }
 
         /**
@@ -406,27 +368,35 @@ public final class __SERVER_CLASS__ {
          * @throws RuntimeException when the runtime or the listener fails to start; the runtime
          *                          is compensated and closed before the failure is rethrown.
          */
-        public void start() {
-            application.start();
+        public synchronized void start() {
+            if (closed) throw new IllegalStateException("server already closed");
+            try {
+                application.start();
+            } catch (RuntimeException failure) {
+                try { close(); } catch (RuntimeException cleanup) { failure.addSuppressed(cleanup); }
+                throw failure;
+            }
         }
 
         /**
          * Stops the listener, the runtime and the executors owned by this class.
          *
-         * <p>Idempotent: the second call only repeats executor shutdown. Exceptions from the
+         * <p>Idempotent: subsequent calls do not release resources again. Exceptions from the
          * listener and runtime are rethrown after executors are released.</p>
          */
         @Override
-        public void close() {
-            try {
-                application.close();
-            } finally {
-                try {
-                    fixture.close();
-                } finally {
-                    executors.close();
-                }
+        public synchronized void close() {
+            if (closed) return;
+            closed = true;
+            RuntimeException failure = null;
+            try { application.close(); } catch (RuntimeException cleanup) { failure = cleanup; }
+            try { fixture.close(); } catch (RuntimeException cleanup) {
+                if (failure == null) failure = cleanup; else failure.addSuppressed(cleanup);
             }
+            try { executors.close(); } catch (RuntimeException cleanup) {
+                if (failure == null) failure = cleanup; else failure.addSuppressed(cleanup);
+            }
+            if (failure != null) throw failure;
         }
     }
 

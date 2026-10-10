@@ -34,7 +34,7 @@ import org.junit.jupiter.api.Test;
 class RpcRemoteActorGatewayTest {
     /** 远程网关必须签名当前可信上下文，无上下文时不得发送。 */
     @Test void signedGatewayCarriesAuthenticatedMetadata() {
-        var assertion = group.zn.zero.security.SecurityMetadataAssertion.digest(new byte[]{1, 2, 3});
+        var assertion = group.zn.zero.security.SecurityMetadataAssertion.digest(java.util.Arrays.copyOf(new byte[]{1, 2, 3}, 32));
         var transport = new InMemoryRpcTransport();
         var captured = new AtomicReference<group.zn.zero.rpc.RpcRequest>();
         transport.register("actor", RpcRemoteActorGateway.DEFAULT_METHOD_NAME, request -> {

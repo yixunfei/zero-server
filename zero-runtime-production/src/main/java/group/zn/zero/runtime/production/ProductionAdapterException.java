@@ -19,6 +19,38 @@ public final class ProductionAdapterException extends ZeroException {
 
     /** 可信失败阶段。 */
     private final ProductionAdapterFailurePhase failurePhase;
+    /** 框架运行时失败的安全定位，不保留原始 Throwable。 */
+    private group.zn.zero.runtime.diagnostics.RuntimeFailurePhase runtimePhase;
+    /** 框架组件 ID。 */
+    private group.zn.zero.runtime.api.ComponentId componentId;
+    /** 框架已脱敏的装配报告。 */
+    private group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport runtimeReport;
+
+    /** 仅安全异常构造期间复制框架诊断字段。 */
+    void copyRuntimeDetails(final Throwable source) {
+        if (source instanceof group.zn.zero.runtime.diagnostics.RuntimeAssemblyException failure) {
+            runtimePhase = failure.phase();
+            componentId = failure.componentId().orElse(null);
+            runtimeReport = failure.report().orElse(null);
+        } else if (source instanceof ProductionAdapterException failure) {
+            runtimePhase = failure.runtimePhase;
+            componentId = failure.componentId;
+            runtimeReport = failure.runtimeReport;
+        }
+    }
+
+    /** 返回原运行时阶段；无对应框架失败时为空。线程安全，只读。 */
+    public java.util.Optional<group.zn.zero.runtime.diagnostics.RuntimeFailurePhase> runtimePhase() {
+        return java.util.Optional.ofNullable(runtimePhase);
+    }
+    /** 返回原运行时组件 ID；可能为空。线程安全，只读。 */
+    public java.util.Optional<group.zn.zero.runtime.api.ComponentId> componentId() {
+        return java.util.Optional.ofNullable(componentId);
+    }
+    /** 返回安全装配报告；可能为空，不含原始异常图。线程安全，只读。 */
+    public java.util.Optional<group.zn.zero.runtime.diagnostics.RuntimeAssemblyReport> runtimeReport() {
+        return java.util.Optional.ofNullable(runtimeReport);
+    }
 
     /**
      * 创建安全异常。

@@ -38,7 +38,12 @@ public final class NettyIoResources implements AutoCloseable {
         try {
             workers = NettyTransportFactory.eventLoops(transport, options.workerThreads());
         } catch (RuntimeException | Error failure) {
-            if (acceptors != null) acceptors.shutdownGracefully(0, CLOSE_SECONDS, TimeUnit.SECONDS);
+            if (acceptors != null) {
+                try { acceptors.shutdownGracefully(0, CLOSE_SECONDS, TimeUnit.SECONDS); }
+                catch (RuntimeException | Error cleanup) {
+                    if (cleanup != failure) failure.addSuppressed(cleanup);
+                }
+            }
             throw failure;
         }
         boss = acceptors;
@@ -75,8 +80,16 @@ public final class NettyIoResources implements AutoCloseable {
      */
     @Override public void close() {
         if (closed.compareAndSet(false, true)) {
-            if (boss != null) boss.shutdownGracefully(0, CLOSE_SECONDS, TimeUnit.SECONDS);
-            workers.shutdownGracefully(0, CLOSE_SECONDS, TimeUnit.SECONDS);
+            Throwable failure = null;
+            try { if (boss != null) boss.shutdownGracefully(0, CLOSE_SECONDS, TimeUnit.SECONDS); }
+            catch (RuntimeException | Error cause) { failure = cause; }
+            try { workers.shutdownGracefully(0, CLOSE_SECONDS, TimeUnit.SECONDS); }
+            catch (RuntimeException | Error cause) {
+                if (failure == null) failure = cause;
+                else if (failure != cause) failure.addSuppressed(cause);
+            }
+            if (failure instanceof Error error) throw error;
+            if (failure instanceof RuntimeException exception) throw exception;
         }
         if (!inEventLoop()) await(termination);
     }

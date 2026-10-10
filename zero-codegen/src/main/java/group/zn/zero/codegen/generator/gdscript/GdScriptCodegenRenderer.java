@@ -37,7 +37,7 @@ public final class GdScriptCodegenRenderer extends AbstractTemplateCodegenRender
      * @param request 代码生成请求；不可为空。
      */
     public void render(final CodegenRequest request) {
-        GeneratedOutputPlan outputs = new GeneratedOutputPlan();
+        GeneratedOutputPlan outputs = group.zn.zero.codegen.generator.OutputPlans.forLanguage(request, CodegenLanguage.GDSCRIPT);
         render(request, outputs);
         outputs.apply();
     }
@@ -51,6 +51,7 @@ public final class GdScriptCodegenRenderer extends AbstractTemplateCodegenRender
     public void render(final CodegenRequest request, final GeneratedOutputPlan outputs) {
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(outputs, "outputs");
+        group.zn.zero.codegen.generator.TargetNames.validate(request, CodegenLanguage.GDSCRIPT);
         Path root = request.outputDir(CodegenLanguage.GDSCRIPT);
         String namespace = request.namespace(CodegenLanguage.GDSCRIPT);
         String dtoSuffix = request.dtoSuffix(CodegenLanguage.GDSCRIPT);
@@ -288,7 +289,7 @@ public final class GdScriptCodegenRenderer extends AbstractTemplateCodegenRender
         if (comment == null || comment.isBlank()) {
             return defaultValue;
         }
-        return comment;
+        return comment.replace("\\", "&#92;").replace("*/", "* /").replace("\r", " ").replace("\n", " ").replace("\u2028", " ").replace("\u2029", " ");
     }
 
     private Map<String, Object> baseModel(final String namespace) {

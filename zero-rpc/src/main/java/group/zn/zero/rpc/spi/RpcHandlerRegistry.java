@@ -1,11 +1,24 @@
 package group.zn.zero.rpc.spi;
 
+import group.zn.zero.core.error.ZeroException;
+import group.zn.zero.rpc.error.RpcErrorCode;
+
 /**
  * RPC handler 注册表。
  *
  * @author zn
  */
 public interface RpcHandlerRegistry {
+
+    /**
+     * 独占注册空闲路由并返回所有权句柄；已有路由必须拒绝，失败不得遗留注册。
+     * 线程安全；不支持精确所有权的自定义注册表应拒绝，不能模拟无条件 unregister。
+     */
+    default RpcHandlerRegistration registerScoped(String serviceName, String methodName, String topic,
+            String group, RpcHandler handler) {
+        throw ZeroException.of(RpcErrorCode.CONTRACT_INVALID,
+                "registry must implement scoped registration for service binding", null);
+    }
 
     /**
      * 注册 RPC 请求处理器。

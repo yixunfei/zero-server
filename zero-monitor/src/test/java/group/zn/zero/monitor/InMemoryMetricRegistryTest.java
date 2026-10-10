@@ -28,7 +28,7 @@ class InMemoryMetricRegistryTest {
                 "zero_test_total",
                 "测试次数",
                 "count",
-                List.of("module", "result")));
+                List.of("module", "result"), group.zn.zero.monitor.MetricType.COUNTER));
 
         registry.record(new MetricSample(
                 "zero_test_total",
@@ -53,28 +53,28 @@ class InMemoryMetricRegistryTest {
                 "zero_test_total",
                 "测试次数",
                 "count",
-                List.of("module", "result"));
+                List.of("module", "result"), group.zn.zero.monitor.MetricType.COUNTER);
 
         registry.register(definition);
         registry.register(new MetricDefinition(
                 "zero_test_total",
                 "测试次数",
                 "count",
-                List.of("module", "result")));
+                List.of("module", "result"), group.zn.zero.monitor.MetricType.COUNTER));
 
         assertEquals(List.of(definition), registry.definitions());
         assertErrorCode(
                 MonitorErrorCode.METRIC_DEFINITION_CONFLICT,
                 () -> registry.register(new MetricDefinition(
-                        "zero_test_total", "other", "count", List.of("module", "result"))));
+                        "zero_test_total", "other", "count", List.of("module", "result"), group.zn.zero.monitor.MetricType.COUNTER)));
         assertErrorCode(
                 MonitorErrorCode.METRIC_DEFINITION_CONFLICT,
                 () -> registry.register(new MetricDefinition(
-                        "zero_test_total", "测试次数", "seconds", List.of("module", "result"))));
+                        "zero_test_total", "测试次数", "seconds", List.of("module", "result"), group.zn.zero.monitor.MetricType.COUNTER)));
         assertErrorCode(
                 MonitorErrorCode.METRIC_DEFINITION_CONFLICT,
                 () -> registry.register(new MetricDefinition(
-                        "zero_test_total", "测试次数", "count", List.of("result", "module"))));
+                        "zero_test_total", "测试次数", "count", List.of("result", "module"), group.zn.zero.monitor.MetricType.COUNTER)));
     }
 
     /**
@@ -100,7 +100,7 @@ class InMemoryMetricRegistryTest {
     void registryShouldRequireExactLabelSchema() {
         InMemoryMetricRegistry registry = new InMemoryMetricRegistry();
         registry.register(new MetricDefinition(
-                "zero_test_total", "测试次数", "count", List.of("module", "result")));
+                "zero_test_total", "测试次数", "count", List.of("module", "result"), group.zn.zero.monitor.MetricType.COUNTER));
         LinkedHashMap<String, String> reversed = new LinkedHashMap<>();
         reversed.put("result", "success");
         reversed.put("module", "zero-test");
@@ -152,14 +152,14 @@ class InMemoryMetricRegistryTest {
         assertErrorCode(
                 MonitorErrorCode.METRIC_LABEL_FORBIDDEN,
                 () -> permissiveRegistry.register(new MetricDefinition(
-                        "zero_test_total", "测试次数", "count", List.of("TRACE_ID"))));
+                        "zero_test_total", "测试次数", "count", List.of("TRACE_ID"), group.zn.zero.monitor.MetricType.COUNTER)));
         assertErrorCode(
                 MonitorErrorCode.METRIC_LABEL_FORBIDDEN,
                 () -> registry.register(new MetricDefinition(
-                        "zero_test_total", "测试次数", "count", List.of("tenant"))));
+                        "zero_test_total", "测试次数", "count", List.of("tenant"), group.zn.zero.monitor.MetricType.COUNTER)));
 
         MetricDefinition definition = new MetricDefinition(
-                "zero_test_total", "测试次数", "count", List.of("module"));
+                "zero_test_total", "测试次数", "count", List.of("module"), group.zn.zero.monitor.MetricType.COUNTER);
         MetricLabelPolicy samplePolicy = new MetricLabelPolicy() {
             @Override
             public boolean allowsSampleLabel(

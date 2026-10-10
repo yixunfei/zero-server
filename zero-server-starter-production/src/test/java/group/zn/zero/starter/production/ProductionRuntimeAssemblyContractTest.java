@@ -106,7 +106,7 @@ class ProductionRuntimeAssemblyContractTest {
             var kafkaConfig = runtime.plan().config().stream()
                     .filter(metadata -> StandardRuntimeCapabilityModel.PRODUCTION_KAFKA_RPC.equals(metadata.owner()))
                     .toList();
-            assertEquals(8, kafkaConfig.size());
+            assertEquals(9, kafkaConfig.size());
             assertEquals(5, kafkaConfig.stream().filter(metadata -> metadata.sensitive()).count());
 
             var kafkaStatus = runtime.report().components().stream()
@@ -315,7 +315,7 @@ class ProductionRuntimeAssemblyContractTest {
 
         assertConfigMetadata(runtime, group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_REDIS_RESOURCE, 1, 1);
         assertConfigMetadata(runtime, group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_REDIS_DATA, 0, 0);
-        assertConfigMetadata(runtime, group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_REDIS_CACHE, 2, 2);
+        assertConfigMetadata(runtime, group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_REDIS_CACHE, 3, 2);
         Set<Class<?>> dataServiceTypes = runtime.requireAll(DataRuntime.DATA_SERVICES)
                 .stream()
                 .map(Object::getClass)

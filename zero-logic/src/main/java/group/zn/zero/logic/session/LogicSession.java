@@ -25,7 +25,7 @@ public final class LogicSession {
     /**
      * 会话属性。
      */
-    private final LogicSessionAttributes attributes;
+    private final DefaultLogicSessionAttributes attributes;
 
     /**
      * 创建业务逻辑会话。
@@ -74,4 +74,8 @@ public final class LogicSession {
     public LogicSessionAttributes attributes() {
         return attributes;
     }
+    /** @return 会话是否已关闭；线程安全，读取用于诊断。 */
+    public boolean isClosed() { return attributes.isClosed(); }
+    void close() { attributes.close(); }
+    void markRequest() { attributes.markRequest(); }
 }

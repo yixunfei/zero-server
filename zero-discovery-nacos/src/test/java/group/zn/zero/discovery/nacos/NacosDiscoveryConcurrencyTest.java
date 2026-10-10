@@ -34,6 +34,68 @@ class NacosDiscoveryConcurrencyTest {
 
     private static final long WAIT_SECONDS = 5L;
 
+    @Test
+    void invalidatedInFlightLookupCannotRepopulateOldSnapshot() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var calls = new AtomicInteger();
+        var callback = new AtomicReference<EventListener>();
+        NamingService client = namingService((proxy, method, args) -> switch (method.getName()) {
+            case "getServerStatus" -> "UP";
+            case "subscribe" -> { callback.set((EventListener) args[3]); yield null; }
+            case "getAllInstances", "selectInstances" -> {
+                int call = calls.incrementAndGet();
+                if (call == 1) { entered.countDown(); await(release); }
+                yield List.of(sdkInstance(call == 1 ? "old" : "new", "blue", true));
+            }
+            default -> defaultValue(method.getReturnType());
+        });
+        var adapter = new NacosDiscoveryAdapter(settings(Map.of("zero.discovery.nacos.lookup-cache-ttl-millis", "60000")),
+                ignored -> client);
+        var done = new CompletableFuture<Void>();
+        Thread queryThread = null;
+        adapter.start();
+        try {
+            adapter.subscribe(new ServiceQuery("logic-service", ServiceDiscoveryConstants.DEFAULT_GROUP_NAME,
+                    List.of(), false, true), event -> { });
+            queryThread = start(() -> adapter.lookup("logic-service"), done);
+            assertTrue(entered.await(WAIT_SECONDS, TimeUnit.SECONDS));
+            callback.get().onEvent(event());
+            release.countDown();
+            done.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            assertEquals("new", adapter.lookup("logic-service").getFirst().instanceId());
+            assertEquals(2, calls.get());
+        } finally {
+            release.countDown();
+            join(queryThread);
+            adapter.stop();
+        }
+    }
+
+    @Test
+    void listenerFailuresRetainOnlyRecentImmutableOrderedHistory() {
+        var callback = new AtomicReference<EventListener>();
+        NamingService client = namingService((proxy, method, args) -> switch (method.getName()) {
+            case "getServerStatus" -> "UP";
+            case "subscribe" -> { callback.set((EventListener) args[3]); yield null; }
+            default -> defaultValue(method.getReturnType());
+        });
+        var adapter = new NacosDiscoveryAdapter(settings(), ignored -> client);
+        var count = new AtomicInteger();
+        adapter.start();
+        try {
+            adapter.subscribe(new ServiceQuery("logic-service", ServiceDiscoveryConstants.DEFAULT_GROUP_NAME,
+                    List.of(), false, true), event -> { throw new IllegalStateException("failure-" + count.incrementAndGet()); });
+            for (int i = 0; i < 300; i++) callback.get().onEvent(event());
+            var failures = adapter.listenerFailures();
+            assertEquals(256, failures.size());
+            assertEquals(300, adapter.listenerFailureCount());
+            assertEquals(44, adapter.droppedListenerFailureCount());
+            assertEquals("failure-45", failures.getFirst().getCause().getMessage());
+            assertThrows(UnsupportedOperationException.class, failures::clear);
+        } finally { adapter.stop(); }
+    }
+
     /** 远端注册未返回时，停止必须等待本地提交后再清理。 */
     @Test
     void stopWaitsForRegistrationCommit() throws Exception {
@@ -69,7 +131,8 @@ class NacosDiscoveryConcurrencyTest {
             registerThread = start(() -> adapter.register(instance()), registered);
             assertTrue(remoteRegisterEntered.await(WAIT_SECONDS, TimeUnit.SECONDS));
             stopThread = start(adapter::stop, stopped);
-            Thread.sleep(50L);
+            assertThrows(java.util.concurrent.TimeoutException.class,
+                    () -> stopped.get(100L, TimeUnit.MILLISECONDS));
             assertFalse(stopped.isDone());
             assertEquals(List.of("register"), calls);
 
@@ -81,6 +144,52 @@ class NacosDiscoveryConcurrencyTest {
         } finally {
             releaseRemoteRegister.countDown();
             join(registerThread);
+            join(stopThread);
+            adapter.stop();
+        }
+    }
+
+    /** 停止已进入清理时，句柄关闭由停止流程统一处理，不并发调用正在关闭的 SDK。 */
+    @Test
+    void subscriptionCloseDuringStopDoesNotAdmitAnotherSdkOperation() throws Exception {
+        var unsubscribeEntered = new CountDownLatch(1);
+        var releaseUnsubscribe = new CountDownLatch(1);
+        var calls = new CopyOnWriteArrayList<String>();
+        NamingService client = namingService((proxy, method, arguments) -> switch (method.getName()) {
+            case "getServerStatus" -> "UP";
+            case "unsubscribe" -> {
+                String service = (String) arguments[0];
+                calls.add("unsubscribe:" + service);
+                if (service.equals("first")) {
+                    unsubscribeEntered.countDown();
+                    await(releaseUnsubscribe);
+                }
+                yield null;
+            }
+            case "shutDown" -> {
+                calls.add("shutdown");
+                yield null;
+            }
+            default -> defaultValue(method.getReturnType());
+        });
+        var adapter = new NacosDiscoveryAdapter(settings(), ignored -> client);
+        var stopped = new CompletableFuture<Void>();
+        Thread stopThread = null;
+        adapter.start();
+        try {
+            adapter.subscribe(new ServiceQuery("first", ServiceDiscoveryConstants.DEFAULT_GROUP_NAME,
+                    List.of(), false, true), event -> { });
+            ServiceSubscription second = adapter.subscribe(new ServiceQuery("second",
+                    ServiceDiscoveryConstants.DEFAULT_GROUP_NAME, List.of(), false, true), event -> { });
+            stopThread = start(adapter::stop, stopped);
+            assertTrue(unsubscribeEntered.await(WAIT_SECONDS, TimeUnit.SECONDS));
+            second.close();
+            assertEquals(List.of("unsubscribe:first"), calls);
+            releaseUnsubscribe.countDown();
+            stopped.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            assertEquals(List.of("unsubscribe:first", "unsubscribe:second", "shutdown"), calls);
+        } finally {
+            releaseUnsubscribe.countDown();
             join(stopThread);
             adapter.stop();
         }

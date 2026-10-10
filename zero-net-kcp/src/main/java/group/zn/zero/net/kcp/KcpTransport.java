@@ -5,6 +5,7 @@ import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 import java.util.function.LongConsumer;
 import java.util.function.LongPredicate;
 
@@ -35,11 +36,15 @@ final class KcpTransport implements AutoCloseable {
     /** @return 最近认证的数据类型。 */
     int type() { return wire.lastType(); }
     void input(final int type, final ByteBuf body, final Consumer<ByteBuf> deliver) {
-        if (type == KcpDatagramCodec.DATA && (!body.isReadable() || fec == null)) deliver.accept(body);
+        input(type, body, (payload, recovered) -> deliver.accept(payload));
+    }
+    /** 入站数据并标记是否由 FEC 恢复；恢复段在迁移静默期仍可完成可靠接收。 */
+    void input(final int type, final ByteBuf body, final BiConsumer<ByteBuf, Boolean> deliver) {
+        if (type == KcpDatagramCodec.DATA && (!body.isReadable() || fec == null)) deliver.accept(body, false);
         else if (type == KcpDatagramCodec.FEC && fec != null) {
             fec.input(ByteBufUtil.getBytes(body), System.nanoTime(), bytes -> {
                 ByteBuf recovered = Unpooled.wrappedBuffer(bytes);
-                try { deliver.accept(recovered); } finally { recovered.release(); }
+                try { deliver.accept(recovered, true); } finally { recovered.release(); }
             });
         } else metric.accept("reject.packet_type");
     }

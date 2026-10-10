@@ -1,5 +1,4 @@
 import java.io.IOException;
-import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -81,24 +80,20 @@ public final class VerifyPublicApiCompatibility {
 
     private static void inspectClass(
             final String module, final String className, final List<String> output) {
-        try {
-            Process process = new ProcessBuilder(
-                    "javap", "-classpath", Path.of(module, "target", "classes").toString(),
-                    "-public", className).redirectErrorStream(true).start();
-            String text = new String(process.getInputStream().readAllBytes(),
-                    java.nio.charset.StandardCharsets.UTF_8);
-            if (process.waitFor() != 0) {
-                throw new IllegalStateException("javap failed for " + module + ":" + className);
+        var tool = java.util.spi.ToolProvider.findFirst("javap")
+                .orElseThrow(() -> new IllegalStateException("JDK javap tool is unavailable"));
+        var text = new java.io.StringWriter();
+        var writer = new java.io.PrintWriter(text);
+        int exit = tool.run(writer, writer, "-classpath", Path.of(module, "target", "classes").toString(),
+                "-public", className);
+        if (exit != 0) {
+            throw new IllegalStateException("javap failed for " + module + ":" + className + ": " + text);
+        }
+        for (String line : text.toString().split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("public ") || trimmed.startsWith("protected ")) {
+                output.add(trimmed);
             }
-            for (String line : text.split("\\R")) {
-                String trimmed = line.trim();
-                if (trimmed.startsWith("public ") || trimmed.startsWith("protected ")) {
-                    output.add(trimmed);
-                }
-            }
-        } catch (IOException | InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("cannot inspect " + module + ":" + className, exception);
         }
     }
 

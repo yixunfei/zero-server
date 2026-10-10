@@ -24,6 +24,50 @@ class NettyIoResourcesTest {
     /** 统一测试传输预算。 */
     private static final ServerOptions OPTIONS = ServerOptions.tcp("127.0.0.1", 0).withIoThreads(1, 1);
 
+    @Test void startupErrorKeepsOriginalAndRollsBackResourcesWithoutClosingBorrowedIo() throws Exception {
+        try (var io = NettyIoResources.open(OPTIONS)) {
+            var original = io.boss();
+            var failure = new AssertionError("register failed");
+            var field = NettyIoResources.class.getDeclaredField("boss");
+            field.setAccessible(true);
+            field.set(io, java.lang.reflect.Proxy.newProxyInstance(getClass().getClassLoader(),
+                    new Class<?>[]{io.netty.channel.EventLoopGroup.class}, (proxy, method, args) -> {
+                        if (method.getName().equals("register")) throw failure;
+                        try { return method.invoke(original, args); }
+                        catch (java.lang.reflect.InvocationTargetException cause) { throw cause.getCause(); }
+                    }));
+            var server = echo(OPTIONS, io);
+            try {
+                org.junit.jupiter.api.Assertions.assertSame(failure, assertThrows(AssertionError.class, server::doStart));
+                var resources = NettyTcpServer.class.getDeclaredField("resources");
+                resources.setAccessible(true);
+                org.junit.jupiter.api.Assertions.assertNull(resources.get(server));
+                assertFalse(io.snapshot().closing());
+            } finally { field.set(io, original); server.doStop(); }
+        }
+    }
+
+    @Test void failedBossShutdownStillClosesWorkersAndKeepsOriginalError() throws Exception {
+        var io = NettyIoResources.open(OPTIONS);
+        var boss = io.boss();
+        var failure = new AssertionError("boss shutdown failed");
+        var field = NettyIoResources.class.getDeclaredField("boss");
+        field.setAccessible(true);
+        field.set(io, java.lang.reflect.Proxy.newProxyInstance(getClass().getClassLoader(),
+                new Class<?>[]{io.netty.channel.EventLoopGroup.class}, (proxy, method, args) -> {
+                    try {
+                        Object result = method.invoke(boss, args);
+                        if (method.getName().equals("shutdownGracefully")) throw failure;
+                        return result;
+                    } catch (java.lang.reflect.InvocationTargetException cause) { throw cause.getCause(); }
+                }));
+        try {
+            org.junit.jupiter.api.Assertions.assertSame(failure, assertThrows(AssertionError.class, io::close));
+            io.termination().toCompletableFuture().get(3, TimeUnit.SECONDS);
+            assertTrue(io.workers().isTerminated());
+        } finally { field.set(io, boss); io.close(); }
+    }
+
     @Test void stoppingOneServerClosesItsChildrenWithoutStoppingSharedPeers() throws Exception {
         try (var io = NettyIoResources.open(OPTIONS)) {
             var first = echo(OPTIONS, io);

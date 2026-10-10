@@ -64,6 +64,18 @@ public record ZeroDataEnvelope(
         return Arrays.copyOf(payload, payload.length);
     }
 
+    /**
+     * 精确比较信封内容，包含编码时间和所有版本，不分配 payload 副本或改变 record 相等语义。
+     * @param other 待比较的信封；可为空。
+     * @return 所有元数据及 payload 字节一致时为 true；线程安全，不修改信封。
+     */
+    public boolean contentEquals(final ZeroDataEnvelope other) {
+        return other != null && namespace.equals(other.namespace) && collection.equals(other.collection)
+                && id.equals(other.id) && version == other.version && schemaVersion == other.schemaVersion
+                && codecVersion == other.codecVersion && encodedAtEpochMillis == other.encodedAtEpochMillis
+                && Arrays.equals(payload, other.payload);
+    }
+
     private static String requireText(final String value, final String name) {
         String current = Objects.requireNonNull(value, name);
         if (current.isBlank()) {

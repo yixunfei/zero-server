@@ -270,7 +270,11 @@ public final class ZeroDataEnvelopeCrudRepository<ID, T extends VersionedEntity<
 
     /** 在调用者所属执行域编码不可变快照，避免 IO 线程读取正在变更的 Actor 实体。 */
     private ZeroDataEnvelopeStore.ConditionalWrite prepareWrite(final T entity) {
-        T current = checkedEntity(entityCodec.prepareForSave(entity));
+        T current = checkedEntity(entity);
+        if (current.id() == null && !entityCodec.metadata().compositeKey()) {
+            throw ZeroException.of(DataErrorCode.INVALID_ENTITY,
+                    "assign and retain the entity id before save using codec.prepareForSave", null);
+        }
         long expectedVersion = current.version();
         T persisted = entityCodec.withVersion(current, expectedVersion + 1L);
         return new ZeroDataEnvelopeStore.ConditionalWrite(entityCodec.encode(persisted), expectedVersion);
@@ -304,7 +308,7 @@ public final class ZeroDataEnvelopeCrudRepository<ID, T extends VersionedEntity<
     }
 
     private ZeroException mappedFailure(final Throwable failure, final ErrorCode fallback, final String message) {
-        return ZeroException.of(errorCode(failure, fallback), message(failure, message), failure);
+        return ZeroException.of(errorCode(failure, fallback), message, failure);
     }
 
     private List<T> decodeAll(final List<ZeroDataEnvelope> envelopes) {
@@ -333,12 +337,6 @@ public final class ZeroDataEnvelopeCrudRepository<ID, T extends VersionedEntity<
         return fallback;
     }
 
-    private String message(final Throwable exception, final String fallback) {
-        if (exception.getCause() instanceof ZeroException zeroException) {
-            return zeroException.getMessage();
-        }
-        String message = exception.getMessage();
-        return message == null || message.isBlank() ? fallback : message;
-    }
+
 
 }

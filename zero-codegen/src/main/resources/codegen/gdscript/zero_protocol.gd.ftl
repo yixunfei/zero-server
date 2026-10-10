@@ -343,19 +343,26 @@ class ZeroReader:
         reader_index = object_end
         limit = object_limits.pop_back()
 
-    func read_presence_bits() -> Array:
+    # known_field_count 必须来自可信 schema；仅展开已知位并跳过未知位图尾部。
+    func read_presence_bits(known_field_count: int) -> Array:
+        if known_field_count < 0 or known_field_count > 0x7fffffff:
+            _fail("invalid schema nullable field count")
+            return []
         var field_count := read_unsigned_int()
         var byte_count := int((field_count + 7) / 8)
         if not _require_readable(byte_count):
             return []
         var values := []
-        values.resize(field_count)
-        for byte_index in range(byte_count):
+        var known_count: int = min(field_count, known_field_count)
+        values.resize(known_count)
+        var known_bytes := int((known_count + 7) / 8)
+        for byte_index in range(known_bytes):
             var word := _read_raw_byte()
             var base := byte_index * 8
-            var end: int = min(field_count, base + 8)
+            var end: int = min(known_count, base + 8)
             for bit_index in range(base, end):
                 values[bit_index] = ((word >> (bit_index - base)) & 1) != 0
+        reader_index += byte_count - known_bytes
         return values
 
     func read_raw_varint32() -> int:
@@ -450,7 +457,7 @@ ${field.writeCode}</#if>
         var object_end := reader.begin_object()
         var message := ${message.name}.new()
 <#if message.hasNullableFields>
-        var presence := reader.read_presence_bits() if reader.has_remaining_in_object(object_end) else []
+        var presence := reader.read_presence_bits(${message.nullableFieldCount?c}) if reader.has_remaining_in_object(object_end) else []
 </#if>
 <#list message.readFields as field>
 <#if field.nullable>

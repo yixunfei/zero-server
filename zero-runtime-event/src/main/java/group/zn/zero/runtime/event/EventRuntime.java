@@ -6,6 +6,7 @@ import group.zn.zero.event.deadletter.DeadLetterSink;
 import group.zn.zero.event.deadletter.InMemoryDeadLetterSink;
 import group.zn.zero.runtime.api.ComponentKey;
 import group.zn.zero.runtime.assembly.RuntimeModule;
+import group.zn.zero.runtime.bootstrap.RuntimeBasics;
 import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
 import group.zn.zero.runtime.spi.ComponentContribution;
 import group.zn.zero.runtime.spi.ComponentDescriptor;
@@ -13,6 +14,7 @@ import group.zn.zero.runtime.spi.ComponentKind;
 import group.zn.zero.runtime.spi.RuntimeComponentProvider;
 import group.zn.zero.runtime.spi.RuntimeProviders;
 import java.util.List;
+import java.time.Clock;
 
 /** Explicit event bindings and lazy local providers. */
 public final class EventRuntime {
@@ -34,8 +36,11 @@ public final class EventRuntime {
                         .provide(DEAD_LETTER_SINK).kind(ComponentKind.LOCAL).build(), context ->
                         ComponentContribution.builder().bind(DEAD_LETTER_SINK, new InMemoryDeadLetterSink()).build()),
                 RuntimeProviders.create(ComponentDescriptor.builder(StandardRuntimeCapabilityModel.LOCAL_EVENT_BUS)
-                        .provide(EVENT_BUS).require(DEAD_LETTER_SINK).kind(ComponentKind.LOCAL).build(), context ->
+                        .provide(EVENT_BUS).require(DEAD_LETTER_SINK).require(RuntimeBasics.EXECUTORS)
+                        .kind(ComponentKind.LOCAL).build(), context ->
                         ComponentContribution.builder().bind(EVENT_BUS,
-                                new InMemoryEventBus(context.require(DEAD_LETTER_SINK))).build()));
+                                new InMemoryEventBus(context.require(DEAD_LETTER_SINK),
+                                        Clock.systemUTC(),
+                                        context.require(RuntimeBasics.EXECUTORS).backgroundExecutor())).build()));
     }
 }

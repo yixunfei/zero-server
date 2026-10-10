@@ -16,6 +16,9 @@ import java.util.Objects;
  */
 public final class InMemoryMetricRegistry implements MetricRegistry {
 
+    /** 静态定义目录上限；满时保留旧定义并拒绝新名称。 */
+    private static final int MAX_DEFINITIONS = 4096;
+
     /**
      * 不增加额外限制的标签策略。
      */
@@ -92,6 +95,10 @@ public final class InMemoryMetricRegistry implements MetricRegistry {
                     MonitorErrorCode.METRIC_DEFINITION_CONFLICT,
                     "registered definition differs from candidate",
                     null);
+        }
+        if (definitions.size() >= MAX_DEFINITIONS) {
+            throw MetricContract.failure(MonitorErrorCode.METRIC_DEFINITION_INVALID,
+                    "metric definition capacity exceeded", null);
         }
         validateDefinitionPolicy(current);
         definitions.put(current.name(), current);
@@ -194,13 +201,7 @@ public final class InMemoryMetricRegistry implements MetricRegistry {
     }
 
     private void appendEscapedLabel(final StringBuilder builder, final String value) {
-        for (int index = 0; index < value.length(); index++) {
-            char current = value.charAt(index);
-            if (current == '\\' || current == '"') {
-                builder.append('\\');
-            }
-            builder.append(current);
-        }
+        MetricTextEscaper.append(builder, value, true);
     }
 
     private void validateDefinitionPolicy(final MetricDefinition definition) {

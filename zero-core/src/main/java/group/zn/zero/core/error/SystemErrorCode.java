@@ -17,6 +17,9 @@ public enum SystemErrorCode implements ErrorCode {
      */
     SYSTEM_ERROR(ErrorCategory.SYSTEM, "ZERO-SYSTEM-ERROR", "system error"),
 
+    /** 服务端配置缺失、不可读或格式非法。 */
+    CONFIGURATION_ERROR(ErrorCategory.SYSTEM, "ZERO-CONFIGURATION-ERROR", "configuration error"),
+
     /**
      * 参数非法。
      */

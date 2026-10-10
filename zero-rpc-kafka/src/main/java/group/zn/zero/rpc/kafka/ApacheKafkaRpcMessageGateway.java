@@ -398,6 +398,8 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
         properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
         properties.put(ProducerConfig.ACKS_CONFIG, "all");
+        // 预留 record batch 与请求元数据开销；broker/topic 的消息预算仍须由部署配置对齐。
+        properties.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, KafkaRpcEnvelopeCodec.MAX_ENVELOPE_BYTES + 1024 * 1024);
         append(properties, settings.producerProperties());
         return properties;
     }
@@ -414,7 +416,10 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
         properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
-        properties.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 100);
+        properties.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1);
+        // fetch 是软上限，broker 首个超大 record batch 可以超过该预算；消息另受 codec 上限约束。
+        properties.put(ConsumerConfig.FETCH_MAX_BYTES_CONFIG, 32 * 1024 * 1024);
+        properties.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, 20 * 1024 * 1024);
         properties.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, 300_000);
         append(properties, settings.consumerProperties());
         // 处理确认是网关契约，扩展属性不得重新打开自动提交。
@@ -685,6 +690,10 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
          * 最近一次 worker 运行异常。
          */
         private volatile RuntimeException lastWorkerException;
+        /** 重启等待独立于 consumer 唤醒，关闭时可立即结束退避。 */
+        private final java.util.concurrent.CountDownLatch stopping = new java.util.concurrent.CountDownLatch(1);
+        /** 连续重启退避；只有稳定运行一分钟后复位。 */
+        private long restartDelayMillis = 100;
 
         /**
          * 创建 topic worker。
@@ -765,6 +774,7 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
         void requestStop(final KafkaRpcCloseDeadline deadline) {
             closeDeadline.compareAndSet(null, Objects.requireNonNull(deadline, "deadline"));
             running.set(false);
+            stopping.countDown();
             Consumer<String, byte[]> current = consumer;
             if (current != null) {
                 try {
@@ -831,6 +841,7 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
         }
 
         private void runConsumer() {
+            long startedAt = System.nanoTime();
             Consumer<String, byte[]> current = createConsumer();
             KafkaRpcResourceException failure = null;
             consumer = current;
@@ -842,6 +853,9 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
                     ConsumerRecords<String, byte[]> records = current.poll(settings.pollTimeout());
                     if (!records.isEmpty()) {
                         batch.track(records, dispatch(records));
+                    }
+                    if (System.nanoTime() - startedAt >= java.util.concurrent.TimeUnit.MINUTES.toNanos(1)) {
+                        restartDelayMillis = 100;
                     }
                 }
             } catch (WakeupException ex) {
@@ -1046,7 +1060,9 @@ final class ApacheKafkaRpcMessageGateway implements KafkaRpcMessageGateway {
                 return;
             }
             try {
-                Thread.sleep(settings.pollTimeout().toMillis());
+                long delay = Math.max(100, Math.min(30_000, restartDelayMillis));
+                restartDelayMillis = Math.min(30_000, delay * 2);
+                stopping.await(delay, java.util.concurrent.TimeUnit.MILLISECONDS);
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
                 running.set(false);

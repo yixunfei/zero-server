@@ -50,7 +50,7 @@ class MapZeroConfigTest {
 
         ZeroException ex = assertThrows(ZeroException.class, () -> config.require("server.id"));
 
-        assertEquals(SystemErrorCode.INVALID_ARGUMENT, ex.errorCode());
+        assertEquals(SystemErrorCode.CONFIGURATION_ERROR, ex.errorCode());
     }
 
     /**

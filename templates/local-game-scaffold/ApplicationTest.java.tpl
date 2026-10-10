@@ -24,8 +24,8 @@ class __TEST_CLASS__ {
                 () -> assertEquals(1001L, result.uid()),
                 () -> assertEquals(3, result.position().x()),
                 () -> assertEquals(5, result.position().y()),
-                () -> assertEquals(4, result.logCount()),
-                () -> assertEquals(2, result.metricCount()),
+                () -> assertEquals(7, result.logCount()),
+                () -> assertEquals(6, result.metricCount()),
                 () -> assertEquals(90105, result.maxProtocolId()),
                 () -> assertTrue(summary.startsWith("local-game=ok|mode=__RUNTIME_PROFILE__|name=__PROJECT_NAME__")),
                 () -> assertTrue(summary.endsWith("|maxProtocolId=90105")));

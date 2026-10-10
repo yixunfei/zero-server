@@ -113,6 +113,9 @@
         </profile>
         <profile>
             <id>performance-gate</id>
+            <modules>
+                <module>zero-benchmarks</module>
+            </modules>
         </profile>
     </profiles>
 </project>

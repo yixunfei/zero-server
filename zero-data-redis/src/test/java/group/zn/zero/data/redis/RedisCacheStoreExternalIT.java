@@ -20,6 +20,24 @@ import redis.clients.jedis.RedisClient;
  * @author zn
  */
 class RedisCacheStoreExternalIT {
+    /** 同版本同内容重放成功且不延长 TTL；不同内容必须冲突。仅使用本测试 UUID 键。 */
+    @Test void identicalReplayPreservesOriginalExpiry() {
+        try (RedisClient client = new RedisDataAdapter().createClient(RedisDriverSettings.fromSystemProperties())) {
+            var store = new RedisCacheStore<String, String>(client, "audit", "replay", new StringCacheValueCodec());
+            String key = java.util.UUID.randomUUID().toString();
+            Instant expiry = Instant.now().plusSeconds(60);
+            try {
+                assertTrue(store.putIfVersion(key, new CacheStoreEntry<>("value", 1, 7, expiry, false))
+                        .toCompletableFuture().join());
+                assertTrue(store.putIfVersion(key, new CacheStoreEntry<>("value", 2, 7,
+                        expiry.plusSeconds(60), false)).toCompletableFuture().join());
+                assertFalse(store.putIfVersion(key, entry("conflict", 7)).toCompletableFuture().join());
+                assertEquals(expiry.toEpochMilli(), store.get(key).toCompletableFuture().join()
+                        .orElseThrow().expiresAt().toEpochMilli());
+            } finally { store.invalidate(key).toCompletableFuture().join(); }
+        }
+    }
+
     /** 全 long 范围的相邻版本不能经 Lua double 转换后混同。 */
     @Test void adjacentLargeVersionsRemainDistinct() {
         try (RedisClient client = new RedisDataAdapter().createClient(RedisDriverSettings.fromSystemProperties())) {

@@ -40,6 +40,9 @@ public record AlertRule(
         severity = Objects.requireNonNull(severity, "severity");
         labels = Map.copyOf(Objects.requireNonNull(labels, "labels"));
         holdFor = Objects.requireNonNull(holdFor, "holdFor");
+        if (!Double.isFinite(threshold)) {
+            throw new IllegalArgumentException("threshold must be finite");
+        }
         if (holdFor.isNegative()) {
             throw new IllegalArgumentException("holdFor must not be negative");
         }

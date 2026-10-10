@@ -315,6 +315,12 @@ class ProductionNetworkLifecycleFocusedTest {
             assertEquals(0, fixture.businessCalls.get());
             assertTrue(fixture.observedEvent(ConnectionLifecycleEventType.FRAME_REJECTED));
             assertTrue(fixture.observedReason(ConnectionRejectionReason.REPLAY_DETECTED));
+            fixture.runPending();
+            ProtocolFrame rejected = fixture.channel.readOutbound();
+            assertEquals(2, rejected.protocolId());
+            assertEquals(group.zn.zero.protocol.ProtocolFeature.ERROR.mask(), rejected.flags());
+            assertTrue(new String(rejected.payload(), java.nio.charset.StandardCharsets.UTF_8)
+                    .contains(NetErrorCode.REPLAY_DETECTED.code()));
         }
     }
 

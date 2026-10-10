@@ -33,7 +33,7 @@ public final class RpcRuntime {
     public static List<RuntimeComponentProvider> providers() {
         return List.of(RuntimeProviders.create(ComponentDescriptor.builder(StandardRuntimeCapabilityModel.LOCAL_RPC)
                 .provide(RPC_TRANSPORT).provide(RPC_HANDLER_REGISTRY).kind(ComponentKind.LOCAL).build(), context -> {
-                    InMemoryRpcTransport transport = new InMemoryRpcTransport();
+                    InMemoryRpcTransport transport = context.resources().register(new InMemoryRpcTransport());
                     return ComponentContribution.builder().bind(RPC_TRANSPORT, transport)
                             .bind(RPC_HANDLER_REGISTRY, transport).build();
                 }));

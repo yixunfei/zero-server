@@ -98,7 +98,8 @@ public sealed class ZeroWriter
     /// <summary>写入 UTF-8 字符串。</summary>
     public void WriteString(string value)
     {
-        byte[] bytes = Encoding.UTF8.GetBytes(value ?? string.Empty);
+        if (value == null) throw new ArgumentNullException(nameof(value));
+        byte[] bytes = Encoding.UTF8.GetBytes(value);
         WriteByteArray(bytes);
     }
 
@@ -496,23 +497,27 @@ public sealed class ZeroReader
         limit = objectLimits.Pop();
     }
 
-    /// <summary>读取 nullable 字段 presence bitmap。</summary>
-    public bool[] ReadPresenceBits()
+    /// <summary>仅展开可信 schema 已知的 nullable 位，校验并跳过未知位图尾部。</summary>
+    public bool[] ReadPresenceBits(int knownFieldCount)
     {
+        if (knownFieldCount < 0) throw new ArgumentOutOfRangeException(nameof(knownFieldCount));
         int fieldCount = ReadUnsignedInt();
         int byteCount = (int)(((long)fieldCount + 7) / 8);
         RequireReadable(byteCount);
-        bool[] values = new bool[fieldCount];
-        for (int byteIndex = 0; byteIndex < byteCount; byteIndex++)
+        int knownCount = Math.Min(fieldCount, knownFieldCount);
+        bool[] values = new bool[knownCount];
+        int knownBytes = (int)(((long)knownCount + 7) / 8);
+        for (int byteIndex = 0; byteIndex < knownBytes; byteIndex++)
         {
             int word = ReadRawByte();
             int baseIndex = byteIndex * 8;
-            int end = Math.Min(fieldCount, baseIndex + 8);
+            int end = baseIndex + Math.Min(knownCount - baseIndex, 8);
             for (int bitIndex = baseIndex; bitIndex < end; bitIndex++)
             {
                 values[bitIndex] = ((word >> (bitIndex - baseIndex)) & 1) != 0;
             }
         }
+        readerIndex += byteCount - knownBytes;
         return values;
     }
 

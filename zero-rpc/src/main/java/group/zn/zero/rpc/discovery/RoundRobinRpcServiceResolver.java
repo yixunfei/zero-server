@@ -116,7 +116,8 @@ public final class RoundRobinRpcServiceResolver implements RpcServiceResolver {
         if (!instance.serviceName().equals(query.serviceName()) || instance.serviceVersion() != query.serviceVersion()) {
             return false;
         }
-        if (!query.transport().isBlank() && !instance.transport().equals(query.transport())) {
+        // 清理时必须精确匹配 transport：query 不指定 transport 时不同 transport 的实例不属于同一 scope。
+        if (!instance.transport().equals(query.transport())) {
             return false;
         }
         if (!instance.groupName().equals(query.groupName())) {

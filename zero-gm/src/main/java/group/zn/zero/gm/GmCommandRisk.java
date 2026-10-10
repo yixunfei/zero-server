@@ -25,5 +25,11 @@ public enum GmCommandRisk {
     /**
      * 必须额外审批或人工复核的危险操作。
      */
-    CRITICAL
+    CRITICAL;
+
+    /** @return HIGH/CRITICAL 必须审批；无数据变更，线程安全。 */
+    public boolean requiresApproval() { return this == HIGH || this == CRITICAL; }
+
+    /** @return CRITICAL 必须可信第二人复核；无数据变更，线程安全。 */
+    public boolean requiresDualReview() { return this == CRITICAL; }
 }

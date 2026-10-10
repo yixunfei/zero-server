@@ -27,6 +27,33 @@ class DurableSubmissionLifecycleTest {
     /** 每测试独占日志目录。 */
     @TempDir Path directory;
 
+    @Test void executorRejectionBeforeAppendIsNotDurableButRejectedReplayKeepsPending() throws Exception {
+        var reject = new java.util.concurrent.atomic.AtomicBoolean(true);
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            java.util.concurrent.Executor io = task -> {
+                if (reject.get()) throw new java.util.concurrent.RejectedExecutionException("full");
+                worker.execute(task);
+            };
+            var service = service(new DeferredBinding(CompletableFuture.completedFuture(null)), io);
+            try {
+                assertThrows(java.util.concurrent.ExecutionException.class, () -> service.submit("before", "p", 0,
+                        DataThreadBinding.unbound(), this::envelope).toCompletableFuture().get(2, TimeUnit.SECONDS));
+                assertTrue(service.records().isEmpty());
+                reject.set(false);
+                service.submit("accepted", "p", 0, DataThreadBinding.unbound(), this::envelope)
+                        .toCompletableFuture().get(2, TimeUnit.SECONDS);
+                reject.set(true);
+                assertThrows(java.util.concurrent.ExecutionException.class,
+                        () -> service.flushNow(1).toCompletableFuture().get(2, TimeUnit.SECONDS));
+                assertEquals(DurableRecord.State.PENDING, service.records().getFirst().state());
+            } finally { reject.set(false); service.close(); }
+        }
+        try (var journal = new LocalDurableJournal(directory, 1_000_000, 10)) {
+            assertEquals("accepted", journal.records().getFirst().operationId());
+            assertEquals(DurableRecord.State.PENDING, journal.records().getFirst().state());
+        }
+    }
+
     /** 取消调用者句柄不取消已接受的捕获，关闭必须等待其刷盘完成。 */
     @Test void closeWaitsForAcceptedCaptureDespiteCallerCancellation() throws Exception {
         var gate = new CompletableFuture<Void>();

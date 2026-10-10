@@ -18,6 +18,23 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class LogRuntimeTest {
+    /** provider 创建的有状态终端由 runtime 关闭且只关闭一次。 */
+    @Test void runtimeClosesOwnedTerminalSink() {
+        var sink = new ClosingSink();
+        var runtime = RuntimeBasics.builder().install(LogRuntime.module(() -> sink)).build();
+        runtime.start();
+        runtime.close();
+        runtime.close();
+        assertEquals(1, sink.closes);
+    }
+
+    /** 可观察关闭次数的测试终端。 */
+    private static final class ClosingSink implements group.zn.zero.log.LogSink, AutoCloseable {
+        /** 关闭次数。 */
+        private int closes;
+        @Override public void append(final ZeroLogRecord record) { }
+        @Override public void close() { closes++; }
+    }
     @Test
     void pipelineUsesSelectedConfigurationAndSinkWithoutCreatingReplacedDefault() {
         AtomicInteger defaults = new AtomicInteger();

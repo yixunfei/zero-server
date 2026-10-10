@@ -79,7 +79,7 @@ public final class JavaCodegenRenderer {
      * @throws ZeroException 生成失败时抛出，必须绑定 ErrorCode。
      */
     public void render(final CodegenRequest request) {
-        GeneratedOutputPlan outputs = new GeneratedOutputPlan();
+        GeneratedOutputPlan outputs = group.zn.zero.codegen.generator.OutputPlans.forLanguage(request, CodegenLanguage.JAVA);
         render(request, outputs);
         outputs.apply();
     }
@@ -93,6 +93,7 @@ public final class JavaCodegenRenderer {
     public void render(final CodegenRequest request, final GeneratedOutputPlan outputs) {
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(outputs, "outputs");
+        group.zn.zero.codegen.generator.TargetNames.validate(request, CodegenLanguage.JAVA);
         JavaLayout layout = JavaLayout.from(request);
         String dtoSuffix = request.dtoSuffix(CodegenLanguage.JAVA);
         JavaProjectModel project = new JavaProjectModel(request.document().messages());
@@ -247,9 +248,9 @@ public final class JavaCodegenRenderer {
             final boolean implementation,
             final String dtoSuffix) {
         String packageName = implementation ? layout.boImplPackage() : layout.boPackage();
-        Set<String> imports = methodImports(packageName, layout.dtoPackage(), methods, dtoSuffix);
+        Set<String> imports = methodImports(layout.dtoPackage(), methods, dtoSuffix);
         if (implementation) {
-            addImport(imports, packageName, layout.boPackage() + "." + boName);
+            imports.add(layout.boPackage() + "." + boName);
         }
         Map<String, Object> model = baseModel(packageName);
         model.put("imports", List.copyOf(imports));
@@ -276,18 +277,16 @@ public final class JavaCodegenRenderer {
         imports.add("group.zn.zero.protocol.buffer.ZeroReader");
         imports.add("group.zn.zero.core.error.ZeroException");
         imports.add("group.zn.zero.protocol.error.ProtocolErrorCode");
-        addImport(imports, layout.dispatcherPackage(), layout.protocolPackage() + ".ProtocolIds");
+        imports.add(layout.protocolPackage() + ".ProtocolIds");
         imports.add("java.util.HashMap");
         imports.add("java.util.Map");
         imports.add("java.util.Objects");
         Map<String, List<ProtocolMethod>> grouped = new LinkedHashMap<>();
         for (ProtocolMethod method : methods) {
             grouped.computeIfAbsent(method.boName(), ignored -> new ArrayList<>()).add(method);
-            addImport(imports, layout.dispatcherPackage(),
-                    layout.dtoPackage() + "." + dtoName(method.requestMessage(), dtoSuffix));
-            addImport(imports, layout.dispatcherPackage(), layout.boPackage() + "." + method.boName());
-            addImport(imports, layout.dispatcherPackage(),
-                    layout.codecPackage() + "." + dtoName(method.requestMessage(), dtoSuffix) + "Codec");
+            imports.add(layout.dtoPackage() + "." + dtoName(method.requestMessage(), dtoSuffix));
+            imports.add(layout.boPackage() + "." + method.boName());
+            imports.add(layout.codecPackage() + "." + dtoName(method.requestMessage(), dtoSuffix) + "Codec");
         }
 
         List<Map<String, Object>> registrations = new ArrayList<>();
@@ -326,9 +325,9 @@ public final class JavaCodegenRenderer {
         imports.add("group.zn.zero.protocol.buffer.ZeroWriter");
         imports.add("group.zn.zero.protocol.codec.ZeroPayloadCodec");
         imports.add("java.util.Objects");
-        addImport(imports, layout.codecPackage(), layout.dtoPackage() + "." + dtoName(message.name(), dtoSuffix));
+        imports.add(layout.dtoPackage() + "." + dtoName(message.name(), dtoSuffix));
         for (ProtocolField field : message.fields()) {
-            addTypeImports(layout.codecPackage(), layout.dtoPackage(), field.type(), imports, dtoSuffix);
+            addTypeImports(layout.dtoPackage(), field.type(), imports, dtoSuffix);
         }
 
         List<ProtocolField> nullableFields = nullableFields(message.fields());
@@ -413,22 +412,21 @@ public final class JavaCodegenRenderer {
     }
 
     private Set<String> methodImports(
-            final String packageName,
             final String dtoPackage,
             final List<ProtocolMethod> methods,
             final String dtoSuffix) {
         Set<String> imports = new TreeSet<>();
         for (ProtocolMethod method : methods) {
             if (!method.expandedParameters()) {
-                addImport(imports, packageName, dtoPackage + "." + dtoName(method.requestMessage(), dtoSuffix));
+                imports.add(dtoPackage + "." + dtoName(method.requestMessage(), dtoSuffix));
             } else {
                 for (ProtocolField parameter : method.parameters()) {
                     typeMapper.fieldType(parameter, imports, dtoSuffix);
-                    addTypeImports(packageName, dtoPackage, parameter.type(), imports, dtoSuffix);
+                    addTypeImports(dtoPackage, parameter.type(), imports, dtoSuffix);
                 }
             }
             if (!method.responseMessage().isBlank()) {
-                addImport(imports, packageName, dtoPackage + "." + dtoName(method.responseMessage(), dtoSuffix));
+                imports.add(dtoPackage + "." + dtoName(method.responseMessage(), dtoSuffix));
             }
         }
         return imports;
@@ -445,14 +443,13 @@ public final class JavaCodegenRenderer {
     }
 
     private void addTypeImports(
-            final String packageName,
             final String dtoPackage,
             final ProtocolType type,
             final Set<String> imports,
             final String dtoSuffix) {
         switch (type.kind()) {
-            case ENUM -> addImport(imports, packageName, dtoPackage + "." + type.name());
-            case MESSAGE -> addImport(imports, packageName, dtoPackage + "." + dtoName(type.name(), dtoSuffix));
+            case ENUM -> imports.add(dtoPackage + "." + type.name());
+            case MESSAGE -> imports.add(dtoPackage + "." + dtoName(type.name(), dtoSuffix));
             case LIST -> imports.add("java.util.List");
             case SET -> imports.add("java.util.Set");
             case MAP -> imports.add("java.util.Map");
@@ -461,7 +458,7 @@ public final class JavaCodegenRenderer {
             }
         }
         for (ProtocolType argument : type.arguments()) {
-            addTypeImports(packageName, dtoPackage, argument, imports, dtoSuffix);
+            addTypeImports(dtoPackage, argument, imports, dtoSuffix);
         }
     }
 
@@ -709,10 +706,15 @@ public final class JavaCodegenRenderer {
     }
 
     private String renderTemplate(final String templateName, final Map<String, Object> model) {
+        // 先校验所有简单类型引用（含同包类型），再省略输出中冗余的同包 import。
+        JavaCompilationUnitNames.validate(templateName, model);
+        Map<String, Object> renderModel = new LinkedHashMap<>(model);
+        renderModel.put("imports", ((List<?>) model.get("imports")).stream().map(String.class::cast)
+                .filter(name -> !name.substring(0, name.lastIndexOf('.')).equals(model.get("packageName"))).toList());
         try {
             Template template = configuration.getTemplate(templateName);
             StringWriter writer = new StringWriter(4096);
-            template.process(model, writer);
+            template.process(renderModel, writer);
             return writer.toString();
         } catch (IOException | TemplateException ex) {
             throw ZeroException.of(
@@ -728,17 +730,6 @@ public final class JavaCodegenRenderer {
         model.put("packageName", packageName);
         model.put("imports", List.of());
         return model;
-    }
-
-    private static void addImport(final Set<String> imports, final String packageName, final String fullyQualifiedName) {
-        int packageEnd = fullyQualifiedName.lastIndexOf('.');
-        if (packageEnd <= 0) {
-            return;
-        }
-        String importPackage = fullyQualifiedName.substring(0, packageEnd);
-        if (!packageName.equals(importPackage)) {
-            imports.add(fullyQualifiedName);
-        }
     }
 
     private static Path packageDir(final Path outputDir, final String packageName) {
@@ -762,7 +753,7 @@ public final class JavaCodegenRenderer {
             return "Set.of()";
         }
         List<String> names = new ArrayList<>();
-        for (ProtocolFeature feature : features) {
+        for (ProtocolFeature feature : java.util.Arrays.stream(ProtocolFeature.values()).filter(features::contains).toList()) {
             names.add("ProtocolFeature." + feature.name());
         }
         return "Set.of(" + String.join(", ", names) + ")";
@@ -826,7 +817,7 @@ public final class JavaCodegenRenderer {
         if (comment == null || comment.isBlank()) {
             return defaultValue;
         }
-        return comment;
+        return comment.replace("\\", "&#92;").replace("*/", "* /").replace("\r", " ").replace("\n", " ").replace("\u2028", " ").replace("\u2029", " ");
     }
 
     private void appendLine(final StringBuilder builder, final String indent, final String line) {

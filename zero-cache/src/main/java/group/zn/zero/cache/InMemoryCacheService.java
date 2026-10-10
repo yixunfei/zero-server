@@ -22,6 +22,11 @@ import java.util.concurrent.atomic.LongAdder;
  * <p>支持自动加载、版本号、失效、防击穿和负缓存防穿透。该实现用于本地原型和测试，
  * 不承担生产级分布式一致性职责。
  *
+ * <p>并发回源背压语义：同一键的并发回源通过单飞表合并，不同键的并发回源总数受
+ * {@code maxConcurrentLoads} 信号量限制；许可耗尽时对全新键立即抛出
+ * {@link CacheErrorCode#BACKPRESSURE_REJECTED}，不排队等待。这是有意的快速失败设计，
+ * 与 {@link CacheLoadCoordinator} 语义一致，调用方应按限流信号处理。
+ *
  * @param <K> 缓存键类型。
  * @param <V> 缓存值类型。
  * @author zn
@@ -55,6 +60,8 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
 
     /** 在途加载许可，独立于因显式更新而脱离单飞表的旧加载。 */
     private final Semaphore loadPermits;
+    /** 单飞登记与准入的线性化锁；仅 miss 注册使用，不在锁内回源或完成 future。 */
+    private final Object loadAdmissionLock = new Object();
 
     /**
      * 命中次数。
@@ -169,6 +176,8 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
      * @param key 缓存键；不可为空。
      * @param loader 加载器；不可为空。
      * @return 缓存值；为空表示加载器确认不存在；线程安全。
+     * @throws ZeroException 当并发回源许可耗尽且该键无在途单飞加载时抛出，
+     *         绑定 {@link CacheErrorCode#BACKPRESSURE_REJECTED}。
      */
     public CompletionStage<Optional<V>> getOrLoad(final K key, final CacheLoader<K, V> loader) {
         Objects.requireNonNull(loader, "loader");
@@ -178,23 +187,16 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
             return CompletableFuture.completedFuture(entry.optionalValue());
         }
         missCount.increment();
-        CompletableFuture<Optional<V>> existing = loading.get(key);
-        if (existing != null) {
-            return existing;
-        }
-        if (!loadPermits.tryAcquire()) {
-            existing = loading.get(key);
-            if (existing != null) {
-                return existing;
+        CompletableFuture<Optional<V>> future;
+        synchronized (loadAdmissionLock) {
+            CompletableFuture<Optional<V>> existing = loading.get(key);
+            if (existing != null) return existing;
+            if (!loadPermits.tryAcquire()) {
+                throw ZeroException.of(CacheErrorCode.BACKPRESSURE_REJECTED,
+                        "cache loader rejected by maxConcurrentLoads", null);
             }
-            throw ZeroException.of(CacheErrorCode.BACKPRESSURE_REJECTED,
-                    "cache loader rejected by maxConcurrentLoads", null);
-        }
-        CompletableFuture<Optional<V>> future = new CompletableFuture<>();
-        existing = loading.putIfAbsent(key, future);
-        if (existing != null) {
-            loadPermits.release();
-            return existing;
+            future = new CompletableFuture<>();
+            loading.put(key, future);
         }
         CompletableFuture<Optional<V>> boundedLoad = new CompletableFuture<>();
         AtomicBoolean permitReleased = new AtomicBoolean();
@@ -293,6 +295,10 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(value, "value");
         updateEntry(key, previous -> {
+            if (previous != null && version >= 0 && version < previous.version()) {
+                throw group.zn.zero.core.error.ZeroException.of(CacheErrorCode.VERSION_CONFLICT,
+                        "cache version must not decrease", null);
+            }
             loading.remove(key);
             return new CacheEntry<>(value, version < 0L ? nextVersion(previous) : version,
                     Instant.now().plus(effectiveTtl(policy.ttl())), false);
@@ -394,15 +400,12 @@ public class InMemoryCacheService<K, V> implements CacheService<K, V> {
         });
     }
 
-    /** 同一锁内校验条目身份与实体版本，异步 L2 操作不得删除期间更新的条目。 */
-    boolean invalidateEntry(final K key, final CacheEntry<V> expected, final long entityVersion) {
+    /** 同一锁内失效当前同版或旧版条目，保护期间回填的更新版本。 */
+    boolean invalidateEntry(final K key, final long entityVersion) {
         synchronized (evictionLock) {
             CacheEntry<V> current = entries.get(Objects.requireNonNull(key, "key"));
             if (current != null && current.entityVersion() > entityVersion) {
                 return false;
-            }
-            if (current != expected) {
-                return current == null;
             }
             entries.remove(key);
             insertionOrder.remove(key);

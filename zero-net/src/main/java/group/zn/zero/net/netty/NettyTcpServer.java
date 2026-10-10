@@ -267,11 +267,14 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
             boundAddress.set((InetSocketAddress) serverChannel.localAddress());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            shutdownGroups();
+            cleanupAfterFailure(ex);
             throw ZeroException.of(NetErrorCode.START_FAILED, "start netty tcp server interrupted", ex);
         } catch (Exception ex) {
-            shutdownGroups();
+            cleanupAfterFailure(ex);
             throw ZeroException.of(NetErrorCode.START_FAILED, "start netty tcp server failed", ex);
+        } catch (Error failure) {
+            cleanupAfterFailure(failure);
+            throw failure;
         }
     }
 
@@ -288,8 +291,16 @@ public final class NettyTcpServer extends AbstractLifecycle implements IServer {
 
     private void shutdownGroups() {
         if (resources != null) {
-            resources.close();
+            NettyServerResources current = resources;
             resources = null;
+            current.close();
+        }
+    }
+
+    private void cleanupAfterFailure(final Throwable failure) {
+        try { shutdownGroups(); }
+        catch (RuntimeException | Error cleanup) {
+            if (cleanup != failure) failure.addSuppressed(cleanup);
         }
     }
 

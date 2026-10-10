@@ -17,6 +17,16 @@ import java.io.DataOutputStream;
  * @author zn
  */
 class RedisCacheEnvelopeCodecTest {
+    /** 有效完整帧之后的额外字节属于损坏数据，不能静默接受。 */
+    @Test void rejectsTrailingBytes() {
+        var codec = new RedisCacheEnvelopeCodec();
+        var envelope = new RedisCacheEnvelope(1, 1, 1, "string", 1, 2, false, new byte[] {1});
+        byte[] encoded = codec.encode(envelope);
+        byte[] trailing = java.util.Arrays.copyOf(encoded, encoded.length + 1);
+        assertEquals(CacheErrorCode.DESERIALIZE_FAILED,
+                assertThrows(ZeroException.class, () -> codec.decode(trailing)).errorCode());
+    }
+
 
     /**
      * 验证正常缓存信封可以往返编码。

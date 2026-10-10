@@ -65,11 +65,11 @@ class SyncPayloadReuseTest {
     /** 固定 canonical 字节验证标量、排序、数组、嵌套空值及转义不改变历史 hash。 */
     @Test
     void hashesRetainCanonicalFormat() throws Exception {
-        assertHash(Map.of("value", 1), "{\"value\":\"1\"}");
-        assertHash(Map.of("b", true, "a", "x"), "{\"a\":\"x\",\"b\":\"true\"}");
-        assertHash(Map.of("array", new int[] {1, 2}), "{\"array\":\"[[1, 2]]\"}");
-        assertHash(Map.of("items", Arrays.asList(null, 1)), "{\"items\":[null,\"1\"]}");
-        assertHash(Map.of("quote", "a\"b\\c"), "{\"quote\":\"a\\\"b\\\\c\"}");
+        assertHash(Map.of("value", 1), "{\"string:value\":\"1\"}");
+        assertHash(Map.of("b", true, "a", "x"), "{\"string:a\":\"x\",\"string:b\":\"true\"}");
+        assertHash(Map.of("array", new int[] {1, 2}), "{\"string:array\":\"[[1, 2]]\"}");
+        assertHash(Map.of("items", Arrays.asList(null, 1)), "{\"string:items\":[null,\"1\"]}");
+        assertHash(Map.of("quote", "a\"b\\c"), "{\"string:quote\":\"a\\\"b\\\\c\"}");
         Map<String, Object> normal = Map.of("nested", Map.of("z", 9, "a", List.of(1, 2)));
         assertEquals(envelope(normal, "one").payloadHash(),
                 envelope(SyncEnvelope.preparePayload(normal), "two").payloadHash());
@@ -85,7 +85,7 @@ class SyncPayloadReuseTest {
                 hashes.add(executor.submit(() -> envelope(Map.of("value", value), "o").payloadHash()));
             }
             for (int index = 0; index < hashes.size(); index++) {
-                assertEquals(sha256("{\"value\":\"" + index + "\"}"), hashes.get(index).get());
+                assertEquals(sha256("{\"string:value\":\"" + index + "\"}"), hashes.get(index).get());
             }
         }
     }

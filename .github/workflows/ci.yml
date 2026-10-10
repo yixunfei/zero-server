@@ -1,5 +1,9 @@
 name: CI
 
+defaults:
+  run:
+    shell: bash
+
 permissions:
   contents: read
 
@@ -67,9 +71,9 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Validate Maven model
-        run: mvn -B -ntp -DskipTests validate
+        run: ./mvnw -B -ntp -DskipTests validate
       - name: Run unit tests
-        run: mvn -B -ntp test
+        run: ./mvnw -B -ntp test
 
   quality:
     name: Quality gate
@@ -83,7 +87,9 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Run quality profile
-        run: mvn -B -ntp -Pquality verify
+        run: ./mvnw -B -ntp -Pquality verify
+      - name: Verify codegen modes and failure exits
+        run: java scripts/VerifyCodegenModes.java
 
   integration:
     name: Local integration tests
@@ -97,7 +103,7 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Run local integration profile
-        run: mvn -B -ntp -Pintegration-tests verify
+        run: ./mvnw -B -ntp -Pintegration-tests verify
 
   architecture:
     name: Architecture and repository evidence
@@ -112,6 +118,8 @@ jobs:
           cache: maven
       - name: Run architecture guard
         run: java scripts/ZeroArchitectureGuard.java
+      - name: Verify dependency guard positive and negative fixtures
+        run: java scripts/VerifyDependencyGuard.java
       - name: Verify framework gap ledger
         run: java scripts/ZeroFrameworkGapLedger.java
       - name: Verify release readiness materials
@@ -166,8 +174,8 @@ jobs:
           set -euxo pipefail
           chmod +x scripts/zero.sh
           java -version
-          mvn -version
-          mvn -B -ntp -DskipTests install
+          ./mvnw -version
+          ./mvnw -B -ntp -DskipTests install
           mkdir -p target/cross-platform
           ZERO_MAVEN_CMD=mvn java scripts/ZeroUnifiedEntryVerifier.java --full-smoke > target/cross-platform/posix-verifier.log
       - name: Run full unified entry smoke on Windows
@@ -176,10 +184,14 @@ jobs:
         run: |
           $env:ZERO_MAVEN_CMD = 'mvn.cmd'
           java -version
-          mvn -version
-          mvn -B -ntp -DskipTests install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./mvnw -version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./mvnw -B -ntp -DskipTests install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           mkdir target\cross-platform -Force
           java scripts\ZeroUnifiedEntryVerifier.java --full-smoke *>&1 | Tee-Object -FilePath target\cross-platform\windows-verifier.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload cross-platform evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -246,7 +258,7 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Run explicitly provisioned external environment
-        run: mvn -B -ntp -Pexternal-tests verify
+        run: ./mvnw -B -ntp -Pexternal-tests verify
         env:
           EXTERNAL_MIDDLEWARE_ENDPOINTS: ${{ secrets.EXTERNAL_MIDDLEWARE_ENDPOINTS }}
 

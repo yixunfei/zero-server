@@ -131,12 +131,12 @@ public final class ProductionNetworkTelemetryObserver implements ConnectionLifec
                 CONNECTION_EVENTS_TOTAL,
                 "Production connection events",
                 "count",
-                List.of("listener", "protocol", "event", "result")));
+                List.of("listener", "protocol", "event", "result"), group.zn.zero.monitor.MetricType.COUNTER));
         metricRegistry.register(new MetricDefinition(
                 CONNECTION_REJECTIONS_TOTAL,
                 "Rejected production connections",
                 "count",
-                List.of("listener", "protocol", "reason")));
+                List.of("listener", "protocol", "reason"), group.zn.zero.monitor.MetricType.COUNTER));
         metricRegistry.register(new MetricDefinition(
                 HANDSHAKE_LATENCY_SECONDS,
                 "Production handshake latency",
@@ -151,12 +151,12 @@ public final class ProductionNetworkTelemetryObserver implements ConnectionLifec
                 HEARTBEAT_TIMEOUTS_TOTAL,
                 "Production heartbeat timeouts",
                 "count",
-                List.of("listener", "protocol")));
+                List.of("listener", "protocol"), group.zn.zero.monitor.MetricType.COUNTER));
         metricRegistry.register(new MetricDefinition(
                 RATE_LIMITED_TOTAL,
                 "Production network rate limited events",
                 "count",
-                List.of("listener", "protocol", "scope")));
+                List.of("listener", "protocol", "scope"), group.zn.zero.monitor.MetricType.COUNTER));
     }
 
     private void appendLog(final ConnectionLifecycleObservation observation) {

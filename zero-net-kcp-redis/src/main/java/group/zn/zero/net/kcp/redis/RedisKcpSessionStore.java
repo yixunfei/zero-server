@@ -29,6 +29,8 @@ import redis.clients.jedis.RedisClient;
 public final class RedisKcpSessionStore implements KcpSessionStore {
     /** 共享不可变脚本，不拼接任何用户输入。 */
     private static final String SCRIPT = script();
+    /** 本地计算脚本摘要；NOSCRIPT 时仅重载当前节点，不隐藏其他 Redis 故障。 */
+    private static final String SCRIPT_SHA = scriptSha();
     /** 调用方拥有的线程安全连接池客户端。 */
     private final RedisClient client;
     /** 隔离 key 空间。 */
@@ -110,7 +112,18 @@ public final class RedisKcpSessionStore implements KcpSessionStore {
         return submit(() -> success(eval(conv, List.of(op, owner, Long.toString(generation), Long.toString(lease.toMillis())))));
     }
     private Object eval(final int conv, final List<String> args) {
-        return client.eval(SCRIPT, List.of(prefix + ":{" + Integer.toUnsignedString(conv) + "}:owner"), args);
+        List<String> keys = List.of(prefix + ":{" + Integer.toUnsignedString(conv) + "}:owner");
+        try { return client.evalsha(SCRIPT_SHA, keys, args); }
+        catch (redis.clients.jedis.exceptions.JedisNoScriptException missing) {
+            return client.eval(SCRIPT, keys, args);
+        }
+    }
+    /** SHA-1 仅为 Redis 脚本寻址，不承担认证。 */
+    private static String scriptSha() {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-1")
+                    .digest(SCRIPT.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException failure) { throw new ExceptionInInitializerError(failure); }
     }
     private <T> CompletionStage<T> submit(final Supplier<T> action) {
         if (!pending.tryAcquire()) return CompletableFuture.failedFuture(new java.util.concurrent.RejectedExecutionException("Redis KCP queue full"));

@@ -20,6 +20,44 @@ import org.junit.jupiter.api.Test;
 
 /** 可控执行器验证 KCP 回调不持调度锁、失败后有序排空并回收预算。 @author zn */
 class KcpDispatchConcurrencyTest {
+    @Test void pendingResponseKeepsBusyAndFirstAsyncFailureStopsBatch() {
+        var endpoint = new Endpoint();
+        endpoint.sendResult = new CompletableFuture<>();
+        endpoint.dispatch.open();
+        endpoint.runAll();
+        endpoint.dispatch.receive(frame());
+        endpoint.dispatch.receive(frame());
+        endpoint.runAll();
+        endpoint.result.complete(List.of(frame(), frame(), frame()));
+        assertEquals(1, endpoint.responses);
+        assertFalse(endpoint.dispatch.idle());
+        assertTrue(endpoint.reserved > 512);
+        var failure = new IllegalStateException("async send failed");
+        endpoint.sendResult.completeExceptionally(failure);
+        endpoint.runAll();
+        assertSame(failure, endpoint.failure);
+        assertEquals(1, endpoint.responses);
+        assertEquals(1, endpoint.closedCallbacks);
+        assertEquals(0, endpoint.reserved);
+    }
+
+    @Test void closeDuringResponseWaitsForPhysicalCompletionAndSkipsRemaining() {
+        var endpoint = new Endpoint();
+        endpoint.sendResult = new CompletableFuture<>();
+        endpoint.dispatch.open();
+        endpoint.runAll();
+        endpoint.dispatch.receive(frame());
+        endpoint.runAll();
+        endpoint.result.complete(List.of(frame(), frame()));
+        endpoint.dispatch.close();
+        endpoint.runAll();
+        assertEquals(0, endpoint.closedCallbacks);
+        endpoint.sendResult.complete(null);
+        endpoint.runAll();
+        assertEquals(1, endpoint.responses);
+        assertEquals(1, endpoint.closedCallbacks);
+        assertEquals(0, endpoint.reserved);
+    }
     /** 响应与执行器可能取得客户端生命周期锁，调度锁不得跨越这些调用。 */
     @Test void invokesExecutorAndResponsesOutsideDispatchMonitor() {
         Endpoint endpoint = new Endpoint();
@@ -97,13 +135,15 @@ class KcpDispatchConcurrencyTest {
         private Throwable failure;
         /** 可注入的发送同步失败。 */
         private RuntimeException sendFailure;
+        /** 可控的本地响应接收阶段。 */
+        private CompletableFuture<Void> sendResult;
 
         private void runAll() { while (!tasks.isEmpty()) tasks.remove().run(); }
         @Override public CompletionStage<Void> respond(final ProtocolFrame frame) {
             responseHeldMonitor |= Thread.holdsLock(dispatch);
             responses++;
             if (sendFailure != null) throw sendFailure;
-            return CompletableFuture.completedFuture(null);
+            return sendResult == null ? CompletableFuture.completedFuture(null) : sendResult;
         }
         @Override public boolean reserveInbound(final long bytes) { reserved += bytes; return true; }
         @Override public void releaseInbound(final long bytes) { reserved -= bytes; }

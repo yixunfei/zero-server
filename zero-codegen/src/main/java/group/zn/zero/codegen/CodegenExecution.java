@@ -40,8 +40,8 @@ public final class CodegenExecution {
                 options.languageOutputDirs(), options.languageNamespaces(), options.dtoSuffixes(),
                 options.javaArtifactOutputDirs(), options.javaArtifactPackages()));
         long rendered = System.nanoTime();
-        List<GeneratedOutputPlan.Change> changes = Set.of("validate", "recover").contains(mode)
-                ? List.of() : plan.inspect("prune".equals(mode));
+        if ("generate".equals(mode) || "prune".equals(mode)) plan.cleanupCommitted();
+        List<GeneratedOutputPlan.Change> changes = plan.inspect("prune".equals(mode));
         if ("generate".equals(mode) || "prune".equals(mode)) {
             plan.apply();
         }

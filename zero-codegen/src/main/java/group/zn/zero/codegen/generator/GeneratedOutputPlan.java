@@ -3,10 +3,8 @@ package group.zn.zero.codegen.generator;
 import group.zn.zero.codegen.error.CodegenErrorCode;
 import group.zn.zero.core.error.ZeroException;
 import java.nio.file.Path;
-import java.nio.file.Files;
 import java.io.IOException;
 import java.util.List;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,16 +25,11 @@ public final class GeneratedOutputPlan {
     /** 已登记目标的上级目录，用于常数时间检测文件与目录冲突。 */
     private final Set<Path> outputParents = new HashSet<>();
 
-    /** 可选工程级生命周期管理器。 */
+    /** 显式输出根的生命周期管理器。 */
     private final ManagedOutput managed;
 
     /** 上次预检的内容快照，由 apply 消费。 */
     private ManagedOutput.Prepared prepared;
-
-    /** 创建独立文件计划；用于单后端或嵌入式调用。 */
-    public GeneratedOutputPlan() {
-        managed = null;
-    }
 
     /**
      * 创建具备清单、锁和恢复日志的工程计划，构造时不写文件。
@@ -69,24 +62,22 @@ public final class GeneratedOutputPlan {
 
     /**
      * 先检查所有输出，再写入；预检失败不会改变任何目标文件。
-     * 工程计划保存恢复日志，IO 失败自动回滚；独立文件计划仅逐文件替换。
+     * 保存恢复日志，提交前 IO 失败回滚，已提交的清理失败不撤销内容。
      *
      * @throws ZeroException 路径冲突、文件归属冲突或 IO 失败时抛出。
      */
     public void apply() {
-        if (managed != null) {
-            managed.apply(prepared == null ? managed.prepare(outputs, false) : prepared);
-            prepared = null;
-            return;
-        }
-        inspect();
-        for (Map.Entry<Path, Output> entry : outputs.entrySet()) {
-            if (entry.getValue().implementation()) {
-                GeneratedSourceWriter.createImplementation(entry.getKey(), entry.getValue().content());
-            } else {
-                GeneratedSourceWriter.writeGenerated(entry.getKey(), entry.getValue().content());
-            }
-        }
+        cleanupCommitted();
+        managed.apply(prepared == null ? managed.prepare(outputs, false) : prepared);
+        prepared = null;
+    }
+
+    /**
+     * 写入前清理已提交日志；只读模式不得调用。线程独占。
+     * @throws ZeroException 日志未提交、内容已变或清理失败。
+     */
+    public void cleanupCommitted() {
+        if (managed.cleanupCommitted()) prepared = null;
     }
 
     /**
@@ -104,36 +95,14 @@ public final class GeneratedOutputPlan {
      * @return 不可变有序状态列表，可能为空。
      */
     public List<Change> inspect(final boolean prune) {
-        if (managed != null) {
-            prepared = managed.prepare(outputs, prune);
-            return prepared.changes();
-        }
-        List<Change> changes = new ArrayList<>();
-        for (Map.Entry<Path, Output> entry : outputs.entrySet()) {
-            if (entry.getValue().implementation()) {
-                GeneratedSourceWriter.validateImplementation(entry.getKey());
-            } else {
-                GeneratedSourceWriter.validateGenerated(entry.getKey());
-            }
-            try {
-                Path path = entry.getKey();
-                String status = !Files.exists(path) ? "create"
-                        : entry.getValue().implementation() ? "preserve"
-                        : Files.readString(path).equals(entry.getValue().content()) ? "unchanged" : "update";
-                changes.add(new Change(path.toString(), status));
-            } catch (IOException ex) {
-                throw ZeroException.of(CodegenErrorCode.OUTPUT_FAILED, "failed to inspect " + entry.getKey(), ex);
-            }
-        }
-        return List.copyOf(changes);
+        prepared = managed.prepare(outputs, prune);
+        return prepared.changes();
     }
 
     /** 恢复工程未完成事务；遇到外部编辑时失败并保留恢复日志，线程独占。 */
     public void recover() {
-        if (managed != null) {
-            managed.recover();
-            prepared = null;
-        }
+        managed.recover();
+        prepared = null;
     }
 
     /** 一项只读文件变更，用于 GUI 和机器报告。 */
@@ -143,7 +112,12 @@ public final class GeneratedOutputPlan {
     private void add(final Path path, final String content, final boolean implementation) {
         Path target = Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
         Objects.requireNonNull(content, "content");
-        if (outputs.containsKey(target)) {
+        try {
+            OutputFiles.validate(target);
+        } catch (IOException ex) {
+            throw failure(ex.getMessage());
+        }
+        if (outputs.keySet().stream().anyMatch(existing -> existing.toString().equalsIgnoreCase(target.toString()))) {
             throw failure("duplicate generated output path: " + target);
         }
         if (outputParents.contains(target)) {
@@ -157,7 +131,7 @@ public final class GeneratedOutputPlan {
         for (Path parent = target.getParent(); parent != null; parent = parent.getParent()) {
             outputParents.add(parent);
         }
-        outputs.put(target, new Output(content.replace("\r\n", "\n"), implementation));
+        outputs.put(target, new Output(content.replace("\r\n", "\n").replace("\r", "\n"), implementation));
         prepared = null;
     }
 

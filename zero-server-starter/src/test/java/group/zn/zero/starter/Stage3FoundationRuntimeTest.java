@@ -83,7 +83,10 @@ class Stage3FoundationRuntimeTest {
                     .join();
             SceneEntityState moved = moveResult.currentState();
 
-            assertEquals(new PlayerLoginResult("guest-1001", 1001L, "trace-login"), loginResult);
+            assertEquals("guest-1001", loginResult.accountId());
+            assertEquals(1001L, loginResult.uid());
+            assertTrue(!loginResult.sessionId().isBlank());
+            assertEquals("trace-login", loginResult.traceId());
             assertEquals(new PlayerProfile(1001L, 1L, "player-1001", true), profile);
             assertEquals(profile, playerRepository.findById(1001L).toCompletableFuture().join().orElseThrow());
             assertEquals(profile, playerCache.get(1001L).toCompletableFuture().join().orElseThrow());

@@ -218,9 +218,24 @@ public final class ZeroArchitectureGuard {
             return;
         }
         GuardReport report = runChecks();
+        checkDependencyModel(report);
         printReport(report);
         if (report.hasViolations()) {
             System.exit(1);
+        }
+    }
+
+    private static void checkDependencyModel(final GuardReport report) throws IOException {
+        Path java = Path.of(System.getProperty("java.home"), "bin",
+                System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java");
+        Process process = new ProcessBuilder(java.toString(), "scripts/ZeroDependencyGuard.java").inheritIO().start();
+        try {
+            if (process.waitFor() == 0) report.pass("dependency-model", "Inherited/profile production graph and inventory verified.");
+            else report.fail("dependency-model", "Dependency guard failed; see diagnostics above.");
+        } catch (InterruptedException failure) {
+            process.destroyForcibly();
+            Thread.currentThread().interrupt();
+            throw new IOException("Dependency guard interrupted", failure);
         }
     }
 
@@ -648,15 +663,16 @@ public final class ZeroArchitectureGuard {
                 .filter(profile -> profile.modules().contains(BENCHMARK_MODULE))
                 .toList();
         boolean defaultReactorClean = !rootModules.contains(BENCHMARK_MODULE);
-        boolean singleFrozenProfile = owners.size() == 1
-                && "benchmarks".equals(owners.get(0).id())
-                && owners.get(0).modules().equals(List.of(BENCHMARK_MODULE))
-                && !owners.get(0).activationConfigured();
-        if (defaultReactorClean && singleFrozenProfile) {
-            report.pass("benchmark-profile", "zero-benchmarks is enabled only by the root benchmarks profile.");
+        boolean explicitProfiles = owners.size() == 2
+                && owners.stream().map(ProfileModules::id).collect(java.util.stream.Collectors.toSet())
+                        .equals(Set.of("benchmarks", "performance-gate"))
+                && owners.stream().allMatch(profile -> profile.modules().equals(List.of(BENCHMARK_MODULE))
+                        && !profile.activationConfigured());
+        if (defaultReactorClean && explicitProfiles) {
+            report.pass("benchmark-profile", "zero-benchmarks is enabled only by explicit benchmarks/performance-gate profiles.");
         } else {
             report.fail("benchmark-profile", "zero-benchmarks must be absent from default modules and declared only "
-                    + "by explicitly selected profile benchmarks with no activation or companion modules.");
+                    + "by explicitly selected benchmarks/performance-gate profiles with no activation or companion modules.");
         }
     }
 

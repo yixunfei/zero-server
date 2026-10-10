@@ -27,6 +27,11 @@ final class BuildResourceLedger {
 
     /** 由 runtime 生命周期或 build 回滚串行调用，外部关闭不持有台账锁。 */
     RuntimeAssemblyException closeAll(final RuntimeAssemblyException original) {
+        return closeAll(original, null, null);
+    }
+
+    RuntimeAssemblyException closeAll(final RuntimeAssemblyException original, final LifecycleCallBoundary calls,
+            final group.zn.zero.runtime.spi.RuntimeDeadline deadline) {
         List<Entry> pending;
         synchronized (this) {
             sealed = true;
@@ -36,10 +41,12 @@ final class BuildResourceLedger {
         for (int index = pending.size() - 1; index >= 0; index--) {
             Entry entry = pending.get(index);
             try {
-                entry.resource.close();
-                synchronized (this) { entry.closed = true; }
+                if (calls == null) { entry.resource.close(); synchronized (this) { entry.closed = true; } }
+                else calls.call(() -> {
+                    entry.resource.close(); synchronized (this) { entry.closed = true; } return null;
+                }, deadline, entry.owner, RuntimeFailurePhase.CLOSE);
             } catch (Throwable failure) {
-                RuntimeAssemblyException safeFailure = RuntimeAssemblyException.failure(
+                RuntimeAssemblyException safeFailure = failure instanceof RuntimeAssemblyException known ? known : RuntimeAssemblyException.failure(
                         RuntimeErrorCode.RUNTIME_RESOURCE_CLOSE_FAILED,
                         RuntimeFailurePhase.CLOSE,
                         entry.owner,

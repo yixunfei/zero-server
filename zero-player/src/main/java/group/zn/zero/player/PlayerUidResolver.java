@@ -5,6 +5,7 @@ package group.zn.zero.player;
  *
  * <p>该接口用于把账号登录请求解析为玩家 ID。实现应避免在 Actor handler 内执行远程 IO；
  * 如果需要访问远程鉴权服务，应先在远程 IO 执行域完成，再投递到 player/session lane。
+ * UID 必须来自具有唯一约束的权威账号映射，账号与 UID 一一对应；禁止截断哈希推导身份。
  *
  * @author zn
  */

@@ -90,7 +90,7 @@ class KafkaRpcAdapterTest {
         assertEquals(0, calls.get());
     }
     /** 本地测试签名器，不用于生产。 */
-    private static final SecurityMetadataAssertion ASSERTION = SecurityMetadataAssertion.digest(new byte[] {1, 2, 3});
+    private static final SecurityMetadataAssertion ASSERTION = SecurityMetadataAssertion.digest(java.util.Arrays.copyOf(new byte[] {1, 2, 3}, 32));
 
     /** Verifies tampered metadata and replayed assertions are rejected before handler execution. */
     @Test
@@ -98,7 +98,7 @@ class KafkaRpcAdapterTest {
         InMemoryKafkaRpcMessageGateway gateway = new InMemoryKafkaRpcMessageGateway();
         KafkaRpcAdapter provider = new KafkaRpcAdapter(settings("provider", "reply-provider"), gateway, timer.executor());
         KafkaRpcAdapter caller = new KafkaRpcAdapter(settings("caller", "reply-caller"), gateway, timer.executor());
-        SecurityMetadataAssertion assertion = SecurityMetadataAssertion.digest("test-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        SecurityMetadataAssertion assertion = SecurityMetadataAssertion.digest("test-secret-01234567890123456789012345678901".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         java.util.Set<String> consumed = java.util.concurrent.ConcurrentHashMap.newKeySet();
         provider.securityMetadataVerifier((snapshot, receivedAt) -> {
             if (snapshot == null || !assertion.verify(snapshot) || !consumed.add(snapshot.assertionReference())) {
@@ -314,8 +314,7 @@ class KafkaRpcAdapterTest {
                 envelopeCodec.encodeRequest(expired))).toCompletableFuture().join();
 
         assertEquals(0, invoked.get());
-        assertEquals(1, responses.size());
-        assertEquals(RpcErrorCode.REQUEST_TIMEOUT.code(), responses.getFirst().errorCode().code());
+        assertEquals(0, responses.size());
         assertTrue(observer.contains(RpcTransportEventType.REQUEST_REJECTED));
         assertFalse(observer.contains(RpcTransportEventType.HANDLER_STARTED));
         provider.close();

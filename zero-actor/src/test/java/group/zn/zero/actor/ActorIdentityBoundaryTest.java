@@ -22,7 +22,7 @@ class ActorIdentityBoundaryTest {
                 assertSame(id, message.traceId());
                 assertSame(id, ActorContext.from(message).messageId());
             }
-            assertThrows(IllegalStateException.class, () -> new ActorMessage(LaneKey.custom("boundary"), "payload"));
+            assertThrows(group.zn.zero.core.error.ZeroException.class, () -> new ActorMessage(LaneKey.custom("boundary"), "payload"));
         } finally { counter.set(prior); }
     }
 }

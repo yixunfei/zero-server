@@ -224,7 +224,10 @@ class Stage3GeneratedBoFullLoopIT {
         PlayerProfile expectedProfile = new PlayerProfile(1001L, 1L, "player-1001", true);
         assertEquals(7, document.protocols().size());
         assertTrue(codegenLogs.stream().anyMatch(item -> item.contains("Generating protocol sources")));
-        assertEquals(new PlayerLoginResult("guest-1001", 1001L, "trace-full-login"), results.loginResult());
+        assertEquals("guest-1001", results.loginResult().accountId());
+        assertEquals(1001L, results.loginResult().uid());
+        assertTrue(!results.loginResult().sessionId().isBlank());
+        assertEquals("trace-full-login", results.loginResult().traceId());
         assertEquals(expectedProfile, results.loadedProfile());
         assertEquals(expectedProfile, playerRepository.findById(1001L).toCompletableFuture()
                 .join()

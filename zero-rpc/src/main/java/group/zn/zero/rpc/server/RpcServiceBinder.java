@@ -74,11 +74,26 @@ public final class RpcServiceBinder {
                     null);
         }
         RpcServiceDescriptor descriptor = describe(serviceInterface);
-        for (RpcMethodDescriptor method : descriptor.methods()) {
-            registry.register(method.routeServiceName(), method.routeMethodName(), method.topic(), method.group(),
-                    handler(implementation, method, implementationMethod(implementation, method)));
+        var registered = new java.util.ArrayList<group.zn.zero.rpc.spi.RpcHandlerRegistration>();
+        var ready = new java.util.concurrent.atomic.AtomicBoolean();
+        try {
+            for (RpcMethodDescriptor method : descriptor.methods()) {
+                RpcHandler delegate = handler(implementation, method, implementationMethod(implementation, method));
+                registered.add(registry.registerScoped(method.routeServiceName(), method.routeMethodName(), method.topic(), method.group(),
+                        request -> ready.get() ? delegate.handle(request)
+                                : completedFailure(request, RpcErrorCode.SERVICE_NOT_FOUND, "rpc service binding incomplete")));
+            }
+            ready.set(true);
+        } catch (RuntimeException | Error failure) {
+            for (int index = registered.size() - 1; index >= 0; index--) {
+                try { registered.get(index).close(); }
+                catch (RuntimeException | Error cleanup) {
+                    if (cleanup != failure) failure.addSuppressed(cleanup);
+                }
+            }
+            throw failure;
         }
-        return new RpcBoundService(registry, descriptor);
+        return new RpcBoundService(registered, descriptor);
     }
 
     private RpcServiceDescriptor describe(final Class<?> serviceInterface) {

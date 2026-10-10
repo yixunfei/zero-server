@@ -41,8 +41,8 @@ public record GmAuditRecord(
         operatorRef = checked(operatorRef, "operatorRef");
         sourceAddressRef = checked(sourceAddressRef, "sourceAddressRef");
         targetType = checked(targetType, "targetType");
-        targetRef = targetRef == null ? "" : checked(targetRef, "targetRef");
-        approvalRef = approvalRef == null ? "" : checked(approvalRef, "approvalRef");
+        targetRef = targetRef == null ? "" : optionalChecked(targetRef, "targetRef");
+        approvalRef = approvalRef == null ? "" : optionalChecked(approvalRef, "approvalRef");
         approvalState = checked(approvalState, "approvalState");
         structureFingerprint = checked(structureFingerprint, "structureFingerprint");
     }
@@ -50,14 +50,10 @@ public record GmAuditRecord(
     /** Converts the already-safe event without retaining its mutable internals. */
     public static GmAuditRecord from(final GmAuditEvent event) {
         Objects.requireNonNull(event, "event");
-        String operationId = event.requestFingerprint().isBlank()
-                ? event.structureFingerprint() + "|" + event.traceId()
-                : event.requestFingerprint();
-        String eventId = event.time().toEpochMilli() + "|" + event.phase() + "|" + operationId;
         GmAuditAttribution attribution = event.attribution();
         return new GmAuditRecord(
-                ref(eventId),
-                ref(operationId),
+                event.eventId(),
+                event.operationId(),
                 event.time(),
                 event.phase(),
                 event.traceId(),
@@ -93,7 +89,4 @@ public record GmAuditRecord(
         return value;
     }
 
-    private static String ref(final String value) {
-        return "audit-ref:" + Integer.toUnsignedString(value.hashCode(), 16);
-    }
 }

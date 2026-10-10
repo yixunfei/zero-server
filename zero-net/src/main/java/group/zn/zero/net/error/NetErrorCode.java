@@ -25,6 +25,9 @@ public enum NetErrorCode implements ErrorCode {
      */
     SEND_FAILED("ZERO-NET-SEND-FAILED", "net message send failed"),
 
+    /** 单连接关闭失败；与消息发送及服务器停止失败区分。 */
+    CONNECTION_CLOSE_FAILED("ZERO-NET-CONNECTION-CLOSE-FAILED", "net connection close failed"),
+
     /** 待写预算耗尽或慢连接不可写；消息未准入。 */
     OUTBOUND_OVERFLOW("ZERO-NET-OUTBOUND-OVERFLOW", "network outbound budget exceeded"),
 

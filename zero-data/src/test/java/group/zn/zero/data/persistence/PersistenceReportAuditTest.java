@@ -58,6 +58,21 @@ class PersistenceReportAuditTest {
         assertEquals(LifecycleState.FAILED, manager.state());
         assertEquals(1, manager.statistics().dirtyCount());
     }
+    /** stop 只发起一次最终失败尝试；不能在 shutdown 预算内忙等重试。 */
+    @Test void stopDoesNotSpinOnPersistentlyFailingBackend() {
+        var attempts = new java.util.concurrent.atomic.AtomicInteger();
+        var manager = new DefaultPersistenceManager();
+        manager.registerTarget(new PersistenceTarget<>("p", new InMemoryCrudRepository<String, Entity>()));
+        manager.start();
+        manager.markDirty("p", "p", DataThreadBinding.unbound(), () -> {
+            attempts.incrementAndGet();
+            throw new IllegalStateException("backend unavailable");
+        });
+        assertThrows(ZeroException.class, manager::stop);
+        assertEquals(1, attempts.get());
+        assertEquals(1, manager.statistics().dirtyCount());
+    }
+
     /** 异步捕获不完成时有界退出，同时并发 flush 按请求排队。 */
     @Test void stalledCaptureTimesOutAndConcurrentFlushIsCoalesced() {
         BlockingCapture capture = new BlockingCapture();

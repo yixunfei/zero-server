@@ -218,7 +218,7 @@ public final class RedisDataAdapter extends AbstractRepositoryAdapter {
      * @return Redis client；不可为空；调用方负责关闭。
      */
     public RedisClient createClient(final RedisDriverSettings settings) {
-        return RedisClient.create(URI.create(Objects.requireNonNull(settings, "settings").uri()));
+        return createClient(settings, Duration.ofSeconds(3));
     }
 
     /**
