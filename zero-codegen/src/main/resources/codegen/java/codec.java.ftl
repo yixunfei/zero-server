@@ -28,7 +28,7 @@ public final class ${codecName} implements ZeroPayloadCodec<${messageName}> {
      *
      * @return 提供者名称；不可为空；线程安全。
      */
-    @Override
+    @java.lang.Override
     public String name() {
         return "${codecProviderName}";
     }
@@ -38,8 +38,8 @@ public final class ${codecName} implements ZeroPayloadCodec<${messageName}> {
      *
      * @return 消息类型；不可为空；线程安全。
      */
-    @Override
-    public Class<${messageName}> messageType() {
+    @java.lang.Override
+    public java.lang.Class<${messageName}> messageType() {
         return ${messageName}.class;
     }
 
@@ -50,7 +50,7 @@ public final class ${codecName} implements ZeroPayloadCodec<${messageName}> {
      * @param message 消息；不可为空。
      * @throws NullPointerException 当写入器或消息为空时抛出。
      */
-    @Override
+    @java.lang.Override
     public void write(final ZeroWriter writer, final ${messageName} message) {
         Objects.requireNonNull(writer, "writer");
         Objects.requireNonNull(message, "message");
@@ -82,16 +82,16 @@ ${field.writeCode}</#if>
      * @return 消息；不可为空；线程不安全。
      * @throws NullPointerException 当读取器为空时抛出。
      */
-    @Override
+    @java.lang.Override
 <#if uncheckedRead>
-    @SuppressWarnings("unchecked")
+    @java.lang.SuppressWarnings("unchecked")
 </#if>
     public ${messageName} read(final ZeroReader reader) {
         Objects.requireNonNull(reader, "reader");
         int objectEnd = reader.beginObject();
         ${messageName} message = new ${messageName}();
 <#if hasNullableFields>
-        boolean[] presence = reader.hasRemainingInObject(objectEnd) ? reader.readPresenceBits() : new boolean[0];
+        boolean[] presence = reader.hasRemainingInObject(objectEnd) ? reader.readPresenceBits(${nullableFieldCount?c}) : new boolean[0];
 </#if>
 <#list readFields as field>
 <#if field.nullable>

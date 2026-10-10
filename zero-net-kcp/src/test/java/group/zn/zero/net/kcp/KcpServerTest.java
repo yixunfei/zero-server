@@ -68,6 +68,20 @@ class KcpServerTest {
             assertError(NetErrorCode.RATE_LIMITED, () -> fixture.ticket(new KcpTestControl()));
         }
     }
+    /** 临期身份不能签出票据，失败不占用会话容量。 */
+    @Test void refusesIdentityWithLessThanBindingWindowRemaining() {
+        try (Fixture fixture = new Fixture(CONFIG)) {
+            var control = new KcpTestControl();
+            var now = java.time.Instant.now();
+            control.attributes().put(ProductionNetworkConnectionAttributes.SECURITY_CONTEXT,
+                    new group.zn.zero.security.SecurityContext("test-player", now.minusSeconds(1),
+                            now.plusMillis(1), "tcp", "peer", "trusted", "trace", "session",
+                            java.util.Set.of("network.request"), java.util.Map.of()));
+            assertError(NetErrorCode.AUTHENTICATION_EXPIRED, () -> fixture.ticket(control));
+            for (int index = 0; index < CONFIG.maxSessions(); index++) fixture.ticket(new KcpTestControl());
+        }
+    }
+
     /** 首个有效地址固定后，其他 UDP 端点即使有密钥也不可迁移；重放与坏包隔离。 */
     @Test void rejectsReplayTamperingOversizeAndAddressMigration() throws Exception {
         try (Fixture fixture = new Fixture(CONFIG)) {

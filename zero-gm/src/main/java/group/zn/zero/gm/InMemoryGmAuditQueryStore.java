@@ -42,6 +42,6 @@ public final class InMemoryGmAuditQueryStore implements GmAuditQueryStore {
                 return index + 1;
             }
         }
-        throw new IllegalArgumentException("audit cursor is invalid");
+        throw group.zn.zero.core.error.ZeroException.of(GmErrorCode.AUDIT_CURSOR_INVALID);
     }
 }

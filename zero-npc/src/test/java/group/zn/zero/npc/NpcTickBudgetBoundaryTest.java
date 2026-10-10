@@ -17,14 +17,14 @@ class NpcTickBudgetBoundaryTest {
                         calls.incrementAndGet();
                         return new BehaviorDecision(npc.behavior(), "unchanged");
                     }, event -> { }, event -> { }, new NoopNpcMetrics());
-            zone.spawn(npc("first"));
-            zone.spawn(npc("second"));
-            TickResult skipped = zone.tick(budget, "skip");
+            zone.spawnAsync(npc("first")).toCompletableFuture().join();
+            zone.spawnAsync(npc("second")).toCompletableFuture().join();
+            TickResult skipped = zone.tickAsync(budget, "skip").toCompletableFuture().join();
             assertEquals(0, calls.get());
             assertEquals(0, skipped.processedCount());
             assertEquals(2, skipped.skippedCount());
             assertEquals(TickResult.Outcome.SKIPPED, skipped.outcome());
-            TickResult resumed = zone.tick(new TickBudget(1000, 1), "resume");
+            TickResult resumed = zone.tickAsync(new TickBudget(1000, 1), "resume").toCompletableFuture().join();
             assertEquals(1, calls.get());
             assertEquals(1, resumed.processedCount());
             assertEquals(1, resumed.skippedCount());

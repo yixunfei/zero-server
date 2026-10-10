@@ -27,8 +27,29 @@ import org.junit.jupiter.api.Test;
 
 /** HTTP 请求安全边界与同连接身份隔离回归。 @author zn */
 class HttpSecurityBoundaryTest {
+    /** 普通重复头和大小写变体都不能在转换请求时被静默折叠。 */
+    @Test void rejectsDuplicateOrdinaryHeaders() {
+        for (String secondName : List.of("X-Forwarded-For", "x-forwarded-for")) {
+            var calls = new java.util.concurrent.atomic.AtomicInteger();
+            var channel = new EmbeddedChannel(new NettyHttpServer.NettyHttpChannelHandler(request -> {
+                calls.incrementAndGet();
+                return CompletableFuture.completedFuture(HttpResponse.text(200, "unexpected"));
+            }, Runnable::run, SecurityMetadataVerifier.failClosed()));
+            try {
+                var request = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, "/");
+                request.headers().add("X-Forwarded-For", "a").add(secondName, "b");
+                channel.writeInbound(request);
+                channel.runPendingTasks();
+                FullHttpResponse response = channel.readOutbound();
+                try { assertEquals(401, response.status().code()); }
+                finally { response.release(); }
+                assertEquals(0, calls.get());
+            } finally { channel.finishAndReleaseAll(); }
+        }
+    }
+
     /** 确定性本地签名器。 */
-    private final SecurityMetadataAssertion assertion = SecurityMetadataAssertion.digest(new byte[] {7, 8});
+    private final SecurityMetadataAssertion assertion = SecurityMetadataAssertion.digest(java.util.Arrays.copyOf(new byte[] {7, 8}, 32));
 
     /** 无 verifier、伪造签名、过期或重复头均不能进入业务处理器。 */
     @Test
@@ -67,6 +88,30 @@ class HttpSecurityBoundaryTest {
         } finally {
             channel.finishAndReleaseAll();
         }
+    }
+
+    /** 永不完成的 verifier 及时返回 401，超时后迟到成功不能再进入业务。 */
+    @Test void verifierDeadlineCompletesRequestExactlyOnce() {
+        var pending = new CompletableFuture<SecurityContext>();
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        EmbeddedChannel channel = new EmbeddedChannel(new NettyHttpServer.NettyHttpChannelHandler(request -> {
+            calls.incrementAndGet();
+            return CompletableFuture.completedFuture(HttpResponse.text(200, "unexpected"));
+        }, Runnable::run, (snapshot, now) -> pending, java.time.Duration.ofMillis(20)));
+        try {
+            channel.writeInbound(request(signed("alice", false)));
+            channel.advanceTimeBy(21, java.util.concurrent.TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            channel.runPendingTasks();
+            FullHttpResponse response = channel.readOutbound();
+            try { assertEquals(401, response.status().code()); }
+            finally { response.release(); }
+            pending.complete(new SecurityContext("alice", Instant.now(), Instant.now().plusSeconds(60),
+                    "http", "peer", "trusted", "trace", "corr", Set.of("read"), Map.of()));
+            channel.runPendingTasks();
+            assertEquals(0, calls.get());
+            org.junit.jupiter.api.Assertions.assertNull(channel.readOutbound());
+        } finally { channel.finishAndReleaseAll(); }
     }
 
     private void assertRejected(final SecurityMetadataVerifier verifier,

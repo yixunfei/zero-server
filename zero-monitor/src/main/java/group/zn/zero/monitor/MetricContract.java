@@ -254,7 +254,8 @@ final class MetricContract {
         return isIdentifierStart(value) || value >= '0' && value <= '9';
     }
 
-    private static boolean containsControl(final String value) {
+    /** 检查指标与告警共用的 ISO 控制字符禁用契约；无数据修改，线程安全。 */
+    static boolean containsControl(final String value) {
         for (int index = 0; index < value.length(); index++) {
             if (Character.isISOControl(value.charAt(index))) {
                 return true;

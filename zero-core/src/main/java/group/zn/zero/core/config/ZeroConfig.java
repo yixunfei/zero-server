@@ -51,7 +51,7 @@ public interface ZeroConfig {
      */
     default String require(final String key) {
         return get(key).orElseThrow(() -> group.zn.zero.core.error.ZeroException.of(
-                group.zn.zero.core.error.SystemErrorCode.INVALID_ARGUMENT,
+                group.zn.zero.core.error.SystemErrorCode.CONFIGURATION_ERROR,
                 "Missing required config: " + key,
                 null));
     }

@@ -41,7 +41,7 @@ public final class VerifyLocalScaffolds {
                     "group.zn.zero.generated.verify.localgame",
                     "src/main/protocol/Game.si",
                     "local-game=ok|mode=local|name=verify-local-game|uid=1001|position=3,5"
-                            + "|logs=4|metrics=2|maxProtocolId=90105"),
+                            + "|logs=7|metrics=6|maxProtocolId=90105"),
             new TemplateSpec(
                     "room",
                     "verify-room-game",

@@ -56,7 +56,7 @@ Rejects(() => new ZeroWriter().WriteUnsignedLong(1UL << 63));
 Rejects(() => new ZeroWriter().WriteByte(128));
 Rejects(() => new ZeroReader(new byte[]{255,255,255,255,255,255,255,255,255,1}).ReadUnsignedLong());
 Rejects(() => new ZeroReader(new byte[]{255,255,255,255,7}).ReadArray(r => r.ReadByte()));
-Rejects(() => new ZeroReader(new byte[]{255,255,255,255,7}).ReadPresenceBits());
+Rejects(() => new ZeroReader(new byte[]{255,255,255,255,7}).ReadPresenceBits(1));
 Rejects(() => new ZeroReader(new byte[]{128,128,4}).ReadShort());
 Rejects(() => { var r = new ZeroReader(new byte[]{1,128,1}); r.BeginObject(); r.ReadInt(); });
 Console.WriteLine("boundary=" + Convert.ToHexString(boundary.ToArray()).ToLowerInvariant());
@@ -69,3 +69,12 @@ var limitsRead = WireLimitsDTOCodec.Read(new ZeroReader(limitsWriter.ToArray()))
 if (limitsRead.lowByte != -128 || limitsRead.lowShort != -32768 || limitsRead.highUint != int.MaxValue
     || limitsRead.lowLong != long.MinValue || limitsRead.highUlong != long.MaxValue
     || limitsRead.data[1] != 255 || limitsRead.signedBytes[0] != -128) throw new Exception("generated scalar DTO failed");
+
+// Decode a large bitmap using only trusted schema flags, preserving the following field.
+var largePresence = new byte[1024 * 1024 + 5];
+new byte[]{128,128,128,4,5}.CopyTo(largePresence, 0);
+largePresence[largePresence.Length - 1] = 42;
+var presenceReader = new ZeroReader(largePresence);
+var flags = presenceReader.ReadPresenceBits(3);
+if (flags.Length != 3 || !flags[0] || flags[1] || !flags[2] || presenceReader.ReadByte() != 42)
+    throw new Exception("schema presence boundary failed");

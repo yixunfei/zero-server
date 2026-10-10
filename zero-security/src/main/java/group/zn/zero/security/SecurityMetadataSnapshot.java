@@ -43,6 +43,7 @@ public record SecurityMetadataSnapshot(
         SecurityValues.require(correlationId, "correlationId", 128);
         SecurityValues.require(assertionReference, "assertionReference", 256);
         permissions = Set.copyOf(Objects.requireNonNull(permissions, "permissions"));
+        permissions.forEach(permission -> SecurityValues.require(permission, "permission", 256));
         issuedAt = Objects.requireNonNull(issuedAt, "issuedAt");
         expiresAt = Objects.requireNonNull(expiresAt, "expiresAt");
         if (!expiresAt.isAfter(issuedAt)) {
@@ -61,11 +62,32 @@ public record SecurityMetadataSnapshot(
                 assertionReference, current.authenticatedAt(), current.expiresAt(), "");
     }
 
-    /** Returns the canonical bytes covered by an external signature provider. */
+    /**
+     * 返回确定性、长度前缀的签名字节；权限按字典序编码，签名字段不参与。
+     * @return 新字节数组；有序、非空，调用方可修改，不修改快照；线程安全。
+     */
     public byte[] canonicalBytes() {
-        return String.join("\u0000", subject, transport, peerAddress, trustedSourceAddress, traceId,
-                correlationId, String.join("\u001f", permissions.stream().sorted().toList()), assertionReference,
-                Long.toString(issuedAt.toEpochMilli()), Long.toString(expiresAt.toEpochMilli())).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var bytes = new java.io.ByteArrayOutputStream();
+        try (var output = new java.io.DataOutputStream(bytes)) {
+            output.writeInt(1);
+            for (String value : java.util.List.of(subject, transport, peerAddress, trustedSourceAddress,
+                    traceId, correlationId, assertionReference)) writeField(output, value);
+            output.writeInt(permissions.size());
+            for (String permission : permissions.stream().sorted().toList()) writeField(output, permission);
+            // HTTP/Kafka 元数据线格式精度为毫秒，签名必须使用相同精度。
+            output.writeLong(issuedAt.toEpochMilli());
+            output.writeLong(expiresAt.toEpochMilli());
+            return bytes.toByteArray();
+        } catch (java.io.IOException failure) {
+            throw new java.io.UncheckedIOException("in-memory canonical encoding failed", failure);
+        }
+    }
+
+    private static void writeField(final java.io.DataOutputStream output, final String value)
+            throws java.io.IOException {
+        byte[] encoded = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        output.writeInt(encoded.length);
+        output.write(encoded);
     }
 
 

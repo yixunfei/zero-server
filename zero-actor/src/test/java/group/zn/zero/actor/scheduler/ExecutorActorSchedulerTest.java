@@ -3,6 +3,7 @@ package group.zn.zero.actor.scheduler;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -199,7 +200,10 @@ class ExecutorActorSchedulerTest {
         CompletionException failure = assertThrows(CompletionException.class, () -> stage.toCompletableFuture().join());
         ZeroException zero = assertInstanceOf(ZeroException.class, failure.getCause());
         assertEquals(SystemErrorCode.SYSTEM_ERROR, zero.errorCode());
-        assertTrue(zero.getMessage().contains(message));
+        // 对外消息已裁剪为安全说明；原始异常文本仅保留在 cause 链中。
+        assertEquals(SystemErrorCode.SYSTEM_ERROR.message(), zero.getMessage());
+        assertNotNull(zero.getCause());
+        assertTrue(String.valueOf(zero.getCause().getMessage()).contains(message));
     }
 
     private void assertSystemFailureCode(final java.util.concurrent.CompletionStage<Void> stage) {

@@ -10,6 +10,9 @@ import group.zn.zero.core.error.ErrorCode;
  */
 public enum ActorErrorCode implements ErrorCode {
 
+    /** 处理超时；lane 在真实完成前隔离，不提前释放串行许可。 */
+    EXECUTION_TIMEOUT(ErrorCategory.SYSTEM, "ZERO-ACTOR-EXECUTION-TIMEOUT", "actor execution timed out"),
+
     /** 消息预算耗尽，不接受本次消息。 */
     CAPACITY_EXCEEDED(ErrorCategory.SYSTEM, "ZERO-ACTOR-CAPACITY-EXCEEDED", "actor capacity exceeded"),
 

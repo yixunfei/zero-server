@@ -27,6 +27,7 @@ final class RuntimeBuildTransaction {
             final PlannedRuntime planned,
             final RuntimeDeadline assemblyDeadline,
             final Duration startupTimeout,
+            final Duration shutdownTimeout,
             final LongSupplier nanoTime) {
         BuildResourceLedger resources = new BuildResourceLedger();
         RuntimeBindings.Mutable bindings = RuntimeBindings.mutable();
@@ -39,7 +40,7 @@ final class RuntimeBuildTransaction {
         }
         tracker.state(group.zn.zero.runtime.api.RuntimeState.BUILT);
         return new DefaultGameRuntime(
-                planned.plan(), bindings.freeze(), components, resources, tracker, startupTimeout, nanoTime);
+                planned.plan(), bindings.freeze(), components, resources, tracker, startupTimeout, shutdownTimeout, nanoTime);
     }
 
     private void createProvider(

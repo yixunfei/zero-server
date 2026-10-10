@@ -43,6 +43,42 @@ class LocalConfigFileWatcherTest {
     @TempDir
     private Path tempDirectory;
 
+    /** 实际文件变更触发 watcher 主失败，观察者异常只能追加，不能覆盖主错误。 */
+    @Test void watcherPrimaryFailureRetainsObserverFailureAsSuppressed() throws Exception {
+        Path source = tempDirectory.resolve("observer-failure.csv");
+        write(source, "id,name\n1,initial\n");
+        var primary = new IllegalStateException("request-factory");
+        var local = ConfigReloadRequestFactory.local("watcher-test");
+        var observed = new CompletableFuture<Void>();
+        try (ExecutorService worker = Executors.newSingleThreadExecutor()) {
+            var service = new LocalConfigHotReloadService(worker,
+                    (table, version, time) -> {
+                        if (version > 1) throw primary;
+                        return local.create(table, version, time);
+                    }, (request, result) -> {
+                        if (result.errorCode() == ConfigReloadErrorCode.WATCHER_FAILED) {
+                            observed.complete(null);
+                            throw new IllegalArgumentException("observer");
+                        }
+                    }, new ConfigHotReloadOptions(true, Duration.ofMillis(1), Duration.ofSeconds(1)));
+            service.register(definition(source));
+            service.start();
+            try {
+                write(source, "id,name\n1,updated\n");
+                observed.get(5, TimeUnit.SECONDS);
+                assertFalse(service.healthy());
+            } finally {
+                var stopFailure = assertThrows(ZeroException.class, service::stop);
+                assertEquals(ConfigReloadErrorCode.WATCHER_STOP_FAILED, stopFailure.errorCode());
+            }
+            var failure = service.watcherFailure().orElseThrow();
+            assertSame(primary, failure.getCause());
+            assertEquals(1, failure.getSuppressed().length);
+            assertEquals(ConfigReloadErrorCode.OBSERVER_FAILED,
+                    ((ZeroException) failure.getSuppressed()[0]).errorCode());
+        }
+    }
+
     /**
      * CFHR-09：验证普通文件事件只命中对应表，OVERFLOW 命中目录内全部受管表。
      */
@@ -82,6 +118,7 @@ class LocalConfigFileWatcherTest {
                     ConfigReloadRequestFactory.local("watcher-test"),
                     (request, result) -> results.add(result),
                     new ConfigHotReloadOptions(true, Duration.ofMillis(250), Duration.ofSeconds(2)));
+            service.authorizer((name, request, automatic) -> automatic);
             ConfigTable<Integer, WatchedItem> table = service.register(definition(source));
             service.start();
 

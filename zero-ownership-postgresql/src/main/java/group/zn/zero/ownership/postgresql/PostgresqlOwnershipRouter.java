@@ -50,6 +50,7 @@ public final class PostgresqlOwnershipRouter implements OwnershipRouter {
             throw new IllegalArgumentException("endpoint must not be blank");
         }
         try (Connection connection = database.connection()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
             try {
                 validateLease(connection, lease);
@@ -76,6 +77,12 @@ public final class PostgresqlOwnershipRouter implements OwnershipRouter {
             } catch (SQLException | RuntimeException failure) {
                 PostgresqlOwnershipSupport.rollback(connection, failure);
                 throw failure;
+            } finally {
+                try {
+                    connection.setAutoCommit(originalAutoCommit);
+                } catch (SQLException failure) {
+                    throw PostgresqlOwnershipSupport.failure("PostgreSQL ownership route cleanup failed", failure);
+                }
             }
         } catch (SQLException failure) {
             throw PostgresqlOwnershipSupport.failure("PostgreSQL ownership route publish failed", failure);

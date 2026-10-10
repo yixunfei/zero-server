@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentMap;
  *
  * @author zn
  */
-public final class InMemoryRpcTransport implements RpcTransport, RpcHandlerRegistry {
+public final class InMemoryRpcTransport implements RpcTransport, RpcHandlerRegistry, AutoCloseable {
 
     /**
      * 请求路由表。
@@ -35,6 +35,15 @@ public final class InMemoryRpcTransport implements RpcTransport, RpcHandlerRegis
      * 传输可用状态。
      */
     private volatile boolean available = true;
+    /** 关闭是永久状态，不能通过 available(true) 恢复。 */
+    private volatile boolean closed;
+
+    /** 禁止新请求并清理路由；已交给 handler 的阶段仍由 handler 负责完成，不伪造取消。 */
+    @Override public synchronized void close() {
+        closed = true;
+        available = false;
+        requestHandlers.clear();
+    }
 
     /**
      * 返回提供者名称。
@@ -99,7 +108,8 @@ public final class InMemoryRpcTransport implements RpcTransport, RpcHandlerRegis
      * @param methodName 方法名；不可为空。
      * @param handler 处理器；不可为空。
      */
-    public void register(final String serviceName, final String methodName, final RpcHandler handler) {
+    public synchronized void register(final String serviceName, final String methodName, final RpcHandler handler) {
+        if (closed) throw ZeroException.of(RpcErrorCode.TRANSPORT_UNAVAILABLE);
         requestHandlers.put(new RpcRoute(serviceName, methodName), Objects.requireNonNull(handler, "handler"));
     }
 
@@ -109,8 +119,22 @@ public final class InMemoryRpcTransport implements RpcTransport, RpcHandlerRegis
      * @param serviceName 服务名；不可为空。
      * @param methodName 方法名；不可为空。
      */
-    public void unregister(final String serviceName, final String methodName) {
+    public synchronized void unregister(final String serviceName, final String methodName) {
         requestHandlers.remove(new RpcRoute(serviceName, methodName));
+    }
+
+    /** 独占注册路由；关闭句柄不会删除后来替换的处理器。 */
+    @Override
+    public synchronized group.zn.zero.rpc.spi.RpcHandlerRegistration registerScoped(final String serviceName,
+            final String methodName, final String topic, final String group, final RpcHandler handler) {
+        if (closed) throw ZeroException.of(RpcErrorCode.TRANSPORT_UNAVAILABLE);
+        RpcRoute route = new RpcRoute(serviceName, methodName);
+        Objects.requireNonNull(handler, "handler");
+        RpcHandler owned = handler::handle;
+        if (requestHandlers.putIfAbsent(route, owned) != null) {
+            throw ZeroException.of(RpcErrorCode.CONTRACT_INVALID, "rpc route already registered", null);
+        }
+        return () -> requestHandlers.remove(route, owned);
     }
 
     /**
@@ -118,7 +142,8 @@ public final class InMemoryRpcTransport implements RpcTransport, RpcHandlerRegis
      *
      * @param available 是否可用。
      */
-    public void available(final boolean available) {
+    public synchronized void available(final boolean available) {
+        if (closed && available) throw ZeroException.of(RpcErrorCode.TRANSPORT_UNAVAILABLE);
         this.available = available;
     }
 
@@ -137,7 +162,7 @@ public final class InMemoryRpcTransport implements RpcTransport, RpcHandlerRegis
             throw ZeroException.of(RpcErrorCode.TRANSPORT_UNAVAILABLE, "rpc transport is unavailable", null);
         }
         Instant timeoutAt = current.timeoutAt();
-        if (timeoutAt.isBefore(Instant.now())) {
+        if (!timeoutAt.isAfter(Instant.now())) {
             throw ZeroException.of(RpcErrorCode.REQUEST_TIMEOUT,
                     "rpc request already timed out: " + current.correlationId(),
                     null);

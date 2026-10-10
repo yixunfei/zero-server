@@ -84,6 +84,23 @@ class OutboundCompletionTest {
         }
     }
 
+    /** 异常关闭会使在途发送失败，业务不得提前收到成功或误认为对端已确认。 */
+    @Test void channelCloseCompletesInflightSendAsFailure() {
+        try (Fixture fixture = new Fixture()) {
+            fixture.immediate = false;
+            var result = fixture.connection.sendFrames(List.of(FRAME, FRAME)).toCompletableFuture();
+            assertFalse(result.isDone());
+            fixture.active = false;
+            fixture.promises.getFirst().setFailure(new java.nio.channels.ClosedChannelException());
+            assertFalse(result.isDone());
+            fixture.promises.getLast().setFailure(new java.nio.channels.ClosedChannelException());
+            assertFailed(result, NetErrorCode.SEND_FAILED);
+            fixture.assertReleased();
+            assertFailed(fixture.connection.send(FRAME).toCompletableFuture(), NetErrorCode.SEND_FAILED);
+            fixture.assertReleased();
+        }
+    }
+
     @Test void eventLoopRejectionAndDisconnectedQueueReleaseExactlyOnce() {
         try (Fixture fixture = new Fixture()) {
             fixture.outside = true;

@@ -147,6 +147,9 @@ public final class ZeroProductionRuntimeConfigKeys {
      */
     public static final String RPC_KAFKA_CLOSE_TIMEOUT_MILLIS = "zero.rpc.kafka.close-timeout-millis";
 
+    /** Kafka 运行期客户端 IO 超时，独立于启动健康检查预算。 */
+    public static final String RPC_KAFKA_IO_TIMEOUT_MILLIS = "zero.rpc.kafka.io-timeout-millis";
+
     /**
      * MongoDB data 显式启用开关。
      */
@@ -171,6 +174,9 @@ public final class ZeroProductionRuntimeConfigKeys {
      * Redis cache 名称配置键。
      */
     public static final String ADAPTER_CACHE_REDIS_CACHE_NAME = "zero.adapter.cache.redis.cache-name";
+
+    /** Redis L2 读取故障的正冷却窗口，ISO-8601 Duration，默认 PT1S。 */
+    public static final String ADAPTER_CACHE_REDIS_FAILURE_COOLDOWN = "zero.adapter.cache.redis.failure-cooldown";
 
     /**
      * PostgreSQL data 显式启用开关。

@@ -7,6 +7,9 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * 基于原子状态的生命周期基类。
  *
+ * <p>状态申请使用短实例锁，doStart/doStop 在锁外运行。同向请求幂等，相反过渡快速拒绝；
+ * 不强制中断用户代码，子类回调不得依赖整个启动/停止过程持有实例监视器。</p>
+ *
  * @author zn
  */
 public abstract class AbstractLifecycle implements Lifecycle {
@@ -22,16 +25,18 @@ public abstract class AbstractLifecycle implements Lifecycle {
      * @throws group.zn.zero.core.error.ZeroException 启动失败时抛出，必须绑定 ErrorCode。
      */
     @Override
-    public final synchronized void start() {
-        LifecycleState current = state.get();
-        beforeStartRequest();
-        if (current == LifecycleState.RUNNING || current == LifecycleState.STARTING) {
-            return;
+    public final void start() {
+        synchronized (this) {
+            LifecycleState current = state.get();
+            beforeStartRequest();
+            if (current == LifecycleState.RUNNING || current == LifecycleState.STARTING) {
+                return;
+            }
+            if (current == LifecycleState.STOPPING) {
+                throw ZeroException.of(SystemErrorCode.SYSTEM_ERROR, "Lifecycle is stopping and cannot start", null);
+            }
+            state.set(LifecycleState.STARTING);
         }
-        if (current == LifecycleState.STOPPING) {
-            throw ZeroException.of(SystemErrorCode.SYSTEM_ERROR, "Lifecycle is stopping and cannot start", null);
-        }
-        state.set(LifecycleState.STARTING);
         try {
             doStart();
             state.set(LifecycleState.RUNNING);
@@ -42,24 +47,26 @@ public abstract class AbstractLifecycle implements Lifecycle {
     }
 
     /**
-     * 停止组件。
+     * 停止组件；线程安全，STARTING 期间拒绝而不等待用户启动代码。
      *
      * @throws group.zn.zero.core.error.ZeroException 停止失败时抛出，必须绑定 ErrorCode。
      */
     @Override
-    public final synchronized void stop() {
-        LifecycleState current = state.get();
-        if (current == LifecycleState.NEW || current == LifecycleState.STOPPED) {
-            state.set(LifecycleState.STOPPED);
-            return;
+    public final void stop() {
+        synchronized (this) {
+            LifecycleState current = state.get();
+            if (current == LifecycleState.NEW || current == LifecycleState.STOPPED) {
+                state.set(LifecycleState.STOPPED);
+                return;
+            }
+            if (current == LifecycleState.STOPPING) {
+                return;
+            }
+            if (current == LifecycleState.STARTING) {
+                throw ZeroException.of(SystemErrorCode.SYSTEM_ERROR, "Lifecycle is starting and cannot stop", null);
+            }
+            state.set(LifecycleState.STOPPING);
         }
-        if (current == LifecycleState.STOPPING) {
-            return;
-        }
-        if (current == LifecycleState.STARTING) {
-            throw ZeroException.of(SystemErrorCode.SYSTEM_ERROR, "Lifecycle is starting and cannot stop", null);
-        }
-        state.set(LifecycleState.STOPPING);
         try {
             doStop();
             state.set(LifecycleState.STOPPED);

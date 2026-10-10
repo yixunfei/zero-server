@@ -46,7 +46,7 @@ ${field.writeCode}</#if>
         int objectEnd = reader.BeginObject();
         ${messageName} message = new ${messageName}();
 <#if hasNullableFields>
-        bool[] presence = reader.HasRemainingInObject(objectEnd) ? reader.ReadPresenceBits() : Array.Empty<bool>();
+        bool[] presence = reader.HasRemainingInObject(objectEnd) ? reader.ReadPresenceBits(${nullableFieldCount?c}) : Array.Empty<bool>();
 </#if>
 <#list readFields as field>
 <#if field.nullable>

@@ -931,26 +931,30 @@ public final class ZeroReader {
     }
 
     /**
-     * 读取 nullable 字段 presence bitmap。
+     * 读取 schema 已知的 nullable presence 位，跳过未知位图尾部；仅所属线程调用。
      *
-     * @return 布尔数组；不可为空；有序；可能为空数组。
+     * @param knownFieldCount schema 中的 nullable 字段数；必须来自可信 schema，不得使用网络长度。
+     * @return 独立可变布尔数组；有序、可能为空、非线程安全；长度不超过已知字段数。
+     * @throws IllegalArgumentException 已知字段数为负数时抛出。
+     * @throws group.zn.zero.core.error.ZeroException 线长度非法或完整位图越过对象边界时抛出。
      */
-    public boolean[] readPresenceBits() {
+    public boolean[] readPresenceBits(final int knownFieldCount) {
+        if (knownFieldCount < 0) throw new IllegalArgumentException("knownFieldCount must not be negative");
         int fieldCount = readSize();
-        if (fieldCount < 0) {
-            throw invalid("field count must not be negative");
-        }
         int byteCount = fieldCount / Byte.SIZE + (fieldCount % Byte.SIZE == 0 ? 0 : 1);
         requireReadable(byteCount);
-        boolean[] values = new boolean[fieldCount];
-        for (int byteIndex = 0; byteIndex < byteCount; byteIndex++) {
+        int knownCount = Math.min(fieldCount, knownFieldCount);
+        boolean[] values = new boolean[knownCount];
+        int knownBytes = knownCount / Byte.SIZE + (knownCount % Byte.SIZE == 0 ? 0 : 1);
+        for (int byteIndex = 0; byteIndex < knownBytes; byteIndex++) {
             int word = readByte() & 0xFF;
             int base = byteIndex * Byte.SIZE;
-            int end = Math.min(fieldCount, base + Byte.SIZE);
+            int end = base + Math.min(knownCount - base, Byte.SIZE);
             for (int bitIndex = base; bitIndex < end; bitIndex++) {
                 values[bitIndex] = ((word >>> (bitIndex - base)) & 1) != 0;
             }
         }
+        readerIndex += byteCount - knownBytes;
         return values;
     }
 

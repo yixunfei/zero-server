@@ -83,7 +83,7 @@ class PrometheusHttpEndpointTest {
     @Test
     void lifecycleAndResponsesShouldBeDeterministic() throws Exception {
         InMemoryMetricRegistry registry = new InMemoryMetricRegistry();
-        registry.register(new MetricDefinition("zero_requests_total", "requests", "count", List.of("result")));
+        registry.register(new MetricDefinition("zero_requests_total", "requests", "count", List.of("result"), group.zn.zero.monitor.MetricType.COUNTER));
         registry.record(new MetricSample("zero_requests_total", 2D, Map.of("result", "ok"), Instant.parse("2026-08-04T00:00:00Z")));
         registry.record(new MetricSample("zero_requests_total", 3D, Map.of("result", "ok"), Instant.parse("2026-08-04T00:00:01Z")));
         PrometheusHttpEndpoint endpoint = new PrometheusHttpEndpoint(new InetSocketAddress("127.0.0.1", 0), registry, executor);
@@ -127,6 +127,49 @@ class PrometheusHttpEndpointTest {
             try (java.net.ServerSocket rebound = new java.net.ServerSocket(port, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
                 assertEquals(port, rebound.getLocalPort());
             }
+        }
+    }
+
+    /** 就绪状态随业务快照变化，存活独立；鉴权、路由和失败关闭保持有效。 */
+    @Test
+    void readinessTracksBusinessAndFailsClosed() throws Exception {
+        var ready = new java.util.concurrent.atomic.AtomicBoolean();
+        var broken = new java.util.concurrent.atomic.AtomicBoolean();
+        try (var endpoint = new PrometheusHttpEndpoint(new InetSocketAddress("127.0.0.1", 0),
+                new InMemoryMetricRegistry(), executor, "test-token", () -> {
+                    if (broken.get()) throw new IllegalStateException("private dependency information");
+                    return ready.get();
+                }); var client = HttpClient.newHttpClient()) {
+            endpoint.start();
+            String base = "http://127.0.0.1:" + endpoint.address().getPort();
+            var uri = URI.create(base + "/ready");
+            assertEquals(401, client.send(HttpRequest.newBuilder(uri).GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).statusCode());
+            var request = HttpRequest.newBuilder(uri).header("Authorization", "Bearer test-token").GET().build();
+            assertEquals(503, client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode());
+            ready.set(true);
+            assertEquals(200, client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode());
+            ready.set(false);
+            assertEquals(503, client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode());
+            assertEquals(200, client.send(HttpRequest.newBuilder(URI.create(base + "/health"))
+                    .header("Authorization", "Bearer test-token").GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+            broken.set(true);
+            var failed = client.send(request, HttpResponse.BodyHandlers.ofString());
+            assertEquals(503, failed.statusCode());
+            assertFalse(failed.body().contains("private"));
+            for (String path : List.of("/ready/extra", "/readyness")) {
+                assertEquals(404, client.send(HttpRequest.newBuilder(URI.create(base + path))
+                        .header("Authorization", "Bearer test-token").GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+            }
+            assertEquals(405, client.send(HttpRequest.newBuilder(uri).header("Authorization", "Bearer test-token")
+                    .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+        }
+        try (var endpoint = new PrometheusHttpEndpoint(new InetSocketAddress("127.0.0.1", 0),
+                new InMemoryMetricRegistry(), executor); var client = HttpClient.newHttpClient()) {
+            endpoint.start();
+            assertEquals(503, client.send(HttpRequest.newBuilder(URI.create(
+                    "http://127.0.0.1:" + endpoint.address().getPort() + "/ready")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).statusCode());
         }
     }
 }

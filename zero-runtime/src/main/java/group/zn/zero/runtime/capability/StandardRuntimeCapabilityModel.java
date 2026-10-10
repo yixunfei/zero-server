@@ -137,7 +137,12 @@ public final class StandardRuntimeCapabilityModel {
         provider(model, LOCAL_LOG_SINK, TERMINAL_LOG_SINK);
         provider(model, LOCAL_LOG_APPENDER, LOG_APPENDER);
         provider(model, LOCAL_DEAD_LETTER, DEAD_LETTER_SINK);
-        provider(model, LOCAL_EVENT_BUS, EVENT_BUS);
+        model.provider(new RuntimeProviderCapability(
+                LOCAL_EVENT_BUS,
+                List.of(EVENT_BUS),
+                List.of(EXECUTORS),
+                STANDARD_PROFILES,
+                List.of(MavenCoordinate.zero("zero-runtime-event"))));
         provider(model, LOCAL_ACTOR, ACTOR_SCHEDULER);
         provider(model, LOCAL_PROTOCOL, PROTOCOL_REGISTRY);
         model.provider(new RuntimeProviderCapability(

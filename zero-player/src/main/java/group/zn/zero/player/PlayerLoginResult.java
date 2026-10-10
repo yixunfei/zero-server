@@ -9,19 +9,21 @@ import java.util.Objects;
  *
  * @param accountId 账号 ID。
  * @param uid 玩家 ID。
+ * @param sessionId 不透明会话身份；用于防止旧连接解除新会话。
  * @param traceId 链路追踪 ID。
  * @author zn
  */
-public record PlayerLoginResult(String accountId, long uid, String traceId) {
+public record PlayerLoginResult(String accountId, long uid, String sessionId, String traceId) {
 
     /**
      * 创建玩家登录结果。
      *
-     * @throws NullPointerException 当 accountId 或 traceId 为空时抛出。
-     * @throws IllegalArgumentException 当 accountId 或 traceId 为空白时抛出。
+     * @throws NullPointerException 当 accountId、sessionId 或 traceId 为空时抛出。
+     * @throws IllegalArgumentException 当 accountId、sessionId 或 traceId 为空白时抛出。
      */
     public PlayerLoginResult {
         accountId = requireText(accountId, "accountId");
+        sessionId = requireText(sessionId, "sessionId");
         traceId = requireText(traceId, "traceId");
     }
 

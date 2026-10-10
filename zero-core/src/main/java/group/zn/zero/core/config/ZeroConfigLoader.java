@@ -90,7 +90,7 @@ public final class ZeroConfigLoader {
             return new SourcedZeroConfig(config.asMap(), origins);
         } catch (IOException ex) {
             throw ZeroException.of(
-                    SystemErrorCode.INVALID_ARGUMENT,
+                    SystemErrorCode.CONFIGURATION_ERROR,
                     "failed to load zero config file: " + checkedPath,
                     ex);
         }

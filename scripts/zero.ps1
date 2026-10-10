@@ -5,9 +5,6 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$StateDir = if ($env:ZERO_STATE_DIR) { $env:ZERO_STATE_DIR } else { Join-Path $RootDir 'target/zero-entry' }
-$PidFile = Join-Path $StateDir 'server.pid'
-$MetaFile = Join-Path $StateDir 'server.meta'
 $MavenCommand = if ($env:MAVEN_CMD) { $env:MAVEN_CMD } elseif ($env:ZERO_MAVEN_CMD) { $env:ZERO_MAVEN_CMD } else { $null }
 
 function Show-Usage {
@@ -20,8 +17,11 @@ Commands:
   generate [options]             Generate a project with NewLocalGame
   test [--projectDir DIR] [args] Run repository or generated-project tests
   diagnose --projectDir DIR      Inspect a generated project without running it
-  run --projectDir DIR           Run generated project and record a controlled PID
-  stop                           Stop only the PID recorded by this entrypoint
+  run --projectDir DIR           Run foreground demo; nonzero on failure
+  demo --projectDir DIR          Alias for run
+  serve --projectDir DIR         Start generated Server and wait for readiness
+  status                         Report verified JVM identity and readiness
+  stop                           Request graceful shutdown and wait
   help                           Show this help
 '@
 }
@@ -33,7 +33,8 @@ function Assert-Root {
 function Invoke-JavaTool([string[]] $ToolArgs) {
     Assert-Root
     $env:ZERO_MAVEN_CMD = Get-MavenCommand
-    & java @ToolArgs
+    Push-Location $RootDir
+    try { & java @ToolArgs } finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 function Invoke-Doctor { Invoke-JavaTool @('scripts/ZeroLocalDoctor.java') }
@@ -67,42 +68,10 @@ function Invoke-Diagnose {
     $projectDir = Get-ProjectDir '--projectDir'
     Invoke-JavaTool @('scripts/InspectLocalScaffold.java', '--projectDir', $projectDir)
 }
-function Invoke-Run {
-    $projectDir = Get-ProjectDir '--projectDir'
-    Assert-Root
-    if (-not (Test-Path (Join-Path $projectDir 'pom.xml'))) { throw 'zero: run requires a generated project with --projectDir DIR' }
-    New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
-    if (Test-Path $PidFile) {
-        $old = (Get-Content $PidFile -Raw).Trim()
-        $oldPid = 0
-        $oldProcess = $null
-        if ([int]::TryParse($old, [ref]$oldPid)) { $oldProcess = Get-Process -Id $oldPid -ErrorAction SilentlyContinue }
-        if ($oldProcess) { throw "zero: a managed server is already running (pid=$oldPid)" }
-        Remove-Item $PidFile, $MetaFile -Force -ErrorAction SilentlyContinue
-    }
-    $log = Join-Path $StateDir 'server.log'
-    $errorLog = Join-Path $StateDir 'server.error.log'
-    $process = Start-Process -FilePath (Get-MavenCommand) -ArgumentList @('-q', "-Dzero.entry.projectDir=$((Resolve-Path $projectDir).Path)", 'exec:java') -WorkingDirectory (Resolve-Path $projectDir) -RedirectStandardOutput $log -RedirectStandardError $errorLog -PassThru
-    Set-Content -Path $PidFile -Value $process.Id -NoNewline
-    "pid=$($process.Id)`nprojectDir=$((Resolve-Path $projectDir).Path)" | Set-Content $MetaFile
-    "zero-run=started|pid=$($process.Id)|projectDir=$projectDir|log=$log"
+function Invoke-ProcessCommand {
+    Invoke-JavaTool (@('scripts/ZeroProcess.java', $Command.ToLowerInvariant()) + $Arguments)
 }
-function Invoke-Stop {
-    New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
-    if (-not (Test-Path $PidFile)) { 'zero-stop=idle|managed=false'; return }
-    $raw = (Get-Content $PidFile -Raw).Trim(); $managedPid = 0
-    if (-not [int]::TryParse($raw, [ref]$managedPid)) { Remove-Item $PidFile, $MetaFile -Force -ErrorAction SilentlyContinue; 'zero-stop=cleaned|managed=false'; return }
-    $process = Get-Process -Id $managedPid -ErrorAction SilentlyContinue
-    if ($process) {
-        $metaProject = $null
-        if (Test-Path $MetaFile) { $metaProject = ((Get-Content $MetaFile | Where-Object { $_ -like 'projectDir=*' }) -replace '^projectDir=', '') }
-        $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $managedPid").CommandLine
-        if (-not $commandLine -or $commandLine -notmatch '(?i)mvn' -or ($metaProject -and $commandLine -notlike "*$metaProject*")) { throw "zero: managed PID identity mismatch (pid=$managedPid)" }
-        Stop-Process -Id $managedPid -Force
-        "zero-stop=stopped|pid=$managedPid"
-    } else { "zero-stop=already-stopped|pid=$managedPid" }
-    Remove-Item $PidFile, $MetaFile -Force -ErrorAction SilentlyContinue
-}
+
 try {
     switch ($Command.ToLowerInvariant()) {
         'doctor' { Invoke-Doctor }
@@ -110,9 +79,16 @@ try {
         'generate' { Invoke-Generate }
         'test' { Invoke-Test }
         'diagnose' { Invoke-Diagnose }
-        'run' { Invoke-Run }
-        'stop' { Invoke-Stop }
+        'run' { Invoke-ProcessCommand }
+        'demo' { Invoke-ProcessCommand }
+        'serve' { Invoke-ProcessCommand }
+        'status' { Invoke-ProcessCommand }
+        'stop' { Invoke-ProcessCommand }
         'help' { Show-Usage }
-        default { Write-Error "zero: unknown command: $Command"; Show-Usage; exit 2 }
+        default { [Console]::Error.WriteLine("zero: unknown command: $Command"); Show-Usage; exit 2 }
     }
-} catch { Write-Error $_; exit 1 }
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    if ($env:ZERO_DEBUG -eq '1') { [Console]::Error.WriteLine($_.ScriptStackTrace) }
+    exit 1
+}

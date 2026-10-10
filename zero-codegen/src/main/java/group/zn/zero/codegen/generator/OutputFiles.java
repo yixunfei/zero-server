@@ -21,12 +21,22 @@ final class OutputFiles {
     /** 拒绝链接和非普通目标，避免跟随链接写出显式目录。 */
     static void validate(final Path path) throws IOException {
         for (Path parent = path; parent != null; parent = parent.getParent()) {
+            if (parent.getFileName() != null) validateSegment(parent.getFileName().toString());
             if (Files.isSymbolicLink(parent)) {
                 throw new IOException("output path must not contain symbolic links: " + parent);
             }
             if (Files.exists(parent) && !(parent.equals(path) ? Files.isRegularFile(parent) : Files.isDirectory(parent))) {
                 throw new IOException("invalid output path: " + parent);
             }
+        }
+    }
+
+    /** 所有平台采用同一可移植路径规则，盘符根不作为段传入。 */
+    private static void validateSegment(final String segment) throws IOException {
+        String stem = segment.split("\\.", -1)[0].toUpperCase(java.util.Locale.ROOT);
+        if (segment.matches("(?s).*[<>:\"/\\\\|?*\\x00-\\x1f].*") || segment.endsWith(".") || segment.endsWith(" ")
+                || stem.matches("CON|PRN|AUX|NUL|COM[0-9⁰¹²³⁴⁵⁶⁷⁸⁹]|LPT[0-9⁰¹²³⁴⁵⁶⁷⁸⁹]")) {
+            throw new IOException("non-portable output path segment: " + segment);
         }
     }
 

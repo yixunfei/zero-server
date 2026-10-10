@@ -63,6 +63,8 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
 
     /** Received security metadata verifier. */
     private final SecurityMetadataVerifier securityMetadataVerifier;
+    /** 请求级 metadata 校验的独立有界超时，不阻塞 EventLoop。 */
+    private final java.time.Duration metadataVerificationTimeout;
 
     /**
      * 实际绑定地址。
@@ -117,6 +119,24 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
     public NettyHttpServer(final ServerOptions options, final HttpRequestHandler handler,
             final Executor handlerExecutor, final SecurityMetadataVerifier securityMetadataVerifier,
             final NettyIoResources ioResources) {
+        this(options, handler, handlerExecutor, securityMetadataVerifier, ioResources, java.time.Duration.ofSeconds(3));
+    }
+
+    /**
+     * 创建显式校验超时的 HTTP 服务；不创建线程，IO 资源关闭责任与其他构造器一致。
+     * @param options HTTP 配置。 @param handler 业务 handler。 @param handlerExecutor 受管业务执行器。
+     * @param securityMetadataVerifier 异步校验器。 @param ioResources 借用 IO 组；可为空。
+     * @param metadataVerificationTimeout 正数校验超时；必须可表示为纳秒。
+     * @throws IllegalArgumentException 配置、超时非法。 @throws NullPointerException 必填参数为空。
+     */
+    public NettyHttpServer(final ServerOptions options, final HttpRequestHandler handler,
+            final Executor handlerExecutor, final SecurityMetadataVerifier securityMetadataVerifier,
+            final NettyIoResources ioResources, final java.time.Duration metadataVerificationTimeout) {
+        this.metadataVerificationTimeout = Objects.requireNonNull(metadataVerificationTimeout, "verificationTimeout");
+        if (metadataVerificationTimeout.isZero() || metadataVerificationTimeout.isNegative()) {
+            throw new IllegalArgumentException("metadata verification timeout must be positive");
+        }
+        metadataVerificationTimeout.toNanos();
         this.borrowedResources = ioResources;
         this.options = Objects.requireNonNull(options, "options");
         if (options.serverType() != ServerType.HTTP) {
@@ -183,22 +203,30 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
                         @Override
                         protected void initChannel(final SocketChannel channel) {
                             current.track(channel);
+                            NettyHttpRequestGuard guard = new NettyHttpRequestGuard(
+                                    options.maxFrameLength(), options.httpRequestTimeout());
                             channel.pipeline()
+                                    .addLast("httpInputDeadline", guard.inputDeadline())
                                     .addLast("httpCodec", new HttpServerCodec())
                                     .addLast("aggregator", new HttpObjectAggregator(options.maxFrameLength()))
+                                    .addLast("httpAdmission", guard)
                                     .addLast("httpHandler", new NettyHttpChannelHandler(
-                                            handler, handlerExecutor, securityMetadataVerifier));
+                                            handler, handlerExecutor, securityMetadataVerifier, metadataVerificationTimeout))
+                                    .addLast("httpFailures", new HttpFailureObserver());
                         }
                     });
             Channel serverChannel = current.bind(bootstrap.bind(options.host(), options.port()));
             boundAddress.set((InetSocketAddress) serverChannel.localAddress());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            shutdownGroups();
+            cleanupAfterFailure(ex);
             throw ZeroException.of(NetErrorCode.START_FAILED, "start netty http server interrupted", ex);
         } catch (Exception ex) {
-            shutdownGroups();
+            cleanupAfterFailure(ex);
             throw ZeroException.of(NetErrorCode.START_FAILED, "start netty http server failed", ex);
+        } catch (Error failure) {
+            cleanupAfterFailure(failure);
+            throw failure;
         }
     }
 
@@ -213,10 +241,28 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
         finally { boundAddress.set(null); }
     }
 
+    /** 启动清理保留原始异常，资源清理失败作为次要诊断。 */
+    private void cleanupAfterFailure(final Throwable failure) {
+        try { shutdownGroups(); }
+        catch (RuntimeException | Error cleanupFailure) {
+            if (cleanupFailure != failure) failure.addSuppressed(cleanupFailure);
+        } finally { boundAddress.set(null); }
+    }
+
     private void shutdownGroups() {
         if (resources != null) {
-            resources.close();
+            NettyServerResources current = resources;
             resources = null;
+            current.close();
+        }
+    }
+
+    /** HTTP 终端异常观察点；只记录稳定错误码，避免泄露业务异常文本。 */
+    private static final class HttpFailureObserver extends io.netty.channel.ChannelInboundHandlerAdapter {
+        /** 业务响应已处理，诊断不再传播到 Netty tail。 */
+        @Override public void exceptionCaught(final ChannelHandlerContext context, final Throwable cause) {
+            String code = cause instanceof ZeroException error ? error.errorCode().code() : NetErrorCode.HANDLER_FAILED.code();
+            System.getLogger(NettyHttpServer.class.getName()).log(System.Logger.Level.ERROR, code);
         }
     }
 
@@ -239,11 +285,19 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
 
         /** Received security metadata verifier. */
         private final SecurityMetadataVerifier securityMetadataVerifier;
+    /** 请求级 metadata 校验的独立有界超时，不阻塞 EventLoop。 */
+    private final java.time.Duration metadataVerificationTimeout;
 
         NettyHttpChannelHandler(
                 final HttpRequestHandler handler,
                 final Executor handlerExecutor,
                 final SecurityMetadataVerifier securityMetadataVerifier) {
+            this(handler, handlerExecutor, securityMetadataVerifier, java.time.Duration.ofSeconds(3));
+        }
+
+        NettyHttpChannelHandler(final HttpRequestHandler handler, final Executor handlerExecutor,
+                final SecurityMetadataVerifier securityMetadataVerifier, final java.time.Duration timeout) {
+            this.metadataVerificationTimeout = timeout;
             this.handler = Objects.requireNonNull(handler, "handler");
             this.handlerExecutor = Objects.requireNonNull(handlerExecutor, "handlerExecutor");
             this.securityMetadataVerifier = Objects.requireNonNull(
@@ -281,24 +335,42 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
                     writeUnauthorized(context);
                     return;
                 }
-                CompletionStage<SecurityContext> verified = securityMetadataVerifier.verify(
-                        snapshot, java.time.Instant.now());
-                if (verified == null) {
-                    writeUnauthorized(context);
-                    return;
-                }
-                verified.whenComplete((securityContext, failure) -> context.executor().execute(() -> {
-                    if (failure != null || securityContext == null || securityContext.expired(java.time.Instant.now())) {
-                        writeUnauthorized(context);
-                        return;
-                    }
-                    submitHandler(context, request, securityContext);
-                }));
+                verifyWithinDeadline(context, request, snapshot);
             } catch (RuntimeException invalidMetadata) {
                 writeUnauthorized(context);
             } catch (Error failure) {
                 writeFailure(context, ZeroException.of(NetErrorCode.HANDLER_FAILED,
                         "HTTP security verifier failed", failure));
+            }
+        }
+
+        /** 独立完成屏障处理超时/校验竞争；回调只在 EventLoop 提交一次结果。 */
+        private void verifyWithinDeadline(final ChannelHandlerContext context,
+                final HttpRequest request, final SecurityMetadataSnapshot snapshot) {
+            var bounded = new java.util.concurrent.CompletableFuture<SecurityContext>();
+            var timeout = context.executor().schedule(
+                    () -> bounded.completeExceptionally(new java.util.concurrent.TimeoutException("metadata verification")),
+                    metadataVerificationTimeout.toNanos(), java.util.concurrent.TimeUnit.NANOSECONDS);
+            bounded.whenComplete((identity, failure) -> {
+                timeout.cancel(false);
+                context.executor().execute(() -> {
+                    if (!context.channel().isActive()) return;
+                    if (failure != null || identity == null || identity.expired(java.time.Instant.now())) {
+                        writeUnauthorized(context);
+                    } else {
+                        submitHandler(context, request, identity);
+                    }
+                });
+            });
+            try {
+                CompletionStage<SecurityContext> stage = Objects.requireNonNull(
+                        securityMetadataVerifier.verify(snapshot, java.time.Instant.now()), "verification stage");
+                stage.whenComplete((identity, failure) -> {
+                    if (failure == null) bounded.complete(identity);
+                    else bounded.completeExceptionally(failure);
+                });
+            } catch (RuntimeException | Error failure) {
+                bounded.completeExceptionally(failure);
             }
         }
 
@@ -330,8 +402,8 @@ public final class NettyHttpServer extends AbstractLifecycle implements IServer 
 
         private boolean hasDuplicateHeaders(final HttpHeaders headers) {
             java.util.Set<String> names = new java.util.HashSet<>();
-            for (String name : headers.names()) {
-                String normalized = name.toLowerCase(java.util.Locale.ROOT);
+            for (Map.Entry<String, String> entry : headers) {
+                String normalized = entry.getKey().toLowerCase(java.util.Locale.ROOT);
                 if (!names.add(normalized)) {
                     return true;
                 }

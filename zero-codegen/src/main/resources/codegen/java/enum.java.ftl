@@ -50,6 +50,6 @@ public enum ${name} {
                 return item;
             }
         }
-        throw new IllegalArgumentException("unknown ${name} value: " + value);
+        throw new java.lang.IllegalArgumentException("unknown ${name} value: " + value);
     }
 }

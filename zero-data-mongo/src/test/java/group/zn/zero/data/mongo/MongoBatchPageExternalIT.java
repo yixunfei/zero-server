@@ -6,10 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
-import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.data.envelope.ZeroDataEnvelope;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeStore.ConditionalWrite;
-import group.zn.zero.data.error.DataErrorCode;
 import group.zn.zero.data.model.PageRequest;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,7 +15,7 @@ import java.util.UUID;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
-/** Mongo 真实批次与分页验证；聚合 CAS 未匹配必须失败且允许部分提交。 @author zn */
+/** Mongo 真实批次与分页验证；逐项 CAS 冲突准确返回 false，后续项继续且同 ID 保序。 @author zn */
 class MongoBatchPageExternalIT {
 
     /** 使用独立临时库，验证跨分块顺序、页外损坏隔离和有序 bulk 冲突。 */
@@ -52,20 +50,18 @@ class MongoBatchPageExternalIT {
                         new ConditionalWrite(envelope("p001", 2), 9),
                         new ConditionalWrite(envelope("p301", 1), 0),
                         new ConditionalWrite(envelope("p000", 3), 2));
-                var failure = assertThrows(ZeroException.class, () -> store.saveIfVersionBatch(mixed));
-                assertEquals(DataErrorCode.VERSION_CONFLICT, failure.errorCode());
+                assertEquals(List.of(true, false, true, true), store.saveIfVersionBatch(mixed));
                 assertEquals(3, store.findById("p000").orElseThrow().version());
                 assertEquals(1, store.findById("p001").orElseThrow().version());
                 assertTrue(store.findById("p301").isPresent());
                 var duplicate = List.of(new ConditionalWrite(envelope("p302", 1), 0),
                         new ConditionalWrite(envelope("p000", 1), 0),
                         new ConditionalWrite(envelope("p303", 1), 0));
-                assertEquals(DataErrorCode.VERSION_CONFLICT,
-                        assertThrows(ZeroException.class, () -> store.saveIfVersionBatch(duplicate)).errorCode());
+                assertEquals(List.of(true, false, true), store.saveIfVersionBatch(duplicate));
                 assertTrue(store.findById("p302").isPresent());
-                assertTrue(store.findById("p303").isEmpty());
+                assertTrue(store.findById("p303").isPresent());
                 var deletes = new ArrayList<>(ids);
-                deletes.addAll(List.of("p301", "p302", "p000", "absent"));
+                deletes.addAll(List.of("p301", "p302", "p303", "p000", "absent"));
                 store.deleteAll(deletes);
                 assertEquals(0, store.count());
             } finally {

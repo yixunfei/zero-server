@@ -70,9 +70,25 @@ public enum GmErrorCode implements ErrorCode {
             "ZERO-GM-OPERATION-AUTHORIZATION-DENIED",
             "gm operation authorization denied"),
 
-    /**
-     * GM 审计 hook 执行失败。
-     */
+    /** 幂等容量不足；操作尚未执行，允许延迟重试。 */
+    IDEMPOTENCY_CAPACITY_EXCEEDED(ErrorCategory.SYSTEM,
+            "ZERO-GM-IDEMPOTENCY-CAPACITY-EXCEEDED", "gm idempotency capacity exceeded"),
+    /** 同键不同请求；禁止重试同键。 */
+    IDEMPOTENCY_CONFLICT(ErrorCategory.CLIENT_REQUEST,
+            "ZERO-GM-IDEMPOTENCY-CONFLICT", "gm idempotency fingerprint conflict"),
+    /** 同键业务仍在执行；不得再次触发业务。 */
+    IDEMPOTENCY_IN_PROGRESS(ErrorCategory.CLIENT_REQUEST,
+            "ZERO-GM-IDEMPOTENCY-IN-PROGRESS", "gm operation is in progress"),
+    /** 历史失败提交状态不确定；需要人工确认，TTL 内不自动重执行。 */
+    IDEMPOTENCY_FAILED(ErrorCategory.CLIENT_REQUEST,
+            "ZERO-GM-IDEMPOTENCY-FAILED", "gm operation previously failed"),
+    /** 幂等后端不可用；须结合提交状态，不能盲重试。 */
+    IDEMPOTENCY_STORE_FAILED(ErrorCategory.SYSTEM,
+            "ZERO-GM-IDEMPOTENCY-STORE-FAILED", "gm idempotency store failed"),
+    /** 当前查询快照/筛选器不存在该游标，调用者应显式重新开始查询。 */
+    AUDIT_CURSOR_INVALID(ErrorCategory.CLIENT_REQUEST,
+            "ZERO-GM-AUDIT-CURSOR-INVALID", "gm audit cursor is invalid for this query"),
+    /** GM 审计 hook 执行失败。 */
     AUDIT_HOOK_FAILED(ErrorCategory.SYSTEM, "ZERO-GM-AUDIT-HOOK-FAILED", "gm audit hook failed");
 
     /**

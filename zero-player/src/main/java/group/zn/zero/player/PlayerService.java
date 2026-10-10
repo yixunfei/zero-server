@@ -25,6 +25,18 @@ public interface PlayerService {
     CompletionStage<PlayerLoginResult> login(PlayerLoginRequest request);
 
     /**
+     * 解除精确会话绑定。
+     * <p>线程安全。默认本地实现先解绑再投递 player lane 清理；投递失败保留有界清理意图，
+     * 调用方应在调度器恢复后用相同账号、UID、sessionId 重试。意图上限 4096，满额在解绑前拒绝。
+     * 在途重复请求共享清理结果；取消返回的观察者不取消清理。成功重新登录同 UID 会使旧清理失效。
+     * @param request 登出请求；不可为空。
+     * @return 解绑或原待清理重试完成返回 true；已完成或被替换的旧请求返回 false；异步完成。
+     * 原解绑在途期间发生替换登录时，原调用仍返回 true，且不会清理替换身份的资料。
+     * @throws NullPointerException 请求为空。
+     */
+    CompletionStage<Boolean> logout(PlayerLogoutRequest request);
+
+    /**
      * 加载玩家在线数据。
      *
      * <p>数据变更：在 player lane 内创建或替换玩家在线档案。线程安全性由实现保证。

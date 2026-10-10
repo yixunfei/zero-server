@@ -74,6 +74,10 @@ public enum RuntimeErrorCode implements ErrorCode {
     RUNTIME_STARTUP_TIMEOUT(ErrorCategory.SYSTEM,
             "ZERO-RUNTIME-STARTUP-TIMEOUT", "runtime startup timed out"),
 
+    /** 停止累计预算耗尽或仍有真实未完成调用，资源保持隔离。 */
+    RUNTIME_SHUTDOWN_TIMEOUT(ErrorCategory.SYSTEM,
+            "ZERO-RUNTIME-SHUTDOWN-TIMEOUT", "runtime shutdown timed out"),
+
     /** lifecycle 停止失败。 */
     RUNTIME_COMPONENT_STOP_FAILED(ErrorCategory.SYSTEM,
             "ZERO-RUNTIME-COMPONENT-STOP-FAILED", "runtime component stop failed"),

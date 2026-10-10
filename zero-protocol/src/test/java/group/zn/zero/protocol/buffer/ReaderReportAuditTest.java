@@ -12,7 +12,7 @@ class ReaderReportAuditTest {
     /** 最大合法整数长度但无载荷，必须返回协议错误。 */
     @Test void malformedBitmapDoesNotAllocateFromUntrustedCount() {
         byte[] payload = {(byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff, 7};
-        assertThrows(ZeroException.class, () -> new ZeroReader(payload).readPresenceBits());
+        assertThrows(ZeroException.class, () -> new ZeroReader(payload).readPresenceBits(1));
         assertThrows(ZeroException.class, () -> new ZeroReader(payload).readIntArray());
     }
     /** 非法集合在工厂拿到攻击者容量前拒绝。 */

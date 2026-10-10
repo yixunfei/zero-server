@@ -40,12 +40,11 @@ if (-not (Test-Path $javac)) {
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 Push-Location $repo
 try {
-    & mvn -pl zero-codegen -am package -q -DskipTests
+    $wrapper = Join-Path $repo $(if ($IsWindows) { 'mvnw.cmd' } else { 'mvnw' })
+    & $wrapper -pl zero-codegen -am package -q -DskipTests
     Assert-Exit 'Maven package'
 
-    $jars = @(Get-ChildItem (Join-Path $codegen 'target') -Filter '*-all.jar')
-    if ($jars.Count -ne 1) { throw 'Expected exactly one codegen *-all.jar; clean the build first.' }
-    $jar = $jars[0].FullName
+    $jar = & (Join-Path $repo 'scripts/ResolveCodegen.ps1') -RepositoryRoot $repo
     $dsl = Join-Path $runRoot 'schema'
     Copy-Item (Join-Path $codegen 'src/test/resources/protocol-dsl/standard-flow') $dsl -Recurse
     Copy-Item (Join-Path $fixture 'schema/*.si') $dsl

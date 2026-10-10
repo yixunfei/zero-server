@@ -31,6 +31,8 @@ final class KcpSession implements KcpDispatchEndpoint {
     private final KcpPathValidator paths;
     /** 延迟创建的算法；只有完成认证与包验证才创建。 */
     private Kcp engine;
+    /** 未投递接收段的元数据；与算法相同 EventLoop 生命周期。 */
+    private final KcpReceiveTracker receiveTracker;
     /** 首次通过认证后固定的 UDP 端点。 */
     volatile InetSocketAddress remote;
     /** 公开的线程安全句柄。 */
@@ -65,6 +67,7 @@ final class KcpSession implements KcpDispatchEndpoint {
         this.control = control;
         this.subject = identity.subject();
         this.identity = identity;
+        receiveTracker = new KcpReceiveTracker(owner.config().tuning().receiveWindow());
         transport = new KcpTransport(ticket, true, owner.config(), owner.algorithms(),
                 owner::reserveFec, owner::releaseFec, owner.counters()::reason);
         paths = new KcpPathValidator(owner.config().transport().paths());
@@ -116,14 +119,21 @@ final class KcpSession implements KcpDispatchEndpoint {
         }
         owner.rejected("unvalidated_path"); return false;
     }
-    private void inputBody(final ByteBuf body) {
+    private void inputBody(final ByteBuf body, final boolean recovered) {
         if (closed) return;
         if (!body.isReadable()) { output(Unpooled.EMPTY_BUFFER); return; }
         if (!KcpSegments.valid(body, ticket.conv(), owner.config())) { owner.fail(this, NetErrorCode.INVALID_MESSAGE, null); return; }
-        if ((frozen || peerQuiescing) && KcpSegments.hasPush(body)) { owner.rejected("migration_frozen"); return; }
+        boolean quiesced = frozen || peerQuiescing;
+        String rejection = receiveTracker.accept(body, quiesced && !recovered);
+        if (rejection != null) {
+            owner.counters().reason(rejection);
+            owner.fail(this, NetErrorCode.INVALID_MESSAGE, null);
+            return;
+        }
         int waiting = engine.waitSnd();
         if (engine.input(body, true, nowMillis()) != 0) { owner.fail(this, NetErrorCode.INVALID_MESSAGE, null); return; }
-        engine.flush(true, nowMillis()); drain(); releaseAcknowledged(waiting);
+        // 静默期只允许已投递旧段重传和控制段；ACK-only 也不能触发业务 drain，没有解冻契约。
+        engine.flush(true, nowMillis()); if (!quiesced || recovered) drain(); releaseAcknowledged(waiting);
     }
     private void emit(final ByteBuf packet) {
         if (closed || remote == null || !owner.channel().isWritable()) { packet.release(); owner.rejected("socket_backpressure"); }
@@ -136,9 +146,7 @@ final class KcpSession implements KcpDispatchEndpoint {
         owner.config().tuning().apply(engine);
         engine.update(nowMillis());
         connection.attributes().put(ProductionNetworkConnectionAttributes.SECURITY_CONTEXT,
-                new group.zn.zero.security.SecurityContext(identity.subject(), identity.authenticatedAt(),
-                        identity.expiresAt(), "kcp", sender.toString(), identity.trustedSourceAddress(),
-                        identity.traceId(), identity.correlationId(), identity.permissions(), identity.attributes()));
+                identity.withTransport("kcp", sender.toString()));
         dispatch.open();
     }
     void send(final ProtocolFrame frame, final long charge, final CompletableFuture<Void> result) {
@@ -188,12 +196,13 @@ final class KcpSession implements KcpDispatchEndpoint {
         if (!authorized()) { owner.fail(this, NetErrorCode.AUTHENTICATION_EXPIRED, null); return; }
         long lifetime = remote == null ? owner.config().timeouts().bindTimeout().toNanos()
                 : owner.config().idleTimeout().toNanos();
-        if (now - lastSeen >= lifetime
-                || charged > 0 && now - pendingSince >= owner.config().timeouts().progressTimeout().toNanos()) {
+        boolean progressExpired = !frozen && !peerQuiescing && charged > 0
+                && now - pendingSince >= owner.config().timeouts().progressTimeout().toNanos();
+        if (now - lastSeen >= lifetime || progressExpired) {
             owner.fail(this, NetErrorCode.HEARTBEAT_TIMEOUT, null);
             return;
         }
-        if (engine != null && engine.waitSnd() > 0) {
+        if (!frozen && !peerQuiescing && engine != null && engine.waitSnd() > 0) {
             owner.counters().updates.incrementAndGet();
             engine.update(nowMillis());
             if (engine.getState() == -1) owner.fail(this, NetErrorCode.SEND_FAILED, null);
@@ -208,17 +217,27 @@ final class KcpSession implements KcpDispatchEndpoint {
         try { if (engine != null) engine.release(); }
         finally {
             engine = null;
+            receiveTracker.clear();
             transport.close(); dispatch.close();
         }
     }
     private void drain() {
         while (!closed && engine.canRecv()) {
-            if (engine.peekSize() > owner.maxFrame()) {
+            int size = engine.peekSize();
+            int segments = receiveTracker.messageSegments(size);
+            if (size > owner.maxFrame() || segments == 0) {
                 owner.fail(this, NetErrorCode.INVALID_MESSAGE, null);
                 return;
             }
             ByteBuf message = engine.mergeRecv();
-            try { dispatch.receive(owner.codec().decode(ByteBufUtil.getBytes(message))); }
+            try {
+                if (message.readableBytes() != size) {
+                    owner.fail(this, NetErrorCode.INVALID_MESSAGE, null);
+                    return;
+                }
+                receiveTracker.delivered(segments);
+                dispatch.receive(owner.codec().decode(ByteBufUtil.getBytes(message)));
+            }
             finally { message.release(); }
         }
     }
@@ -234,7 +253,9 @@ final class KcpSession implements KcpDispatchEndpoint {
         long lifetime = remote == null ? owner.config().timeouts().bindTimeout().toNanos()
                 : owner.config().idleTimeout().toNanos();
         long next = Math.min(now + 250_000_000L, lastSeen + lifetime);
-        if (charged > 0) next = Math.min(next, pendingSince + owner.config().timeouts().progressTimeout().toNanos());
+        if (!frozen && !peerQuiescing && charged > 0) {
+            next = Math.min(next, pendingSince + owner.config().timeouts().progressTimeout().toNanos());
+        }
         if (engine != null && engine.waitSnd() > 0) {
             long delay = Math.max(1, engine.check(nowMillis()) - nowMillis());
             next = Math.min(next, now + delay * 1_000_000L);
@@ -264,7 +285,7 @@ final class KcpSession implements KcpDispatchEndpoint {
     void freeze() { frozen = true; }
     boolean frozen() { return frozen; }
     boolean peerQuiescing() { return peerQuiescing; }
-    boolean drained() { return dispatch.idle() && budget.pending() == 0 && !transport.sending(); }
+    boolean drained() { return receiveTracker.empty() && dispatch.idle() && budget.pending() == 0 && !transport.sending(); }
     KcpSessionSnapshot migrationSnapshot() {
         return new KcpSessionSnapshot(ticket.conv(), ticket.generation(), owner.sessionServices().nodeId(), subject,
                 remote, ticket.expiresAt(), transport.receiveWindow(), transport.sentSequence(), transport.receivedSequence());

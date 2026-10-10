@@ -34,6 +34,41 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class ApacheKafkaRpcMessageGatewayLifecycleTest {
+    /** 生产者默认接受 codec 上限且保留应用显式覆盖。 */
+    @Test void producerRequestBudgetMatchesEnvelopeLimit() {
+        for (int maximum : new int[] {KafkaRpcEnvelopeCodec.MAX_ENVELOPE_BYTES + 1024 * 1024, 2_000_000}) {
+            var factory = new TestClientFactory(new MockProducer<>(), () -> new HealthyPollingConsumer(new CountDownLatch(1)));
+            Map<String, Object> overrides = maximum == 2_000_000 ? Map.of("max.request.size", maximum) : Map.of();
+            var config = new KafkaRpcSettings("localhost:9092", "budget", "group", "prefix", "reply",
+                    8, Duration.ofMillis(10), Duration.ofSeconds(1), overrides, Map.of());
+            try (var gateway = new ApacheKafkaRpcMessageGateway(config, RpcTransportObserver.noop(), factory)) {
+                assertEquals(maximum, factory.producerConfiguration.get().get("max.request.size"));
+            }
+        }
+    }
+
+    /** 验证实际 consumer 工厂收到 fetch 预算，并允许应用显式覆盖。 */
+    @Test
+    void consumerFetchBudgetsReachClientAndRespectOverrides() throws InterruptedException {
+        for (Map<String, Object> overrides : List.of(Map.<String, Object>of(),
+                Map.<String, Object>of("max.poll.records", 4, "fetch.max.bytes", 8_000_000,
+                        "max.partition.fetch.bytes", 4_000_000))) {
+            CountDownLatch polled = new CountDownLatch(1);
+            TestClientFactory factory = new TestClientFactory(new MockProducer<>(),
+                    () -> new HealthyPollingConsumer(polled));
+            var config = new KafkaRpcSettings("localhost:9092", "budget-client", "budget-group",
+                    "budget", "budget-reply", 8, Duration.ofMillis(10), Duration.ofSeconds(1), Map.of(), overrides);
+            try (var gateway = new ApacheKafkaRpcMessageGateway(config, RpcTransportObserver.noop(), factory)) {
+                gateway.subscribe("budget-topic", "budget-group", message -> { });
+                assertTrue(polled.await(2, TimeUnit.SECONDS));
+                Properties actual = factory.consumerConfiguration.get();
+                assertEquals(overrides.getOrDefault("max.poll.records", 1), actual.get("max.poll.records"));
+                assertEquals(overrides.getOrDefault("fetch.max.bytes", 32 * 1024 * 1024), actual.get("fetch.max.bytes"));
+                assertEquals(overrides.getOrDefault("max.partition.fetch.bytes", 20 * 1024 * 1024),
+                        actual.get("max.partition.fetch.bytes"));
+            }
+        }
+    }
 
     /** 测试使用的第三方敏感异常标记。 */
     private static final String FAILURE_SECRET = "gateway-lifecycle-secret";
@@ -367,6 +402,12 @@ class ApacheKafkaRpcMessageGatewayLifecycleTest {
      */
     private static final class TestClientFactory implements KafkaRpcClientFactory {
 
+        /** 实际生产者配置快照。 */
+        private final AtomicReference<Properties> producerConfiguration = new AtomicReference<>();
+
+        /** 实际传给第三方 consumer 的配置快照。 */
+        private final AtomicReference<Properties> consumerConfiguration = new AtomicReference<>();
+
         /** 测试 producer。 */
         private final Producer<String, byte[]> producer;
 
@@ -394,6 +435,7 @@ class ApacheKafkaRpcMessageGatewayLifecycleTest {
          */
         @Override
         public Producer<String, byte[]> createProducer(final Properties properties) {
+            producerConfiguration.set(properties);
             return producer;
         }
 
@@ -405,6 +447,7 @@ class ApacheKafkaRpcMessageGatewayLifecycleTest {
          */
         @Override
         public Consumer<String, byte[]> createConsumer(final Properties properties) {
+            consumerConfiguration.set(properties);
             return consumers.get();
         }
     }

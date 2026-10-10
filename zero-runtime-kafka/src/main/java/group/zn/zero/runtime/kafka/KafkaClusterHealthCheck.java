@@ -54,6 +54,7 @@ final class KafkaClusterHealthCheck implements ProductionHealthProbe {
     @Override
     public void check(final Duration timeout) {
         Duration currentTimeout = requirePositive(timeout);
+        if (currentTimeout.toMillis() < 1) throw budgetFailure();
         long deadlineNanos = deadlineAfter(currentTimeout);
         Properties properties = adminProperties(currentTimeout);
         AdminClient adminClient = null;
@@ -75,8 +76,16 @@ final class KafkaClusterHealthCheck implements ProductionHealthProbe {
             Thread.currentThread().interrupt();
         }
         if (failure != null) {
+            if (failure instanceof TimeoutException && remaining(deadlineNanos).isZero()) throw budgetFailure();
             throw safeFailure(failure);
         }
+    }
+
+    /** 区分无法继续执行探针的预算耗尽与 broker 故障。 */
+    private ProductionAdapterException budgetFailure() {
+        return ProductionAdapterFailures.failure(ProductionAdapterNames.ADAPTER_KAFKA_RPC,
+                ProductionAdapterFailurePhase.STARTUP_BUDGET, ProductionAdapterErrorCode.STARTUP_BUDGET_EXHAUSTED,
+                ProductionAdapterErrorCode.STARTUP_BUDGET_EXHAUSTED.message());
     }
 
     /**
@@ -136,6 +145,14 @@ final class KafkaClusterHealthCheck implements ProductionHealthProbe {
                 properties.put(key, value);
             }
         });
+        Map<String, Object> consumer = new LinkedHashMap<>();
+        currentSettings.consumerProperties().forEach((key, value) -> {
+            if (ProductionKafkaRpcProvider.allowedClientProperty(key)) consumer.put(key, value);
+        });
+        if (!properties.equals(consumer)) {
+            throw ProductionAdapterFailures.invalidConfig(ProductionAdapterNames.ADAPTER_KAFKA_RPC,
+                    ProductionAdapterFailurePhase.CONFIG_VALIDATION, "kafka.consumer.security-properties");
+        }
         return Map.copyOf(properties);
     }
 

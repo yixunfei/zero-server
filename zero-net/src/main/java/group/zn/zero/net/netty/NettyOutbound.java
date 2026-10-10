@@ -52,19 +52,19 @@ final class NettyOutbound {
     private CompletionStage<Void> send(final ProtocolFrame frame, final List<ProtocolFrame> frames) {
         if (!channel.isActive()) return failed(NetErrorCode.SEND_FAILED, null);
         int count = frames == null ? 1 : frames.size();
-        if (!channel.isWritable() || count > options.tuning().maxPendingBytesPerConnection() / 128) {
-            return failed(NetErrorCode.OUTBOUND_OVERFLOW, null);
-        }
+        if (count > local.maximum() / 128 || count > global.maximum() / 128) return overflow("static", 128L * count);
         long bytes;
         try {
             bytes = frames == null ? reservation(frame) : reservation(frames);
         } catch (RuntimeException failure) {
             return failed(NetErrorCode.INVALID_MESSAGE, failure);
         }
-        if (!local.acquire(bytes)) return failed(NetErrorCode.OUTBOUND_OVERFLOW, null);
+        if (bytes > local.maximum() || bytes > global.maximum()) return overflow("static", bytes);
+        if (!channel.isWritable()) return overflow("unwritable", bytes);
+        if (!local.acquire(bytes)) return overflow("local-exhausted", bytes);
         if (!global.acquire(bytes)) {
             local.release(bytes);
-            return failed(NetErrorCode.OUTBOUND_OVERFLOW, null);
+            return overflow("global-exhausted", bytes);
         }
         CompletableFuture<Void> result = new CompletableFuture<>();
         try {
@@ -120,6 +120,12 @@ final class NettyOutbound {
     }
 
     private void release(final long bytes) { local.release(bytes); global.release(bytes); }
+    /** 只输出可信数值；used 是诊断快照，准入仍由原子预算决定。 */
+    private CompletionStage<Void> overflow(final String reason, final long required) {
+        return CompletableFuture.failedFuture(ZeroException.of(NetErrorCode.OUTBOUND_OVERFLOW,
+                "outbound " + reason + ": required=" + required + ", local=" + local.used() + "/" + local.maximum()
+                        + ", global=" + global.used() + "/" + global.maximum(), null));
+    }
     long pendingBytes() { return local.used(); }
     private static CompletionStage<Void> failed(final NetErrorCode code, final Throwable cause) {
         return CompletableFuture.failedFuture(error(code, cause));

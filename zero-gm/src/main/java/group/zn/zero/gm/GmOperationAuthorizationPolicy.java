@@ -18,6 +18,6 @@ public record GmOperationAuthorizationPolicy(
 
     /** Returns the policy as a validated, pluggable source-IP matcher. */
     public GmSourceIpPolicy sourceIpPolicy() {
-        return allowedSourceIps.isEmpty() ? GmSourceIpPolicy.allowAll() : GmSourceIpPolicy.of(allowedSourceIps);
+        return GmSourceIpPolicy.of(allowedSourceIps);
     }
 }

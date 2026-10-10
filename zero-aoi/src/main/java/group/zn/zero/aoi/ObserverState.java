@@ -16,7 +16,7 @@ final class ObserverState {
     Position center;
     /** 上次查询范围。 */
     int range;
-    /** 所有相等状态也使用同一实体引用；否则可变 state 的值比较可能在未更新索引时改变。 */
+    /** 当前索引实体均为同一引用时才允许查询快速路径。 */
     boolean stableIdentity;
     /** 内部遍历代次；与业务序号无关。 */
     private long generation;
@@ -52,10 +52,13 @@ final class ObserverState {
     static final class Seen {
         /** 上次可见状态，供 LEAVE 使用。 */
         AoiEntity entity;
+        /** 当前索引实体身份；与比较快照分离，以支持 equals 相等的换引用。 */
+        AoiEntity identity;
         /** 最近出现代次。 */
         long generation;
         private Seen(final AoiEntity entity, final long generation) {
             this.entity = entity;
+            this.identity = entity;
             this.generation = generation;
         }
     }

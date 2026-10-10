@@ -84,9 +84,15 @@ public interface GmSourceIpPolicy {
             AddressParts parts = split(value);
             requireLiteral(parts.address());
             try {
-                return parts.prefix() == null
-                        ? InetAddress.getByName(parts.address()).getAddress().length * Byte.SIZE
-                        : Integer.parseInt(parts.prefix());
+                int length = InetAddress.getByName(parts.address()).getAddress().length * Byte.SIZE;
+                if (parts.prefix() == null) return length;
+                int prefix = Integer.parseInt(parts.prefix());
+                // JDK 把 IPv4-mapped IPv6 规范化为四字节 IPv4。
+                if (length == 32 && parts.address().contains(":")) {
+                    if (prefix < 96 || prefix > 128) throw new IllegalArgumentException("invalid mapped IPv4 prefix");
+                    return prefix - 96;
+                }
+                return prefix;
             } catch (NumberFormatException | UnknownHostException exception) {
                 throw new IllegalArgumentException("invalid source IP policy", exception);
             }
@@ -94,7 +100,7 @@ public interface GmSourceIpPolicy {
 
         private static void requireLiteral(final String address) {
             if (address.contains(":")) {
-                if (!address.matches("[0-9A-Fa-f:]+")) {
+                if (!address.matches("[0-9A-Fa-f:.]+")) {
                     throw new IllegalArgumentException("source IP policy must use a literal address");
                 }
             } else if (!address.matches("[0-9.]+")) {

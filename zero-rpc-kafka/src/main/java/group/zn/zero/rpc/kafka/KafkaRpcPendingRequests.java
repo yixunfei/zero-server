@@ -215,6 +215,20 @@ public final class KafkaRpcPendingRequests implements AutoCloseable {
         }
         KafkaRpcTimeoutWheel.TimeoutTask timeoutTask = timeoutWheel.schedule(
                 current.correlationId(), current.timeoutAt(), pending.token());
+        if (timeoutTask == null) {
+            // 时间轮在 closed 检查后关闭：兜底失败该请求，防止 future 永久挂起和 permit 泄漏。
+            if (pendingRequests.remove(current.correlationId(), pending)) {
+                finish(pending);
+                failedCount.incrementAndGet();
+                pending.future().completeExceptionally(ZeroException.of(
+                        RpcErrorCode.TRANSPORT_UNAVAILABLE,
+                        "kafka rpc timeout wheel is closed",
+                        null));
+                observe(RpcTransportEventType.PENDING_FAILED, current, RpcErrorCode.TRANSPORT_UNAVAILABLE,
+                        "kafka rpc timeout wheel is closed");
+            }
+            return future;
+        }
         pending.timeoutTask().set(timeoutTask);
         // 响应/关闭可以先于记录发布；双方都检查，保证迟到登记不残留在时间轮。
         if (pendingRequests.get(current.correlationId()) != pending) timeoutWheel.cancel(timeoutTask);

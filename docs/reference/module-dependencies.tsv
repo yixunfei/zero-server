@@ -1,0 +1,324 @@
+# Reviewed repository modules and actual inherited/profile dependency edges. See dependency-guard-contract.zh-CN.md.
+edge	zero-actor/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-actor/pom.xml#default
+edge	zero-actor/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-aoi/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-benchmarks/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-benchmarks/pom.xml	group.zn.zero:zero-aoi:0.1.2-SNAPSHOT	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-benchmarks/pom.xml	group.zn.zero:zero-cache:0.1.2-SNAPSHOT	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-benchmarks/pom.xml	group.zn.zero:zero-frame-sync:0.1.2-SNAPSHOT	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-benchmarks/pom.xml	group.zn.zero:zero-log:0.1.2-SNAPSHOT	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-benchmarks/pom.xml	group.zn.zero:zero-monitor:0.1.2-SNAPSHOT	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-benchmarks/pom.xml	group.zn.zero:zero-net:0.1.2-SNAPSHOT	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-benchmarks/pom.xml	group.zn.zero:zero-protocol:0.1.2-SNAPSHOT	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-benchmarks/pom.xml	group.zn.zero:zero-ranking:0.1.2-SNAPSHOT	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-benchmarks/pom.xml	group.zn.zero:zero-room:0.1.2-SNAPSHOT	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-benchmarks/pom.xml	group.zn.zero:zero-scene:0.1.2-SNAPSHOT	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-benchmarks/pom.xml	group.zn.zero:zero-server-starter-production:0.1.2-SNAPSHOT	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-benchmarks/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-benchmarks/pom.xml	org.openjdk.jmh:jmh-core:1.37	compile	false	jar		zero-benchmarks/pom.xml#default
+edge	zero-cache/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-cache/pom.xml#default
+edge	zero-cache/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-codegen/pom.xml	com.google.code.gson:gson:2.13.2	compile	false	jar		zero-codegen/pom.xml#default
+edge	zero-codegen/pom.xml	group.zn.zero:zero-protocol:0.1.2-SNAPSHOT	compile	false	jar		zero-codegen/pom.xml#default
+edge	zero-codegen/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	compile	false	jar		zero-codegen/pom.xml#default
+edge	zero-codegen/pom.xml	org.freemarker:freemarker:2.3.34	compile	false	jar		zero-codegen/pom.xml#default
+edge	zero-codegen/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-core/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-data-mongo/pom.xml	group.zn.zero:zero-data:0.1.2-SNAPSHOT	compile	false	jar		zero-data-mongo/pom.xml#default
+edge	zero-data-mongo/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-data-mongo/pom.xml	org.mongodb:mongodb-driver-sync:5.9.2	compile	false	jar		zero-data-mongo/pom.xml#default
+edge	zero-data-postgresql/pom.xml	com.zaxxer:HikariCP:7.1.0	compile	false	jar		zero-data-postgresql/pom.xml#default
+edge	zero-data-postgresql/pom.xml	group.zn.zero:zero-data:0.1.2-SNAPSHOT	compile	false	jar		zero-data-postgresql/pom.xml#default
+edge	zero-data-postgresql/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-data-postgresql/pom.xml	org.postgresql:postgresql:42.7.13	compile	false	jar		zero-data-postgresql/pom.xml#default
+edge	zero-data-redis/pom.xml	group.zn.zero:zero-cache:0.1.2-SNAPSHOT	compile	false	jar		zero-data-redis/pom.xml#default
+edge	zero-data-redis/pom.xml	group.zn.zero:zero-data:0.1.2-SNAPSHOT	compile	false	jar		zero-data-redis/pom.xml#default
+edge	zero-data-redis/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-data-redis/pom.xml	redis.clients:jedis:8.0.0	compile	false	jar		zero-data-redis/pom.xml#default
+edge	zero-data/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-data/pom.xml#default
+edge	zero-data/pom.xml	group.zn.zero:zero-protocol:0.1.2-SNAPSHOT	compile	false	jar		zero-data/pom.xml#default
+edge	zero-data/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-discovery-nacos/pom.xml	com.alibaba.nacos:nacos-client:3.2.3	compile	false	jar		zero-discovery-nacos/pom.xml#default
+edge	zero-discovery-nacos/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-discovery-nacos/pom.xml#default
+edge	zero-discovery-nacos/pom.xml	group.zn.zero:zero-discovery:0.1.2-SNAPSHOT	compile	false	jar		zero-discovery-nacos/pom.xml#default
+edge	zero-discovery-nacos/pom.xml	group.zn.zero:zero-rpc-discovery:0.1.2-SNAPSHOT	test	false	jar		zero-discovery-nacos/pom.xml#default
+edge	zero-discovery-nacos/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-discovery/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-discovery/pom.xml#default
+edge	zero-discovery/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-event/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-event/pom.xml#default
+edge	zero-event/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-frame-sync/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-frame-sync/pom.xml#default
+edge	zero-frame-sync/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-game/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-game/pom.xml#default
+edge	zero-game/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-game/pom.xml#default
+edge	zero-game/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-gm-rest/pom.xml	com.google.code.gson:gson:2.13.2	compile	false	jar		zero-gm-rest/pom.xml#default
+edge	zero-gm-rest/pom.xml	group.zn.zero:zero-gm:0.1.2-SNAPSHOT	compile	false	jar		zero-gm-rest/pom.xml#default
+edge	zero-gm-rest/pom.xml	group.zn.zero:zero-net:0.1.2-SNAPSHOT	compile	false	jar		zero-gm-rest/pom.xml#default
+edge	zero-gm-rest/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-gm/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-gm/pom.xml#default
+edge	zero-gm/pom.xml	group.zn.zero:zero-log:0.1.2-SNAPSHOT	compile	false	jar		zero-gm/pom.xml#default
+edge	zero-gm/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-hot-update/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-hot-update/pom.xml#default
+edge	zero-hot-update/pom.xml	group.zn.zero:zero-log:0.1.2-SNAPSHOT	compile	false	jar		zero-hot-update/pom.xml#default
+edge	zero-hot-update/pom.xml	org.apache.commons:commons-csv:1.14.1	compile	false	jar		zero-hot-update/pom.xml#default
+edge	zero-hot-update/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-log/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-log/pom.xml#default
+edge	zero-log/pom.xml	group.zn.zero:zero-monitor:0.1.2-SNAPSHOT	compile	false	jar		zero-log/pom.xml#default
+edge	zero-log/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-logic/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-logic/pom.xml#default
+edge	zero-logic/pom.xml	group.zn.zero:zero-codegen:0.1.2-SNAPSHOT	test	false	jar		zero-logic/pom.xml#default
+edge	zero-logic/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-logic/pom.xml#default
+edge	zero-logic/pom.xml	group.zn.zero:zero-event:0.1.2-SNAPSHOT	compile	false	jar		zero-logic/pom.xml#default
+edge	zero-logic/pom.xml	group.zn.zero:zero-log:0.1.2-SNAPSHOT	compile	false	jar		zero-logic/pom.xml#default
+edge	zero-logic/pom.xml	group.zn.zero:zero-monitor:0.1.2-SNAPSHOT	compile	false	jar		zero-logic/pom.xml#default
+edge	zero-logic/pom.xml	group.zn.zero:zero-net:0.1.2-SNAPSHOT	compile	false	jar		zero-logic/pom.xml#default
+edge	zero-logic/pom.xml	group.zn.zero:zero-protocol:0.1.2-SNAPSHOT	compile	false	jar		zero-logic/pom.xml#default
+edge	zero-logic/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-monitor/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-monitor/pom.xml#default
+edge	zero-monitor/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-net-kcp-redis/pom.xml	group.zn.zero:zero-net-kcp:0.1.2-SNAPSHOT	compile	false	jar		zero-net-kcp-redis/pom.xml#default
+edge	zero-net-kcp-redis/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-net-kcp-redis/pom.xml	redis.clients:jedis:8.0.0	compile	false	jar		zero-net-kcp-redis/pom.xml#default
+edge	zero-net-kcp/pom.xml	com.github.l42111996:kcp-base:1.6.2	compile	false	jar		zero-net-kcp/pom.xml#default
+edge	zero-net-kcp/pom.xml	group.zn.zero:zero-net:0.1.2-SNAPSHOT	compile	false	jar		zero-net-kcp/pom.xml#default
+edge	zero-net-kcp/pom.xml	org.bouncycastle:bcpkix-jdk18on:1.80	test	false	jar		zero-net-kcp/pom.xml#default
+edge	zero-net-kcp/pom.xml	org.bouncycastle:bcprov-jdk18on:1.80	test	false	jar		zero-net-kcp/pom.xml#default
+edge	zero-net-kcp/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-net/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	group.zn.zero:zero-event:0.1.2-SNAPSHOT	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	group.zn.zero:zero-protocol:0.1.2-SNAPSHOT	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	group.zn.zero:zero-security:0.1.2-SNAPSHOT	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	io.netty:netty-codec-http:4.2.17.Final	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	io.netty:netty-codec:4.2.17.Final	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	io.netty:netty-handler:4.2.17.Final	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	io.netty:netty-transport-classes-epoll:4.2.17.Final	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	io.netty:netty-transport-native-epoll:4.2.17.Final	runtime	false	jar	linux-aarch_64	zero-net/pom.xml#linux-native
+edge	zero-net/pom.xml	io.netty:netty-transport-native-epoll:4.2.17.Final	runtime	false	jar	linux-x86_64	zero-net/pom.xml#linux-native
+edge	zero-net/pom.xml	io.netty:netty-transport:4.2.17.Final	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	org.bouncycastle:bcpkix-jdk18on:1.80	test	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	org.bouncycastle:bcprov-jdk18on:1.80	test	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-npc/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-npc/pom.xml#default
+edge	zero-npc/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-ownership-postgresql/pom.xml	group.zn.zero:zero-ownership:0.1.2-SNAPSHOT	compile	false	jar		zero-ownership-postgresql/pom.xml#default
+edge	zero-ownership-postgresql/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-ownership-postgresql/pom.xml	org.postgresql:postgresql:42.7.13	compile	false	jar		zero-ownership-postgresql/pom.xml#default
+edge	zero-ownership/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-ownership/pom.xml#default
+edge	zero-ownership/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-parent/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-player/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-player/pom.xml#default
+edge	zero-player/pom.xml	group.zn.zero:zero-cache:0.1.2-SNAPSHOT	compile	false	jar		zero-player/pom.xml#default
+edge	zero-player/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-player/pom.xml#default
+edge	zero-player/pom.xml	group.zn.zero:zero-data:0.1.2-SNAPSHOT	compile	false	jar		zero-player/pom.xml#default
+edge	zero-player/pom.xml	group.zn.zero:zero-game:0.1.2-SNAPSHOT	compile	false	jar		zero-player/pom.xml#default
+edge	zero-player/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-protocol/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-protocol/pom.xml#default
+edge	zero-protocol/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-ranking/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-ranking/pom.xml#default
+edge	zero-ranking/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-room/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-room/pom.xml#default
+edge	zero-room/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-rpc-common/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-rpc-common/pom.xml#default
+edge	zero-rpc-common/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-rpc-discovery/pom.xml	group.zn.zero:zero-discovery:0.1.2-SNAPSHOT	compile	false	jar		zero-rpc-discovery/pom.xml#default
+edge	zero-rpc-discovery/pom.xml	group.zn.zero:zero-rpc:0.1.2-SNAPSHOT	compile	false	jar		zero-rpc-discovery/pom.xml#default
+edge	zero-rpc-discovery/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-rpc-kafka/pom.xml	group.zn.zero:zero-discovery-nacos:0.1.2-SNAPSHOT	test	false	jar		zero-rpc-kafka/pom.xml#default
+edge	zero-rpc-kafka/pom.xml	group.zn.zero:zero-game:0.1.2-SNAPSHOT	test	false	jar		zero-rpc-kafka/pom.xml#default
+edge	zero-rpc-kafka/pom.xml	group.zn.zero:zero-rpc-discovery:0.1.2-SNAPSHOT	test	false	jar		zero-rpc-kafka/pom.xml#default
+edge	zero-rpc-kafka/pom.xml	group.zn.zero:zero-rpc:0.1.2-SNAPSHOT	compile	false	jar		zero-rpc-kafka/pom.xml#default
+edge	zero-rpc-kafka/pom.xml	group.zn.zero:zero-security:0.1.2-SNAPSHOT	compile	false	jar		zero-rpc-kafka/pom.xml#default
+edge	zero-rpc-kafka/pom.xml	org.apache.kafka:kafka-clients:4.2.0	compile	false	jar		zero-rpc-kafka/pom.xml#default
+edge	zero-rpc-kafka/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-rpc/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-rpc/pom.xml#default
+edge	zero-rpc/pom.xml	group.zn.zero:zero-protocol:0.1.2-SNAPSHOT	compile	false	jar		zero-rpc/pom.xml#default
+edge	zero-rpc/pom.xml	group.zn.zero:zero-rpc-common:0.1.2-SNAPSHOT	compile	false	jar		zero-rpc/pom.xml#default
+edge	zero-rpc/pom.xml	group.zn.zero:zero-security:0.1.2-SNAPSHOT	compile	false	jar		zero-rpc/pom.xml#default
+edge	zero-rpc/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-actor/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-actor/pom.xml#default
+edge	zero-runtime-actor/pom.xml	group.zn.zero:zero-runtime-bootstrap:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-actor/pom.xml#default
+edge	zero-runtime-actor/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-bootstrap/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-bootstrap/pom.xml#default
+edge	zero-runtime-bootstrap/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-cache/pom.xml	group.zn.zero:zero-cache:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-cache/pom.xml#default
+edge	zero-runtime-cache/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-cache/pom.xml#default
+edge	zero-runtime-cache/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-data/pom.xml	group.zn.zero:zero-data:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-data/pom.xml#default
+edge	zero-runtime-data/pom.xml	group.zn.zero:zero-runtime-bootstrap:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-data/pom.xml#default
+edge	zero-runtime-data/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-data/pom.xml#default
+edge	zero-runtime-data/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-discovery/pom.xml	group.zn.zero:zero-rpc-discovery:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-discovery/pom.xml#default
+edge	zero-runtime-discovery/pom.xml	group.zn.zero:zero-runtime-rpc:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-discovery/pom.xml#default
+edge	zero-runtime-discovery/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-discovery/pom.xml#default
+edge	zero-runtime-discovery/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-event/pom.xml	group.zn.zero:zero-event:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-event/pom.xml#default
+edge	zero-runtime-event/pom.xml	group.zn.zero:zero-runtime-bootstrap:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-event/pom.xml#default
+edge	zero-runtime-event/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-event/pom.xml#default
+edge	zero-runtime-event/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-kafka/pom.xml	group.zn.zero:zero-rpc-kafka:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-kafka/pom.xml#default
+edge	zero-runtime-kafka/pom.xml	group.zn.zero:zero-runtime-log:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-kafka/pom.xml#default
+edge	zero-runtime-kafka/pom.xml	group.zn.zero:zero-runtime-production:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-kafka/pom.xml#default
+edge	zero-runtime-kafka/pom.xml	group.zn.zero:zero-runtime-rpc:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-kafka/pom.xml#default
+edge	zero-runtime-kafka/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-kcp/pom.xml	group.zn.zero:zero-net-kcp:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-kcp/pom.xml#default
+edge	zero-runtime-kcp/pom.xml	group.zn.zero:zero-runtime-monitor:0.1.2-SNAPSHOT	compile	true	jar		zero-runtime-kcp/pom.xml#default
+edge	zero-runtime-kcp/pom.xml	group.zn.zero:zero-runtime-net:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-kcp/pom.xml#default
+edge	zero-runtime-kcp/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-log/pom.xml	group.zn.zero:zero-log:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-log/pom.xml#default
+edge	zero-runtime-log/pom.xml	group.zn.zero:zero-runtime-bootstrap:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-log/pom.xml#default
+edge	zero-runtime-log/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-mongo/pom.xml	group.zn.zero:zero-data-mongo:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-mongo/pom.xml#default
+edge	zero-runtime-mongo/pom.xml	group.zn.zero:zero-runtime-data:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-mongo/pom.xml#default
+edge	zero-runtime-mongo/pom.xml	group.zn.zero:zero-runtime-production:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-mongo/pom.xml#default
+edge	zero-runtime-mongo/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-monitor/pom.xml	group.zn.zero:zero-monitor:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-monitor/pom.xml#default
+edge	zero-runtime-monitor/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-monitor/pom.xml#default
+edge	zero-runtime-monitor/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-nacos/pom.xml	group.zn.zero:zero-discovery-nacos:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-nacos/pom.xml#default
+edge	zero-runtime-nacos/pom.xml	group.zn.zero:zero-runtime-discovery:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-nacos/pom.xml#default
+edge	zero-runtime-nacos/pom.xml	group.zn.zero:zero-runtime-production:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-nacos/pom.xml#default
+edge	zero-runtime-nacos/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-net/pom.xml	group.zn.zero:zero-log:0.1.2-SNAPSHOT	compile	true	jar		zero-runtime-net/pom.xml#default
+edge	zero-runtime-net/pom.xml	group.zn.zero:zero-monitor:0.1.2-SNAPSHOT	compile	true	jar		zero-runtime-net/pom.xml#default
+edge	zero-runtime-net/pom.xml	group.zn.zero:zero-net:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-net/pom.xml#default
+edge	zero-runtime-net/pom.xml	group.zn.zero:zero-runtime-log:0.1.2-SNAPSHOT	test	false	jar		zero-runtime-net/pom.xml#default
+edge	zero-runtime-net/pom.xml	group.zn.zero:zero-runtime-monitor:0.1.2-SNAPSHOT	test	false	jar		zero-runtime-net/pom.xml#default
+edge	zero-runtime-net/pom.xml	group.zn.zero:zero-runtime-production:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-net/pom.xml#default
+edge	zero-runtime-net/pom.xml	group.zn.zero:zero-security:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-net/pom.xml#default
+edge	zero-runtime-net/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-postgresql/pom.xml	com.zaxxer:HikariCP:7.1.0	compile	false	jar		zero-runtime-postgresql/pom.xml#default
+edge	zero-runtime-postgresql/pom.xml	group.zn.zero:zero-data-postgresql:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-postgresql/pom.xml#default
+edge	zero-runtime-postgresql/pom.xml	group.zn.zero:zero-runtime-data:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-postgresql/pom.xml#default
+edge	zero-runtime-postgresql/pom.xml	group.zn.zero:zero-runtime-production:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-postgresql/pom.xml#default
+edge	zero-runtime-postgresql/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-production/pom.xml	group.zn.zero:zero-runtime-bootstrap:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-production/pom.xml#default
+edge	zero-runtime-production/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-protocol/pom.xml	group.zn.zero:zero-protocol:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-protocol/pom.xml#default
+edge	zero-runtime-protocol/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-protocol/pom.xml#default
+edge	zero-runtime-protocol/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-redis/pom.xml	group.zn.zero:zero-data-redis:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-redis/pom.xml#default
+edge	zero-runtime-redis/pom.xml	group.zn.zero:zero-runtime-cache:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-redis/pom.xml#default
+edge	zero-runtime-redis/pom.xml	group.zn.zero:zero-runtime-data:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-redis/pom.xml#default
+edge	zero-runtime-redis/pom.xml	group.zn.zero:zero-runtime-production:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-redis/pom.xml#default
+edge	zero-runtime-redis/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-rpc/pom.xml	group.zn.zero:zero-rpc:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-rpc/pom.xml#default
+edge	zero-runtime-rpc/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-rpc/pom.xml#default
+edge	zero-runtime-rpc/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime/pom.xml#default
+edge	zero-runtime/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-scene/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-scene/pom.xml#default
+edge	zero-scene/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-scene/pom.xml#default
+edge	zero-scene/pom.xml	group.zn.zero:zero-game:0.1.2-SNAPSHOT	compile	false	jar		zero-scene/pom.xml#default
+edge	zero-scene/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-security/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-security/pom.xml#default
+edge	zero-security/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-server-starter-production/pom.xml	group.zn.zero:zero-runtime-kafka:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter-production/pom.xml#default
+edge	zero-server-starter-production/pom.xml	group.zn.zero:zero-runtime-mongo:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter-production/pom.xml#default
+edge	zero-server-starter-production/pom.xml	group.zn.zero:zero-runtime-nacos:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter-production/pom.xml#default
+edge	zero-server-starter-production/pom.xml	group.zn.zero:zero-runtime-net:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter-production/pom.xml#default
+edge	zero-server-starter-production/pom.xml	group.zn.zero:zero-runtime-postgresql:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter-production/pom.xml#default
+edge	zero-server-starter-production/pom.xml	group.zn.zero:zero-runtime-production:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter-production/pom.xml#default
+edge	zero-server-starter-production/pom.xml	group.zn.zero:zero-runtime-redis:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter-production/pom.xml#default
+edge	zero-server-starter-production/pom.xml	group.zn.zero:zero-server-starter:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter-production/pom.xml#default
+edge	zero-server-starter-production/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-cache:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-codegen:0.1.2-SNAPSHOT	test	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-data-mongo:0.1.2-SNAPSHOT	test	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-data-postgresql:0.1.2-SNAPSHOT	test	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-data-redis:0.1.2-SNAPSHOT	test	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-data:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-discovery-nacos:0.1.2-SNAPSHOT	test	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-event:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-game:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-gm:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-hot-update:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-log:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-logic:0.1.2-SNAPSHOT	test	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-monitor:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-net:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-player:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-protocol:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-rpc-discovery:0.1.2-SNAPSHOT	test	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-rpc-kafka:0.1.2-SNAPSHOT	test	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-rpc:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-runtime-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-runtime-bootstrap:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-runtime-cache:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-runtime-data:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-runtime-event:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-runtime-log:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-runtime-monitor:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-runtime-protocol:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-runtime-rpc:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	group.zn.zero:zero-scene:0.1.2-SNAPSHOT	compile	false	jar		zero-server-starter/pom.xml#default
+edge	zero-server-starter/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-state-sync/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-world/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-world/pom.xml#default
+edge	zero-world/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+module	pom.xml	group.zn.zero:zero-server:0.1.2-SNAPSHOT	root
+module	zero-actor/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-aoi/pom.xml	group.zn.zero:zero-aoi:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-benchmarks/pom.xml	group.zn.zero:zero-benchmarks:0.1.2-SNAPSHOT	pom.xml#benchmarks,pom.xml#performance-gate
+module	zero-bom/pom.xml	group.zn.zero:zero-bom:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-cache/pom.xml	group.zn.zero:zero-cache:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-codegen/pom.xml	group.zn.zero:zero-codegen:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-core/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-data-mongo/pom.xml	group.zn.zero:zero-data-mongo:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-data-postgresql/pom.xml	group.zn.zero:zero-data-postgresql:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-data-redis/pom.xml	group.zn.zero:zero-data-redis:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-data/pom.xml	group.zn.zero:zero-data:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-discovery-nacos/pom.xml	group.zn.zero:zero-discovery-nacos:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-discovery/pom.xml	group.zn.zero:zero-discovery:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-event/pom.xml	group.zn.zero:zero-event:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-frame-sync/pom.xml	group.zn.zero:zero-frame-sync:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-game/pom.xml	group.zn.zero:zero-game:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-gm-rest/pom.xml	group.zn.zero:zero-gm-rest:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-gm/pom.xml	group.zn.zero:zero-gm:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-hot-update/pom.xml	group.zn.zero:zero-hot-update:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-log/pom.xml	group.zn.zero:zero-log:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-logic/pom.xml	group.zn.zero:zero-logic:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-monitor/pom.xml	group.zn.zero:zero-monitor:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-net-kcp-redis/pom.xml	group.zn.zero:zero-net-kcp-redis:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-net-kcp/pom.xml	group.zn.zero:zero-net-kcp:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-net/pom.xml	group.zn.zero:zero-net:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-npc/pom.xml	group.zn.zero:zero-npc:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-ownership-postgresql/pom.xml	group.zn.zero:zero-ownership-postgresql:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-ownership/pom.xml	group.zn.zero:zero-ownership:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-parent/pom.xml	group.zn.zero:zero-parent:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-player/pom.xml	group.zn.zero:zero-player:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-protocol/pom.xml	group.zn.zero:zero-protocol:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-ranking/pom.xml	group.zn.zero:zero-ranking:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-room/pom.xml	group.zn.zero:zero-room:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-rpc-common/pom.xml	group.zn.zero:zero-rpc-common:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-rpc-discovery/pom.xml	group.zn.zero:zero-rpc-discovery:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-rpc-kafka/pom.xml	group.zn.zero:zero-rpc-kafka:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-rpc/pom.xml	group.zn.zero:zero-rpc:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-actor/pom.xml	group.zn.zero:zero-runtime-actor:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-bootstrap/pom.xml	group.zn.zero:zero-runtime-bootstrap:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-cache/pom.xml	group.zn.zero:zero-runtime-cache:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-data/pom.xml	group.zn.zero:zero-runtime-data:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-discovery/pom.xml	group.zn.zero:zero-runtime-discovery:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-event/pom.xml	group.zn.zero:zero-runtime-event:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-kafka/pom.xml	group.zn.zero:zero-runtime-kafka:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-kcp/pom.xml	group.zn.zero:zero-runtime-kcp:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-log/pom.xml	group.zn.zero:zero-runtime-log:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-mongo/pom.xml	group.zn.zero:zero-runtime-mongo:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-monitor/pom.xml	group.zn.zero:zero-runtime-monitor:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-nacos/pom.xml	group.zn.zero:zero-runtime-nacos:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-net/pom.xml	group.zn.zero:zero-runtime-net:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-postgresql/pom.xml	group.zn.zero:zero-runtime-postgresql:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-production/pom.xml	group.zn.zero:zero-runtime-production:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-protocol/pom.xml	group.zn.zero:zero-runtime-protocol:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-redis/pom.xml	group.zn.zero:zero-runtime-redis:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime-rpc/pom.xml	group.zn.zero:zero-runtime-rpc:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-runtime/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-scene/pom.xml	group.zn.zero:zero-scene:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-security/pom.xml	group.zn.zero:zero-security:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-server-starter-production/pom.xml	group.zn.zero:zero-server-starter-production:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-server-starter/pom.xml	group.zn.zero:zero-server-starter:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-state-sync/pom.xml	group.zn.zero:zero-state-sync:0.1.2-SNAPSHOT	pom.xml#default
+module	zero-world/pom.xml	group.zn.zero:zero-world:0.1.2-SNAPSHOT	pom.xml#default

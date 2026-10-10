@@ -3,6 +3,7 @@ package group.zn.zero.player;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import group.zn.zero.actor.scheduler.LocalActorScheduler;
 import group.zn.zero.cache.InMemoryCacheService;
@@ -89,6 +90,28 @@ class MissingPlayerPolicyTest {
             assertEquals(7, service.login(new PlayerLoginRequest("account", "token", "trace"))
                     .toCompletableFuture().join().uid());
             assertEquals(1, service.loadPlayer(new PlayerLoadRequest(7, "trace")).toCompletableFuture().join().version());
+        }
+    }
+
+    /** UID 排他且过期连接不得解除替换后的会话。 */
+    @Test void logoutRequiresExactSessionAndUidIsExclusive() {
+        var repository = new InMemoryCrudRepository<Long, PlayerProfile>();
+        repository.save(new PlayerProfile(7, "registered", true)).toCompletableFuture().join();
+        try (var service = new LocalPlayerService(new LocalActorScheduler(), request -> 7, repository,
+                new InMemoryCacheService<>(), Runnable::run)) {
+            PlayerLoginResult first = service.login(new PlayerLoginRequest("account-a", "token", "first"))
+                    .toCompletableFuture().join();
+            assertThrows(CompletionException.class, () -> service.login(new PlayerLoginRequest("account-b", "token", "second"))
+                    .toCompletableFuture().join());
+            assertTrue(service.logout(new PlayerLogoutRequest("account-a", 7, first.sessionId(), "logout"))
+                    .toCompletableFuture().join());
+            PlayerLoginResult replacement = service.login(new PlayerLoginRequest("account-a", "token", "replacement"))
+                    .toCompletableFuture().join();
+            assertFalse(service.logout(new PlayerLogoutRequest("account-a", 7, first.sessionId(), "stale"))
+                    .toCompletableFuture().join());
+            assertEquals(7L, service.querySession("account-a", "query").toCompletableFuture().join().orElseThrow());
+            assertTrue(service.logout(new PlayerLogoutRequest("account-a", 7, replacement.sessionId(), "logout"))
+                    .toCompletableFuture().join());
         }
     }
 

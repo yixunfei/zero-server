@@ -43,6 +43,10 @@ final class KcpSessions {
         }
         Instant expires = now.plus(owner.config().ticketLifetime());
         if (expires.isAfter(context.expiresAt())) expires = context.expiresAt();
+        // 接入至少保留一次完整 connect 超时窗口，不能延长权威认证有效期。
+        if (java.time.Duration.between(now, expires).compareTo(owner.config().timeouts().bindTimeout()) < 0) {
+            throw KcpServer.error(NetErrorCode.AUTHENTICATION_EXPIRED, null);
+        }
         int conv;
         do { conv = random.nextInt(); } while (conv == 0 || entries.containsKey(conv));
         return register(control, context, ticket(conv, expires, 1), false);

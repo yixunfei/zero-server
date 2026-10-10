@@ -345,6 +345,23 @@ public final class ZeroAcceptanceEvidence {
         }
     }
 
+    /** 当前根 POM 的字面版本；禁用外部实体，不回退历史构件。 */
+    private static String reactorVersion() throws IOException {
+        try {
+            var factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            var model = factory.newDocumentBuilder().parse(Path.of("pom.xml").toFile());
+            String value = javax.xml.xpath.XPathFactory.newInstance().newXPath().evaluate("/project/version", model).trim();
+            if (!value.matches("[A-Za-z0-9][A-Za-z0-9_.-]*")) throw new IOException("invalid reactor version");
+            return value;
+        } catch (javax.xml.parsers.ParserConfigurationException | org.xml.sax.SAXException
+                | javax.xml.xpath.XPathExpressionException failure) {
+            throw new IOException("cannot read reactor version", failure);
+        }
+    }
+
     private static Path createConfigLintFixture(final Path root) throws IOException {
         Path fixture = OUTPUT.resolve("config-lint-fixture");
         Files.createDirectories(fixture);
@@ -352,7 +369,7 @@ public final class ZeroAcceptanceEvidence {
                 + "  \"schemaVersion\": 1,\n  \"ownershipSchemaVersion\": 1,\n"
                 + "  \"generator\": \"zero-codegen/project-scaffold\",\n"
                 + "  \"projectName\": \"acceptance\",\n  \"packageName\": \"group.example.acceptance\",\n"
-                + "  \"zeroVersion\": \"0.1.1\",\n  \"template\": \"runtime\",\n"
+                + "  \"zeroVersion\": \"" + reactorVersion() + "\",\n  \"template\": \"runtime\",\n"
                 + "  \"prototype\": true,\n  \"connectsExternalMiddleware\": false,\n"
                 + "  \"opensNetworkPorts\": false,\n  \"runtimeProfile\": \"local\",\n"
                 + "  \"requiresExternalServices\": false,\n  \"selectedComponents\": [],\n"

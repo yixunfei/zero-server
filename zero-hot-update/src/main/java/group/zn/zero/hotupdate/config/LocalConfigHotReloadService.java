@@ -82,6 +82,8 @@ public final class LocalConfigHotReloadService extends AbstractLifecycle {
      * 当前 watcher。
      */
     private volatile LocalConfigFileWatcher watcher;
+    /** 默认拒绝运行期热重载；只允许启动前配置可信授权端口。 */
+    private volatile ConfigReloadAuthorizer authorizer = (tableName, request, automatic) -> false;
 
     /**
      * 创建本地配置热重载服务。
@@ -144,6 +146,16 @@ public final class LocalConfigHotReloadService extends AbstractLifecycle {
     }
 
     /**
+     * 启动前安装应用授权边界；默认拒绝手动和 watcher 重载，初始加载仍由启动权限负责。
+     * @param value 可信授权端口；不可为空。线程安全；启动后不能替换策略。
+     * @throws ZeroException 服务不处于 NEW 时拒绝。
+     */
+    public synchronized void authorizer(final ConfigReloadAuthorizer value) {
+        if (state() != LifecycleState.NEW) throw ZeroException.of(ConfigReloadErrorCode.INVALID_SERVICE_STATE);
+        authorizer = Objects.requireNonNull(value, "authorizer");
+    }
+
+    /**
      * 返回已注册表名快照。
      *
      * @return 不可变、有序、可能为空、线程安全的表名集合。
@@ -167,7 +179,7 @@ public final class LocalConfigHotReloadService extends AbstractLifecycle {
         ConfigTable<?, ?> table = requireTable(tableName);
         HotUpdateRequest checkedRequest = Objects.requireNonNull(request, "request");
         try {
-            return CompletableFuture.supplyAsync(() -> reloadNow(table, checkedRequest), ioExecutor);
+            return CompletableFuture.supplyAsync(() -> reloadNow(table, checkedRequest, false), ioExecutor);
         } catch (RejectedExecutionException ex) {
             return CompletableFuture.failedFuture(ZeroException.of(
                     ConfigReloadErrorCode.EXECUTOR_REJECTED,
@@ -183,6 +195,14 @@ public final class LocalConfigHotReloadService extends AbstractLifecycle {
      */
     public Optional<ZeroException> watcherFailure() {
         return Optional.ofNullable(watcherFailure.get());
+    }
+
+    /**
+     * 返回自动重载服务健康状态；线程安全、无副作用。watcher 失败立即降级，
+     * 已发布快照与手动 reload 仍可用；监控/readiness 应使用本方法而非仅检查生命周期 RUNNING。
+     */
+    public boolean healthy() {
+        return state() == LifecycleState.RUNNING && watcherFailure.get() == null;
     }
 
     /**
@@ -304,15 +324,17 @@ public final class LocalConfigHotReloadService extends AbstractLifecycle {
         ConfigTable<?, ?> table = requireTable(tableName);
         Instant requestedAt = clock.instant();
         HotUpdateRequest request = automaticRequestFactory.create(tableName, table.nextVersion(), requestedAt);
-        reloadNow(table, request);
+        reloadNow(table, request, true);
     }
 
     private ConfigReloadResult reloadNow(
             final ConfigTable<?, ?> table,
-            final HotUpdateRequest request) {
+            final HotUpdateRequest request, final boolean automatic) {
         long startedNanos = System.nanoTime();
         ConfigTableReloadOutcome outcome;
         try {
+            requireRunning();
+            authorize(table.definition().tableName(), request, automatic);
             outcome = table.reload(clock.instant());
         } catch (RuntimeException ex) {
             ConfigReloadResult rejected = rejectedResult(
@@ -326,6 +348,16 @@ public final class LocalConfigHotReloadService extends AbstractLifecycle {
         ConfigReloadResult accepted = acceptedResult(table, outcome, startedNanos, clock.instant());
         notifyObserver(request, accepted);
         return accepted;
+    }
+
+    private void authorize(final String tableName, final HotUpdateRequest request, final boolean automatic) {
+        boolean allowed;
+        try { allowed = authorizer.allows(tableName, request, automatic); }
+        catch (RuntimeException failure) {
+            throw ZeroException.of(ConfigReloadErrorCode.AUTHORIZATION_DENIED,
+                    ConfigReloadErrorCode.AUTHORIZATION_DENIED.message(), failure);
+        }
+        if (!allowed) throw ZeroException.of(ConfigReloadErrorCode.AUTHORIZATION_DENIED);
     }
 
     private ConfigReloadResult acceptedResult(

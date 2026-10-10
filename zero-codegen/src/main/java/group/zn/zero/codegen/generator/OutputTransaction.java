@@ -23,7 +23,7 @@ final class OutputTransaction {
     private final Predicate<Path> allowed;
 
     OutputTransaction(final Path root, final Predicate<Path> allowed) {
-        this.root = root;
+        this.root = root.toAbsolutePath().normalize();
         this.allowed = allowed;
     }
 
@@ -37,13 +37,14 @@ final class OutputTransaction {
         if (mutations.isEmpty()) {
             return;
         }
+        boolean committed = false;
         try (Locks locks = lock(mutations)) {
             Path journal = root.resolve(JOURNAL);
             if (Files.exists(journal)) {
                 throw new IOException("pending codegen transaction; run --mode recover: " + journal);
             }
             verify(mutations, false);
-            OutputFiles.replace(journal, new Gson().toJson(new Journal(1, mutations)));
+            OutputFiles.replace(journal, new Gson().toJson(new Journal(2, "PREPARED", mutations)));
             try {
                 for (int index = 0; index < mutations.size(); index++) {
                     hook.beforeWrite(index);
@@ -51,6 +52,9 @@ final class OutputTransaction {
                     verify(List.of(mutation), false);
                     OutputFiles.replace(Path.of(mutation.path()), mutation.after());
                 }
+                hook.beforeCommit();
+                OutputFiles.replace(journal, new Gson().toJson(new Journal(2, "COMMITTED", mutations)));
+                committed = true;
             } catch (IOException | RuntimeException ex) {
                 try {
                     restore(mutations);
@@ -60,32 +64,72 @@ final class OutputTransaction {
                 }
                 throw ex;
             }
-            Files.delete(journal);
+            try {
+                hook.beforeCleanup();
+                Files.delete(journal);
+            } catch (IOException ex) {
+                throw new CommittedCleanupException(ex);
+            }
+        } catch (IOException failure) {
+            if (committed && !(failure instanceof CommittedCleanupException)) throw new CommittedCleanupException(failure);
+            throw failure;
         }
     }
 
-    /** 回滚遗留事务；遇到事务之外的编辑时保留日志并停止。 */
+    /** 根据提交阶段恢复：未提交回滚，已提交只清理；外部编辑始终保留。 */
     void recover() throws IOException {
+        finishPending(false);
+    }
+
+    /** 写操作允许清理已提交日志，未提交日志仍要求显式恢复。 */
+    boolean cleanupCommitted() throws IOException {
+        return finishPending(true);
+    }
+
+    private boolean finishPending(final boolean committedOnly) throws IOException {
         Path journal = root.resolve(JOURNAL);
         String text = OutputFiles.read(journal);
-        if (text == null) {
-            return;
-        }
-        Journal pending;
-        try {
-            pending = new Gson().fromJson(text, Journal.class);
-            if (pending == null || pending.schema() != 1 || pending.mutations() == null) {
-                throw new IllegalArgumentException("invalid journal");
-            }
-        } catch (RuntimeException ex) {
-            throw new IOException("invalid recovery journal: " + journal, ex);
+        if (text == null) return false;
+        Journal pending = parseJournal(text);
+        if (committedOnly && !pending.phase().equals("COMMITTED")) {
+            throw new IOException("pending codegen transaction; run --mode recover: " + journal);
         }
         try (Locks locks = lock(pending.mutations())) {
             if (!text.equals(OutputFiles.read(journal))) {
                 throw new IOException("recovery journal changed during inspection");
             }
-            restore(pending.mutations());
+            if (pending.phase().equals("COMMITTED")) {
+                for (Mutation mutation : pending.mutations()) {
+                    Path path = checkedPath(mutation);
+                    if (!Objects.equals(OutputFiles.read(path), mutation.after())) {
+                        throw new IOException("committed output changed; preserve and inspect: " + path);
+                    }
+                }
+            } else {
+                restore(pending.mutations());
+            }
             Files.delete(journal);
+            return true;
+        }
+    }
+
+    private Journal parseJournal(final String text) throws IOException {
+        try {
+            Journal pending = new Gson().fromJson(text, Journal.class);
+            if (pending != null && pending.schema() == 1) {
+                throw new IOException("legacy schema 1 journal: recover with the original generator before upgrading");
+            }
+            if (pending == null || pending.schema() != 2 || pending.mutations() == null
+                    || !("PREPARED".equals(pending.phase()) || "COMMITTED".equals(pending.phase()))) {
+                throw new IOException("invalid recovery journal");
+            }
+            java.util.Set<Path> paths = new java.util.HashSet<>();
+            for (Mutation mutation : pending.mutations()) {
+                if (!paths.add(checkedPath(mutation))) throw new IOException("duplicate transaction path");
+            }
+            return pending;
+        } catch (RuntimeException ex) {
+            throw new IOException("invalid recovery journal", ex);
         }
     }
 
@@ -136,9 +180,9 @@ final class OutputTransaction {
         Locks locks = new Locks();
         try {
             for (Path directory : directories.stream().distinct().sorted().toList()) {
-                Files.createDirectories(directory);
                 Path lockPath = directory.resolve(".zero-codegen.lock");
                 OutputFiles.validate(lockPath);
+                Files.createDirectories(directory);
                 FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
                 locks.channels.add(channel);
                 FileLock lock;
@@ -154,7 +198,11 @@ final class OutputTransaction {
             }
             return locks;
         } catch (IOException | RuntimeException ex) {
-            locks.close();
+            try {
+                locks.close();
+            } catch (IOException cleanup) {
+                ex.addSuppressed(cleanup);
+            }
             throw ex;
         }
     }
@@ -164,7 +212,7 @@ final class OutputTransaction {
     }
 
     /** 有版本的恢复日志。 */
-    private record Journal(int schema, List<Mutation> mutations) {
+    private record Journal(int schema, String phase, List<Mutation> mutations) {
     }
 
     /** 可注入 IO 失败，不对业务使用方暴露。 */
@@ -172,6 +220,20 @@ final class OutputTransaction {
     interface CommitHook {
         /** 写入前回调，可抛出模拟 IO 失败。 */
         void beforeWrite(int index) throws IOException;
+        /** 提交标记前故障点。 */
+        default void beforeCommit() throws IOException { }
+        /** 提交后清理故障点。 */
+        default void beforeCleanup() throws IOException { }
+    }
+
+    /** 内容已提交，仅清理失败；调用方不得按未提交处理。 */
+    static final class CommittedCleanupException extends IOException {
+        /** 序列化版本。 */
+        private static final long serialVersionUID = 1L;
+
+        CommittedCleanupException(final IOException cause) {
+            super("output committed; metadata cleanup failed; recover or retry generation", cause);
+        }
     }
 
     /** 锁通道在所有退出路径释放；锁文件保留，避免删除后不同 inode 绕过锁。 */

@@ -121,7 +121,7 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
     }
 
     /**
-     * 调度一个超时任务。
+     * 调度一个超时任务；时间轮已关闭时返回 null，调用方必须按注册失败兜底。
      *
      * @param correlationId 关联 ID；不可为空。
      * @param timeoutAt 超时时间；不可为空。
@@ -130,20 +130,25 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
     TimeoutTask schedule(final String correlationId, final Instant timeoutAt, final long token) {
         Objects.requireNonNull(correlationId, "correlationId");
         Objects.requireNonNull(timeoutAt, "timeoutAt");
+        if (!running.get()) {
+            return null;
+        }
         TimeoutTask task = new TimeoutTask(correlationId, timeoutAt.toEpochMilli(), token);
-        enqueue(task);
+        if (!enqueue(task)) {
+            return null;
+        }
         return task;
     }
 
-    /** 同一记录的重排与取消串行；桶扫描不持有记录锁，避免锁顺序反转。 */
-    private void enqueue(final TimeoutTask task) {
+    /** 同一记录的重排与取消串行；桶扫描不持有记录锁，避免锁顺序反转。已关闭时返回 false。 */
+    private boolean enqueue(final TimeoutTask task) {
         synchronized (task) {
-            if (task.cancelled) return;
-            enqueueActive(task);
+            if (task.cancelled) return false;
+            return enqueueActive(task);
         }
     }
 
-    private void enqueueActive(final TimeoutTask task) {
+    private boolean enqueueActive(final TimeoutTask task) {
         while (running.get()) {
             long delayMillis = Math.max(1L, task.deadlineMillis() - System.currentTimeMillis());
             long delayTicks = Math.max(1L, divideCeil(delayMillis, tickMillis)) + 1L;
@@ -151,15 +156,16 @@ final class KafkaRpcTimeoutWheel implements AutoCloseable {
             long rounds = (delayTicks - 1L) / wheelSize;
             Map<Long, TimeoutTask> bucket = buckets[bucketIndex(tick + delayTicks)];
             synchronized (bucket) {
-                if (!running.get()) return;
+                if (!running.get()) return false;
                 // 等待桶锁期间时间轮可能已经扫描目标桶，重新选桶避免多等一轮。
                 if (currentTick.get() != tick) continue;
                 task.remainingRounds = rounds;
                 task.bucket = bucket;
                 bucket.put(task.token(), task);
-                return;
+                return true;
             }
         }
+        return false;
     }
 
     /** 取消指定登记，立即释放桶记录；与重排并发安全，不影响复用 correlationId 的请求。 */

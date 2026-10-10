@@ -50,7 +50,7 @@ public final class ObservabilityLocalApplication {
             "zero_example_observability_operations_total",
             "本地可观测性示例操作次数",
             "operations",
-            List.of("module", "operation", "result"));
+            List.of("module", "operation", "result"), group.zn.zero.monitor.MetricType.COUNTER);
 
     private ObservabilityLocalApplication() {
     }

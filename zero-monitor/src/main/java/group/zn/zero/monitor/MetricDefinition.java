@@ -15,7 +15,13 @@ public record MetricDefinition(
         String name,
         String description,
         String unit,
-        List<String> labelNames) {
+        List<String> labelNames,
+        MetricType type) {
+
+    /** 创建默认 GAUGE；累计计数必须通过完整构造显式选择 COUNTER。 */
+    public MetricDefinition(final String name, final String description, final String unit, final List<String> labelNames) {
+        this(name, description, unit, labelNames, MetricType.GAUGE);
+    }
 
     /**
      * 创建并校验指标定义。
@@ -29,5 +35,6 @@ public record MetricDefinition(
         description = MetricContract.definitionText(description, "description");
         unit = MetricContract.definitionText(unit, "unit");
         labelNames = MetricContract.definitionLabels(labelNames);
+        type = java.util.Objects.requireNonNull(type, "type");
     }
 }

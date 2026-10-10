@@ -45,6 +45,19 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
      */
     private static final byte[] PUT_IF_VERSION_SCRIPT = """
             local current = redis.call('GET', KEYS[2])
+            if current and current ~= '0' and current == ARGV[1] then
+              local previous = redis.call('GET', KEYS[1])
+              local candidate = ARGV[3]
+              if not previous or #previous < 43 or #candidate < 43 then return 0 end
+              local oldNameSize = string.byte(previous,21)*256 + string.byte(previous,22)
+              local newNameSize = string.byte(candidate,21)*256 + string.byte(candidate,22)
+              if #previous < 43+oldNameSize or #candidate < 43+newNameSize then return 0 end
+              if string.sub(previous,17,22+oldNameSize) == string.sub(candidate,17,22+newNameSize)
+                and string.sub(previous,39+oldNameSize) == string.sub(candidate,39+newNameSize) then
+                return 1
+              end
+              return 0
+            end
             if current == '0' and ARGV[1] == '0' then
               local previous = redis.call('GET', KEYS[1])
               if previous and string.sub(previous, 1, 8) >= string.sub(ARGV[3], 1, 8) then
@@ -351,7 +364,7 @@ public final class RedisCacheStore<K, V> implements CacheStore<K, V> {
 
     private CacheStoreEntry<V> toEntry(final RedisCacheEnvelope envelope) {
         RedisCacheEnvelope current = Objects.requireNonNull(envelope, "envelope");
-        if (!valueCodec.name().equals(current.codecName())) {
+        if (current.schemaVersion() != schemaVersion || !valueCodec.name().equals(current.codecName())) {
             throw ZeroException.of(CacheErrorCode.DESERIALIZE_FAILED, "redis cache codec mismatch", null);
         }
         V value = current.negative() ? null : valueCodec.decode(current.payload());

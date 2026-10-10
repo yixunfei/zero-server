@@ -45,7 +45,7 @@ public class InMemoryServiceDiscovery extends AbstractLifecycle implements Servi
     /**
      * 监听器失败记录。
      */
-    private final CopyOnWriteArrayList<ZeroException> listenerFailures = new CopyOnWriteArrayList<>();
+    private final java.util.ArrayDeque<ZeroException> listenerFailures = new java.util.ArrayDeque<>();
 
     /**
      * 健康状态。
@@ -93,7 +93,7 @@ public class InMemoryServiceDiscovery extends AbstractLifecycle implements Servi
      * @return 不可变、无序、可能为空、线程安全的失败列表。
      */
     public List<ZeroException> listenerFailures() {
-        return List.copyOf(listenerFailures);
+        synchronized (listenerFailures) { return List.copyOf(listenerFailures); }
     }
 
     /**
@@ -295,18 +295,21 @@ public class InMemoryServiceDiscovery extends AbstractLifecycle implements Servi
             notifyListener(listener, event);
         }
         for (LocalSubscription subscription : subscriptions) {
-            subscription.notifyIfMatches(type, serviceName, groupName);
+            subscription.notifyIfMatches(type, serviceName, groupName, clusters);
         }
     }
 
     private void notifyListener(final ServiceDiscoveryListener listener, final ServiceEvent event) {
         try {
             listener.onEvent(event);
-        } catch (RuntimeException ex) {
-            listenerFailures.add(ZeroException.of(
+        } catch (RuntimeException | Error ex) {
+            synchronized (listenerFailures) {
+                if (listenerFailures.size() >= 256) listenerFailures.removeFirst();
+                listenerFailures.add(ZeroException.of(
                     DiscoveryErrorCode.LISTENER_FAILED,
                     "service discovery listener failed: " + event.serviceName(),
                     ex));
+            }
         }
     }
 
@@ -354,7 +357,10 @@ public class InMemoryServiceDiscovery extends AbstractLifecycle implements Servi
          * @param serviceName 服务名称；不可为空。
          * @param groupName 服务分组；不可为空。
          */
-        private void notifyIfMatches(final ServiceEventType type, final String serviceName, final String groupName) {
+        private void notifyIfMatches(final ServiceEventType type, final String serviceName, final String groupName,
+                final List<String> clusters) {
+            if (!query.clusters().isEmpty() && !clusters.isEmpty()
+                    && java.util.Collections.disjoint(query.clusters(), clusters)) return;
             if (closed.get() || !query.serviceName().equals(serviceName) || !query.groupName().equals(groupName)) {
                 return;
             }

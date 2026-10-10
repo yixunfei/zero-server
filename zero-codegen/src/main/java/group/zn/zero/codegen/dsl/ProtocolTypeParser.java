@@ -35,6 +35,9 @@ public final class ProtocolTypeParser {
      */
     private int index;
 
+    /** 当前解析调用深度。 */
+    private int depth;
+
     /**
      * 创建类型解析器。
      *
@@ -73,6 +76,7 @@ public final class ProtocolTypeParser {
     public ProtocolType parse(final String expression) {
         source = Objects.requireNonNull(expression, "expression");
         index = 0;
+        depth = 0;
         ProtocolType type = readType();
         skipWhitespace();
         if (index != source.length()) {
@@ -82,6 +86,17 @@ public final class ProtocolTypeParser {
     }
 
     private ProtocolType readType() {
+        if (++depth > ProtocolTypeBudget.MAX_DEPTH) {
+            throw parseError("type depth exceeds " + ProtocolTypeBudget.MAX_DEPTH);
+        }
+        try {
+            return readTypeBody();
+        } finally {
+            depth--;
+        }
+    }
+
+    private ProtocolType readTypeBody() {
         skipWhitespace();
         String identifier = readIdentifier();
         String normalized = identifier.toLowerCase(Locale.ROOT);
@@ -112,13 +127,19 @@ public final class ProtocolTypeParser {
         while (peek("[]")) {
             index += 2;
             type = ProtocolType.array(type);
+            requireBudget(type);
             skipWhitespace();
         }
         if (peek("?")) {
             index++;
             type = ProtocolType.optional(type);
         }
+        requireBudget(type);
         return type;
+    }
+
+    private void requireBudget(final ProtocolType type) {
+        if (!ProtocolTypeBudget.permits(type)) throw parseError("type depth exceeds " + ProtocolTypeBudget.MAX_DEPTH);
     }
 
     private ProtocolType readSingleGeneric(final String owner) {
@@ -224,7 +245,8 @@ public final class ProtocolTypeParser {
     private ZeroException parseError(final String message) {
         return ZeroException.of(
                 CodegenErrorCode.DSL_PARSE_FAILED,
-                message + " at index " + index + " in type expression: " + source,
+                message + " at index " + index + " in type expression: "
+                        + source.substring(0, Math.min(source.length(), 256)),
                 null);
     }
 

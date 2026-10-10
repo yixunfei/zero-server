@@ -1,8 +1,6 @@
 package group.zn.zero.data.persistence.durable;
 
 import group.zn.zero.data.envelope.ZeroDataEnvelope;
-import group.zn.zero.data.envelope.ZeroDataEnvelopeCodec;
-import java.util.Arrays;
 import java.util.Objects;
 
 /** 耐久意图及其处理结果；不是“后端已成功”记录；不可变、线程安全。 @author zn */
@@ -32,8 +30,7 @@ public record DurableRecord(String operationId, String target, long expectedVers
 
     /** @param left 信封。 @param right 信封。 @return 包含元数据的完整字节相同；线程安全。 */
     public static boolean sameEnvelope(final ZeroDataEnvelope left, final ZeroDataEnvelope right) {
-        var codec = new ZeroDataEnvelopeCodec();
-        return Arrays.equals(codec.encode(left), codec.encode(right));
+        return Objects.requireNonNull(left, "left").contentEquals(Objects.requireNonNull(right, "right"));
     }
 
     /** @param next 下一状态。 @param count 已尝试次数。 @param at 下次时间。 @param code 错误码。

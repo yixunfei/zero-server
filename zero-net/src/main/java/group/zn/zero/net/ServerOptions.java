@@ -12,6 +12,7 @@ import java.util.Objects;
  * @param workerThreads IO 工作线程数。
  * @param maxFrameLength 最大 frame 或内容长度。
  * @param codecType 网络编解码类型。
+ * @param httpRequestTimeout HTTP 完整请求和业务响应期限。
  * @author zn
  */
 public record ServerOptions(
@@ -22,7 +23,11 @@ public record ServerOptions(
         int workerThreads,
         int maxFrameLength,
         ServerCodecType codecType,
-        NetworkTuning tuning) {
+        NetworkTuning tuning,
+        java.time.Duration httpRequestTimeout) {
+
+    /** HTTP 请求和响应的默认绝对期限。 */
+    public static final java.time.Duration DEFAULT_HTTP_REQUEST_TIMEOUT = java.time.Duration.ofSeconds(30);
 
     /**
      * 使用默认资源预算创建配置；参数约束同完整构造器，线程安全。
@@ -37,6 +42,14 @@ public record ServerOptions(
     public ServerOptions(final ServerType serverType, final String host, final int port,
             final int bossThreads, final int workerThreads, final int maxFrameLength, final ServerCodecType codecType) {
         this(serverType, host, port, bossThreads, workerThreads, maxFrameLength, codecType, NetworkTuning.defaults());
+    }
+
+    /** 保持含 NetworkTuning 的既有构造方式，HTTP 期限使用默认值。 */
+    public ServerOptions(final ServerType serverType, final String host, final int port,
+            final int bossThreads, final int workerThreads, final int maxFrameLength,
+            final ServerCodecType codecType, final NetworkTuning tuning) {
+        this(serverType, host, port, bossThreads, workerThreads, maxFrameLength, codecType,
+                tuning, DEFAULT_HTTP_REQUEST_TIMEOUT);
     }
 
     /**
@@ -55,6 +68,11 @@ public record ServerOptions(
         Objects.requireNonNull(host, "host");
         Objects.requireNonNull(codecType, "codecType");
         Objects.requireNonNull(tuning, "tuning");
+        Objects.requireNonNull(httpRequestTimeout, "httpRequestTimeout");
+        if (httpRequestTimeout.isZero() || httpRequestTimeout.isNegative()) {
+            throw new IllegalArgumentException("httpRequestTimeout must be positive");
+        }
+        httpRequestTimeout.toNanos();
         if (port < 0 || port > 65535) {
             throw new IllegalArgumentException("port must be between 0 and 65535");
         }
@@ -129,7 +147,8 @@ public record ServerOptions(
      * @return 新配置；不可为空；线程安全。
      */
     public ServerOptions withMaxFrameLength(final int length) {
-        return new ServerOptions(serverType, host, port, bossThreads, workerThreads, length, codecType, tuning);
+        return new ServerOptions(serverType, host, port, bossThreads, workerThreads, length,
+                codecType, tuning, httpRequestTimeout);
     }
 
     /**
@@ -140,12 +159,20 @@ public record ServerOptions(
      * @return 新配置；不可为空；线程安全。
      */
     public ServerOptions withIoThreads(final int boss, final int worker) {
-        return new ServerOptions(serverType, host, port, boss, worker, maxFrameLength, codecType, tuning);
+        return new ServerOptions(serverType, host, port, boss, worker, maxFrameLength,
+                codecType, tuning, httpRequestTimeout);
     }
 
     /** @param value 不可变资源设置。 @return 更新后的独立配置；线程安全。 */
     public ServerOptions withTuning(final NetworkTuning value) {
-        return new ServerOptions(serverType, host, port, bossThreads, workerThreads, maxFrameLength, codecType, value);
+        return new ServerOptions(serverType, host, port, bossThreads, workerThreads, maxFrameLength,
+                codecType, value, httpRequestTimeout);
+    }
+
+    /** 返回更新 HTTP 完整请求与业务响应期限后的配置。 */
+    public ServerOptions withHttpRequestTimeout(final java.time.Duration timeout) {
+        return new ServerOptions(serverType, host, port, bossThreads, workerThreads, maxFrameLength,
+                codecType, tuning, timeout);
     }
 
     /**

@@ -17,6 +17,15 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class PrometheusExporterTest {
+    /** 指标类型由定义决定，名称后缀不影响导出语义。 */
+    @Test void explicitMetricTypeOverridesNameConvention() {
+        var registry = new InMemoryMetricRegistry();
+        registry.register(new MetricDefinition("requests", "requests", "count", List.of(), MetricType.COUNTER));
+        registry.register(new MetricDefinition("queue_total", "current queue", "count", List.of(), MetricType.GAUGE));
+        String output = new PrometheusExporter().export(registry);
+        assertTrue(output.contains("# TYPE requests counter"));
+        assertTrue(output.contains("# TYPE queue_total gauge"));
+    }
 
     /**
      * 验证 exporter 按定义 schema 而非样本 Map 顺序输出并正确转义。
@@ -28,7 +37,7 @@ class PrometheusExporterTest {
                 "zero_request_total",
                 "request \\ count",
                 "count",
-                List.of("module", "result")));
+                List.of("module", "result"), group.zn.zero.monitor.MetricType.COUNTER));
         LinkedHashMap<String, String> labels = new LinkedHashMap<>();
         labels.put("result", "ok\\done");
         labels.put("module", "gateway\"edge");
@@ -105,7 +114,7 @@ class PrometheusExporterTest {
     @Test
     void exporterShouldRejectMismatchedSamples() {
         MetricDefinition definition = new MetricDefinition(
-                "zero_request_total", "request", "count", List.of("module"));
+                "zero_request_total", "request", "count", List.of("module"), group.zn.zero.monitor.MetricType.COUNTER);
         MetricSample sample = new MetricSample(
                 "zero_request_total",
                 1D,

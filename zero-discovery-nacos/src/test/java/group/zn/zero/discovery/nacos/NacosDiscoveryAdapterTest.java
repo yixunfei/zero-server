@@ -36,6 +36,28 @@ import org.junit.jupiter.api.Test;
  * @author zn
  */
 class NacosDiscoveryAdapterTest {
+    /** 一个坏实例不会遮蔽同服务的健康实例。 */
+    @Test void malformedInstanceIsIsolatedFromLookup() {
+        var good = new com.alibaba.nacos.api.naming.pojo.Instance();
+        good.setIp("127.0.0.1");
+        good.setPort(6200);
+        good.setHealthy(true);
+        good.setClusterName(ServiceDiscoveryConstants.DEFAULT_CLUSTER_NAME);
+        var bad = new com.alibaba.nacos.api.naming.pojo.Instance();
+        bad.setIp("");
+        NamingService client = namingService((proxy, method, arguments) -> switch (method.getName()) {
+            case "getServerStatus" -> "UP";
+            case "selectInstances", "getAllInstances" -> List.of(bad, good);
+            default -> defaultValue(method.getReturnType());
+        });
+        var adapter = new NacosDiscoveryAdapter(settings(100), properties -> client);
+        adapter.start();
+        try {
+            assertEquals(1, adapter.lookup(new ServiceQuery("logic-service",
+                    ServiceDiscoveryConstants.DEFAULT_GROUP_NAME, List.of(), true, false)).size());
+            assertEquals(1, adapter.listenerFailures().size());
+        } finally { adapter.stop(); }
+    }
 
     /**
      * 验证启动健康失败后的关闭异常作为 suppressed 保留，不能覆盖主失败。

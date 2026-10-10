@@ -36,8 +36,10 @@ public final class InMemoryOwnershipRouter implements OwnershipRouter {
             throw new OwnershipException("cannot publish an expired ownership lease");
         }
         OwnershipRoute current = routes.get(lease.resource());
-        if (current != null && current.validAt(now)
-                && (current.epoch() > lease.epoch() || !current.owner().equals(lease.owner()))) {
+        // 过期路由仍保留 epoch 栅栏；同代同 owner 必须允许续租刷新。
+        if (current != null && (current.epoch() > lease.epoch()
+                || !current.owner().equals(lease.owner())
+                && (current.validAt(now) || current.epoch() == lease.epoch()))) {
             throw new OwnershipException("stale owner route");
         }
         OwnershipRoute route = new OwnershipRoute(lease.resource(), lease.owner(), lease.epoch(), endpoint,

@@ -15,9 +15,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.RecordComponent;
-import java.lang.reflect.Type;
 import java.time.Clock;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -314,7 +312,7 @@ public final class ZeroDataEntityCodec<ID, T extends VersionedEntity<ID>> {
             values[index] = memberValue(entity, keyParts.get(index).javaName());
         }
         Class<?> keyType = keyType();
-        if (keyType == String.class || keyType == Object.class || keyType == null) {
+        if (keyType == String.class || keyType == Object.class) {
             return (ID) compositeString(keyParts, values);
         }
         return (ID) constructCompositeKey(keyType, values);
@@ -391,35 +389,16 @@ public final class ZeroDataEntityCodec<ID, T extends VersionedEntity<ID>> {
 
     private Class<?> keyType() {
         if (keyGenerator.getClass() != NoopZeroDataKeyGenerator.class) {
-            Class<?> generatorType = genericType(keyGenerator.getClass(), ZeroDataKeyGenerator.class);
-            if (generatorType != null) {
-                return generatorType;
-            }
+            return requireKeyType(keyGenerator.getClass(), ZeroDataKeyGenerator.class);
         }
-        return genericType(keyCodec.getClass(), ZeroDataKeyCodec.class);
+        return requireKeyType(keyCodec.getClass(), ZeroDataKeyCodec.class);
     }
 
-    private Class<?> genericType(final Class<?> implementationType, final Class<?> interfaceType) {
-        for (Type type : implementationType.getGenericInterfaces()) {
-            Class<?> resolved = genericType(type, interfaceType);
-            if (resolved != null) {
-                return resolved;
-            }
-        }
-        Class<?> superclass = implementationType.getSuperclass();
-        if (superclass == null || superclass == Object.class) {
-            return null;
-        }
-        return genericType(superclass, interfaceType);
-    }
-
-    private Class<?> genericType(final Type type, final Class<?> interfaceType) {
-        if (type instanceof ParameterizedType parameterizedType
-                && parameterizedType.getRawType() == interfaceType
-                && parameterizedType.getActualTypeArguments()[0] instanceof Class<?> keyType) {
-            return keyType;
-        }
-        return null;
+    private Class<?> requireKeyType(final Class<?> implementation, final Class<?> contract) {
+        Class<?> resolved = KeyTypeResolver.resolve(implementation, contract);
+        if (resolved == null) throw ZeroException.of(DataErrorCode.MAPPING_INVALID,
+                "unresolved composite key type: " + implementation.getName(), null);
+        return resolved;
     }
 
     @SuppressWarnings("unchecked")

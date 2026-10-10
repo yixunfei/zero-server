@@ -155,7 +155,7 @@ public final class NettyConnection implements IConnection {
                 return;
             }
             result.completeExceptionally(ZeroException.of(
-                    NetErrorCode.SEND_FAILED,
+                    NetErrorCode.CONNECTION_CLOSE_FAILED,
                     "close netty connection failed",
                     done.cause()));
         });

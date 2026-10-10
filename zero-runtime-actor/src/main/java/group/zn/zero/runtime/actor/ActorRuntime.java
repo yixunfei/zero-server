@@ -50,22 +50,47 @@ public final class ActorRuntime {
         java.util.Objects.requireNonNull(config, "config");
         return List.of(RuntimeProviders.create(ComponentDescriptor.builder(StandardRuntimeCapabilityModel.LOCAL_ACTOR)
                 .provide(ACTOR_SCHEDULER).require(RuntimeBasics.EXECUTORS).kind(ComponentKind.LOCAL).build(), context -> {
-                    var scheduler = context.resources().register(new ExecutorActorScheduler(
-                            context.require(RuntimeBasics.EXECUTORS).actorExecutor(), config));
+                    var scheduler = new ExecutorActorScheduler(
+                            context.require(RuntimeBasics.EXECUTORS).actorExecutor(), config,
+                            context.require(RuntimeBasics.EXECUTORS).scheduledExecutor("actor-timeout"),
+                            config.executionTimeout());
+                    var close = context.resources().register(new SchedulerResource(scheduler));
                     return ComponentContribution.builder().bind(ACTOR_SCHEDULER, scheduler)
-                            .lifecycle(new SchedulerLifecycle(scheduler)).build();
+                            .lifecycle(new SchedulerLifecycle(close)).build();
                 }));
+    }
+
+    /** 正常停止和 build 回滚共享一次物理关闭；关闭失败允许再次调用。 @author zn */
+    private static final class SchedulerResource implements AutoCloseable {
+        /** 被管理的调度器。 */
+        private final ExecutorActorScheduler scheduler;
+        /** 由资源监视器保护的关闭标志。 */
+        private boolean closed;
+        private SchedulerResource(final ExecutorActorScheduler scheduler) { this.scheduler = scheduler; }
+        @Override public synchronized void close() {
+            if (closed) return;
+            scheduler.close();
+            closed = true;
+        }
     }
 
     /** 生命周期停止与创建期资源回滚共享幂等的调度器关闭责任。 @author zn */
     private static final class SchedulerLifecycle implements Lifecycle {
         /** 被管理的调度器。 */
-        private final ExecutorActorScheduler scheduler;
+        private final SchedulerResource resource;
         /** 组件状态；runtime 只在开始/停止阶段调用。 */
         private volatile LifecycleState state = LifecycleState.NEW;
-        private SchedulerLifecycle(final ExecutorActorScheduler scheduler) { this.scheduler = scheduler; }
+        private SchedulerLifecycle(final SchedulerResource resource) { this.resource = resource; }
         @Override public LifecycleState state() { return state; }
-        @Override public void start() { state = LifecycleState.RUNNING; }
-        @Override public void stop() { scheduler.close(); state = LifecycleState.STOPPED; }
+        @Override public synchronized void start() {
+            if (state == LifecycleState.RUNNING) return;
+            if (state != LifecycleState.NEW) throw group.zn.zero.core.error.ZeroException.of(
+                    group.zn.zero.core.error.SystemErrorCode.SYSTEM_ERROR, "closed actor runtime cannot restart", null);
+            state = LifecycleState.RUNNING;
+        }
+        @Override public synchronized void stop() {
+            if (state == LifecycleState.STOPPED) return;
+            resource.close(); state = LifecycleState.STOPPED;
+        }
     }
 }

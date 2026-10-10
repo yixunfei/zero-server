@@ -23,6 +23,9 @@ public final class VerifyNoSdkExternalService {
             throw new IllegalArgumentException("VerifyNoSdkExternalService takes no arguments");
         }
         Files.createDirectories(OUTPUT);
+        runMaven(List.of(maven(), "-B", "-ntp", "-pl", "zero-runtime-bootstrap", "-am", "-DskipTests", "install"),
+                OUTPUT.resolve("current-reactor-build.log"));
+        Files.writeString(OUTPUT.resolve("reactor-version.txt"), reactorVersion());
         writeFixture();
         runMaven(List.of(maven(), "-B", "-ntp", "-f", OUTPUT.resolve("pom.xml").toString(), "clean", "test",
                 "dependency:build-classpath", "-DincludeScope=runtime", "-Dmdep.outputFile=target/runtime-classpath.txt"),
@@ -58,13 +61,13 @@ public final class VerifyNoSdkExternalService {
                 + "assertTrue(true); } }\n", StandardCharsets.UTF_8);
     }
 
-    private static String dependency(final String group, final String artifact) {
+    private static String dependency(final String group, final String artifact) throws IOException {
         return "<dependency><groupId>" + group + "</groupId><artifactId>" + artifact
-                + "</artifactId><version>0.1.1</version></dependency>";
+                + "</artifactId><version>" + reactorVersion() + "</version></dependency>";
     }
 
     private static void runMaven(final List<String> command, final Path log) throws IOException, InterruptedException {
-        ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
+        ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile());
         String javaHome = System.getProperty("java.home");
         if (javaHome != null) {
             builder.environment().put("JAVA_HOME", javaHome);
@@ -74,10 +77,17 @@ public final class VerifyNoSdkExternalService {
                     + builder.environment().getOrDefault(pathKey, ""));
         }
         Process process = builder.start();
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        boolean completed = process.waitFor(10, TimeUnit.MINUTES);
-        Files.writeString(log, output, StandardCharsets.UTF_8);
+        boolean completed;
+        try {
+            completed = process.waitFor(10, TimeUnit.MINUTES);
+        } catch (InterruptedException interrupted) {
+            process.descendants().forEach(ProcessHandle::destroyForcibly);
+            process.destroyForcibly();
+            Thread.currentThread().interrupt();
+            throw interrupted;
+        }
         if (!completed) {
+            process.descendants().forEach(ProcessHandle::destroyForcibly);
             process.destroyForcibly();
             throw new IllegalStateException("no-SDK consumer timed out");
         }
@@ -86,7 +96,25 @@ public final class VerifyNoSdkExternalService {
         }
     }
 
+    /** 当前根 POM 的字面版本；禁用外部实体，不回退历史构件。 */
+    private static String reactorVersion() throws IOException {
+        try {
+            var factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            var model = factory.newDocumentBuilder().parse(Path.of("pom.xml").toFile());
+            String value = javax.xml.xpath.XPathFactory.newInstance().newXPath().evaluate("/project/version", model).trim();
+            if (!value.matches("[A-Za-z0-9][A-Za-z0-9_.-]*")) throw new IOException("invalid reactor version");
+            return value;
+        } catch (javax.xml.parsers.ParserConfigurationException | org.xml.sax.SAXException
+                | javax.xml.xpath.XPathExpressionException failure) {
+            throw new IOException("cannot read reactor version", failure);
+        }
+    }
+
     private static String maven() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "mvn.cmd" : "mvn";
+        return Path.of(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")
+                ? "mvnw.cmd" : "mvnw").toAbsolutePath().toString();
     }
 }

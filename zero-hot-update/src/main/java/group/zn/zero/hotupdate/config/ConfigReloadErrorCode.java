@@ -10,6 +10,9 @@ import group.zn.zero.core.error.ErrorCode;
  */
 public enum ConfigReloadErrorCode implements ErrorCode {
 
+    /** 未配置授权、授权拒绝或授权端口失败。 */
+    AUTHORIZATION_DENIED("ZERO-CONFIG-AUTHORIZATION-DENIED", "config reload authorization denied"),
+
     /**
      * 配置表定义非法。
      */

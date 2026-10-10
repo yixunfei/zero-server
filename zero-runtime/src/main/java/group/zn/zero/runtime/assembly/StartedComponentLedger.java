@@ -17,7 +17,7 @@ final class StartedComponentLedger {
 
     private final List<Entry> entries = new ArrayList<>();
 
-    void record(final ComponentId componentId, final Lifecycle lifecycle) {
+    synchronized void record(final ComponentId componentId, final Lifecycle lifecycle) {
         entries.add(new Entry(
                 Objects.requireNonNull(componentId, "componentId"),
                 Objects.requireNonNull(lifecycle, "lifecycle")));
@@ -26,20 +26,28 @@ final class StartedComponentLedger {
     RuntimeAssemblyException stopAll(
             final RuntimeAssemblyException original,
             final RuntimeReportTracker tracker) {
+        return stopAll(original, tracker, null, null);
+    }
+
+    RuntimeAssemblyException stopAll(final RuntimeAssemblyException original, final RuntimeReportTracker tracker,
+            final LifecycleCallBoundary calls, final group.zn.zero.runtime.spi.RuntimeDeadline deadline) {
         RuntimeAssemblyException primary = original;
-        for (int index = entries.size() - 1; index >= 0; index--) {
-            Entry entry = entries.get(index);
+        List<Entry> snapshot;
+        synchronized (this) { snapshot = List.copyOf(entries); }
+        for (int index = snapshot.size() - 1; index >= 0; index--) {
+            Entry entry = snapshot.get(index);
             if (entry.stopped) {
                 continue;
             }
             long startedAt = System.nanoTime();
             try {
-                entry.lifecycle.stop();
-                entry.stopped = true;
+                if (calls == null) { entry.lifecycle.stop(); entry.stopped = true; }
+                else calls.call(() -> { entry.lifecycle.stop(); entry.stopped = true; return null; },
+                        deadline, entry.componentId, RuntimeFailurePhase.STOP);
                 tracker.stopped(entry.componentId, RuntimePhaseOutcome.SUCCEEDED, elapsed(startedAt));
             } catch (Throwable failure) {
                 tracker.stopped(entry.componentId, RuntimePhaseOutcome.FAILED, elapsed(startedAt));
-                RuntimeAssemblyException safeFailure = RuntimeAssemblyException.failure(
+                RuntimeAssemblyException safeFailure = failure instanceof RuntimeAssemblyException known ? known : RuntimeAssemblyException.failure(
                         RuntimeErrorCode.RUNTIME_COMPONENT_STOP_FAILED,
                         RuntimeFailurePhase.STOP,
                         entry.componentId,
@@ -62,7 +70,7 @@ final class StartedComponentLedger {
 
         private final ComponentId componentId;
         private final Lifecycle lifecycle;
-        private boolean stopped;
+        private volatile boolean stopped;
 
         private Entry(final ComponentId componentId, final Lifecycle lifecycle) {
             this.componentId = componentId;

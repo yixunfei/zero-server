@@ -223,6 +223,13 @@ public final class ScaffoldComponents {
         return providers(id).stream().anyMatch(provider -> !provider.profiles().contains("local"));
     }
 
+    /** 外部档位与外部服务分开判定；内置网络生命周期只提供本进程策略，不连接中间件。 */
+    boolean requiresExternalServices(final Selection selection) {
+        return selection.components().stream().flatMap(id -> providers(id).stream())
+                .anyMatch(provider -> !provider.profiles().contains("local")
+                        && !provider.providerId().equals(StandardRuntimeCapabilityModel.PRODUCTION_NETWORK_LIFECYCLE));
+    }
+
     private Set<String> provided(final Set<String> selected) {
         Set<String> result = new LinkedHashSet<>();
         selected.forEach(id -> providers(id).forEach(provider -> result.addAll(provider.provides())));

@@ -202,7 +202,7 @@ public final class ZeroBufferBenchmark {
         checksum += reader.readByteArray().length;
         checksum += reader.readIntArray().length;
         checksum += reader.readLongArray().length;
-        checksum += reader.readPresenceBits().length;
+        checksum += reader.readPresenceBits(9).length;
         return checksum;
     }
 

@@ -81,12 +81,8 @@ public final class ZeroFrameworkBoundaryGuard {
     private static void inspectSource(final Path path, final List<String> failures) {
         try {
             String text = Files.readString(path, StandardCharsets.UTF_8);
-            String lower = text.toLowerCase(Locale.ROOT);
-            for (String token : FORBIDDEN_GAMEPLAY_TOKENS) {
-                if (GAMEPLAY_PACKAGE.matcher(text).find()) {
-                    failures.add("project gameplay package in protected source: " + path);
-                    return;
-                }
+            if (GAMEPLAY_PACKAGE.matcher(text).find()) {
+                failures.add("project gameplay package/import in protected source: " + path);
             }
         } catch (IOException ex) {
             failures.add("cannot read protected source: " + path);

@@ -62,7 +62,7 @@ public final class __CLIENT_CLASS__ {
         if (response.protocolId() != ProtocolIds.GAME_LOGIN_PROTOCOL) {
             throw new IllegalStateException("unexpected response protocol: " + response.protocolId());
         }
-        if ((response.flags() & 1) != 0) {
+        if (group.zn.zero.protocol.ProtocolFeature.ERROR.enabledIn(response.flags())) {
             throw new IllegalStateException("listener reported a dispatch failure: "
                     + new String(response.payload(), java.nio.charset.StandardCharsets.UTF_8));
         }

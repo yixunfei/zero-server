@@ -81,7 +81,7 @@ rejects(() => new ZeroWriter().writeByte(128));
 rejects(() => new ZeroWriter().writeUnsignedInt(2147483648));
 rejects(() => new ZeroReader(Uint8Array.of(255,255,255,255,255,255,255,255,255,1)).readUnsignedLong());
 rejects(() => new ZeroReader(Uint8Array.of(255,255,255,255,7)).readArray(r => r.readByte()));
-rejects(() => new ZeroReader(Uint8Array.of(255,255,255,255,7)).readPresenceBits());
+rejects(() => new ZeroReader(Uint8Array.of(255,255,255,255,7)).readPresenceBits(1));
 rejects(() => new ZeroReader(Uint8Array.of(128,128,4)).readShort());
 rejects(() => { const r = new ZeroReader(Uint8Array.of(1,128,1)); r.beginObject(); r.readInt(); });
 console.log('boundary=' + hex(boundary.toUint8Array()));
@@ -96,3 +96,11 @@ const limitsRead = WireLimitsDTOCodec.read(new ZeroReader(limitsWriter.toUint8Ar
 if (limitsRead.lowByte !== -128 || limitsRead.lowShort !== -32768 || limitsRead.highUint !== 2147483647
     || limitsRead.lowLong !== limits.lowLong || limitsRead.highUlong !== limits.highUlong
     || limitsRead.data[1] !== 255 || limitsRead.signedBytes[0] !== -128) throw new Error('generated scalar DTO failed');
+
+// A large valid bitmap must allocate only schema-known flags and skip its entire wire extent.
+const largePresence = new Uint8Array(1024 * 1024 + 5);
+largePresence.set([128, 128, 128, 4, 5]);
+largePresence[largePresence.length - 1] = 42;
+const presenceReader = new ZeroReader(largePresence);
+if (JSON.stringify(presenceReader.readPresenceBits(3)) !== '[true,false,true]'
+    || presenceReader.readByte() !== 42) throw new Error('schema presence boundary failed');

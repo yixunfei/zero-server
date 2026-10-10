@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.time.Instant;
+import java.time.Clock;
+import java.time.ZoneOffset;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,6 +24,28 @@ class SecurityContractTest {
     @Test void contextRejectsSensitiveAttributesAndExpiredIsDeterministic() {
         assertThrows(IllegalArgumentException.class, () -> context(Map.of("password", "x")));
         assertTrue(context(Map.of("region", "test")).expired(NOW.plusSeconds(60)));
+    }
+
+    @Test void contextExpiryUsesMonotonicBudgetAndCannotBeRevivedByClockRollback() {
+        AtomicLong nanos = new AtomicLong();
+        Clock wall = Clock.fixed(NOW, ZoneOffset.UTC);
+        SecurityContext context = new SecurityContext("subject", NOW, NOW.plusSeconds(10), "tcp",
+                "peer", "source", "trace", "corr", Set.of("read"), Map.of(), wall, nanos::get);
+        assertFalse(context.expired(NOW.plusSeconds(9)));
+        nanos.set(10_000_000_000L);
+        assertTrue(context.expired(NOW.plusSeconds(9)));
+        nanos.set(11_000_000_000L);
+        assertTrue(context.expired(NOW.minusSeconds(60)));
+    }
+
+    @Test void derivedTransportSharesMonotonicExpiryState() {
+        AtomicLong nanos = new AtomicLong();
+        SecurityContext context = new SecurityContext("subject", NOW, NOW.plusSeconds(10), "tcp",
+                "peer", "source", "trace", "corr", Set.of("read"), Map.of(), Clock.fixed(NOW, ZoneOffset.UTC),
+                nanos::get);
+        SecurityContext derived = context.withTransport("kcp", "udp-peer");
+        nanos.set(10_000_000_000L);
+        assertTrue(derived.expired(NOW.minusSeconds(1)));
     }
     @Test
     void trustedProxyResolverRejectsUnboundedOrInvalidForwarding() {

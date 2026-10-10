@@ -63,7 +63,10 @@ class ScaffoldManifestContractTest {
         assertEquals(Set.copyOf(selection.components()), strings(manifest.getAsJsonArray("selectedComponents")));
         assertEquals(Set.copyOf(selection.providers()), strings(manifest.getAsJsonArray("selectedProviders")));
         assertEquals(Set.copyOf(selection.capabilities()), strings(manifest.getAsJsonArray("runtimeCapabilities")));
-        assertEquals(selection.external(), manifest.get("requiresExternalServices").getAsBoolean());
+        boolean requiresServices = requested.stream()
+                .anyMatch(id -> Set.of("redis", "kafka", "nacos", "mongo", "postgresql").contains(id));
+        assertEquals(requiresServices, manifest.get("requiresExternalServices").getAsBoolean());
+        assertEquals(selection.external() ? "external-test" : "local", manifest.get("runtimeProfile").getAsString());
         var document = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
                 .parse(output.resolve("pom.xml").toFile());
         var xpath = javax.xml.xpath.XPathFactory.newInstance().newXPath();

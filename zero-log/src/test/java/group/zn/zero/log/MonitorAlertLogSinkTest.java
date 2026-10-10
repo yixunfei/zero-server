@@ -17,6 +17,22 @@ import org.junit.jupiter.api.Test;
  */
 class MonitorAlertLogSinkTest {
 
+    /** 超长标签仍保留命名空间并生成不同的有界键。 */
+    @Test void maximumLengthLabelsRemainDistinct() {
+        InMemoryLogSink terminal = new InMemoryLogSink();
+        var sink = new MonitorAlertLogSink(new LogPipeline(java.util.List.of(), terminal),
+                new LogSource("game", "local", "monitor"), "trace");
+        String first = "a".repeat(63) + "b";
+        String second = "a".repeat(63) + "c";
+        sink.publish(new AlertEvent("rule", "metric", AlertSeverity.WARNING, 2, 1,
+                Map.of(first, "one", second, "two"), Instant.now(), "alert"));
+        var fields = terminal.records().getFirst().fields();
+        var keys = fields.keySet().stream().filter(key -> key.startsWith("metric.label.")).toList();
+        assertEquals(2, keys.size());
+        org.junit.jupiter.api.Assertions.assertTrue(keys.stream().allMatch(key -> key.length() <= 64));
+        assertEquals(java.util.Set.of("one", "two"), keys.stream().map(fields::get).collect(java.util.stream.Collectors.toSet()));
+    }
+
     /**
      * 验证严重告警写入显式 ERROR 日志并绑定专用 ErrorCode。
      */

@@ -144,6 +144,10 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
      * 最近一次发送失败。
      */
     private volatile Throwable lastSendFailure;
+    /** 单个响应的有限重试计数；超过上限后终止该消息，避免 replyTopic 配置错误导致无限重投。 */
+    private final ConcurrentMap<String, AtomicInteger> responseSendFailures = new ConcurrentHashMap<>();
+    /** 响应发送失败后允许的重投次数。 */
+    private static final int MAX_RESPONSE_SEND_FAILURES = 3;
 
     /**
      * request topic 消息监听器。
@@ -184,6 +188,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
      * @throws NullPointerException 当任一参数为空时抛出。
      * @throws ZeroException 当 Kafka producer 创建失败时抛出。
      */
+    @Deprecated
     public KafkaRpcAdapter(final KafkaRpcSettings settings, final RpcTransportObserver observer, final java.util.concurrent.ScheduledExecutorService timer) {
         this(settings, observer, KafkaRpcConsumerExecution.compatibilityDefault(), timer);
     }
@@ -288,7 +293,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
         }
         CompletionStage<Void> sent;
         try { sent = sendRequest(current); }
-        catch (RuntimeException failure) { sent = CompletableFuture.failedFuture(failure); }
+        catch (RuntimeException | Error failure) { sent = CompletableFuture.failedFuture(failure); }
         sent.whenComplete((ignored, throwable) -> {
             if (throwable != null) {
                 observe(RpcTransportEventType.SEND_FAILED, current, topicResolver.requestTopic(current),
@@ -401,6 +406,26 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
         }
     }
 
+    /** 独占注册并按处理器身份回收，避免绑定回滚删除其他注册。 */
+    @Override
+    public group.zn.zero.rpc.spi.RpcHandlerRegistration registerScoped(final String serviceName,
+            final String methodName, final String topic, final String group, final RpcHandler handler) {
+        Objects.requireNonNull(handler, "handler");
+        RpcHandler owned = handler::handle;
+        synchronized (registrationLifecycleMonitor) {
+            RpcRoute route = new RpcRoute(serviceName, methodName);
+            if (handlers.containsKey(route)) {
+                throw ZeroException.of(RpcErrorCode.CONTRACT_INVALID, "rpc route already registered", null);
+            }
+            register(serviceName, methodName, topic, group, owned);
+            return () -> {
+                synchronized (registrationLifecycleMonitor) {
+                    if (handlers.get(route) == owned) unregister(serviceName, methodName);
+                }
+            };
+        }
+    }
+
     /**
      * 关闭 Kafka RPC 适配器。
      *
@@ -421,6 +446,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
         requestSubscriptionsByRoute.clear();
         requestSubscriptionReferences.clear();
         replyTopics.clear();
+            responseSendFailures.clear();
         if (failure != null) {
             throw failure;
         }
@@ -463,7 +489,13 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
     }
 
     private void onReplyMessage(final KafkaRpcMessage message) {
-        KafkaRpcEnvelope envelope = envelopeCodec.decode(message.value());
+        final KafkaRpcEnvelope envelope;
+        try {
+            envelope = envelopeCodec.decode(message.value());
+        } catch (RuntimeException | Error failure) {
+            LOGGER.log(System.Logger.Level.WARNING, "kafka rpc reply envelope decode failed", failure);
+            return;
+        }
         if (envelope.kind() == KafkaRpcEnvelopeKind.RESPONSE) {
             pendingRequests.complete(envelope.response());
         }
@@ -488,14 +520,10 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
         observe(RpcTransportEventType.REQUEST_RECEIVED, request, message.topic(), request.group(),
                 null, "kafka rpc request received");
         if (!request.timeoutAt().isAfter(Instant.now())) {
-            observe(RpcTransportEventType.REQUEST_REJECTED, request, message.topic(), request.group(),
-                    RpcErrorCode.REQUEST_TIMEOUT, "kafka rpc request already timed out");
             return reject(request, RpcErrorCode.REQUEST_TIMEOUT, "rpc request already timed out");
         }
         RpcHandler handler = handlers.get(new RpcRoute(request.serviceName(), request.methodName()));
         if (handler == null) {
-            observe(RpcTransportEventType.REQUEST_REJECTED, request, message.topic(), request.group(),
-                    RpcErrorCode.SERVICE_NOT_FOUND, "rpc handler not found");
             return reject(request, RpcErrorCode.SERVICE_NOT_FOUND,
                     "rpc handler not found: " + request.serviceName() + "#" + request.methodName());
         }
@@ -530,12 +558,18 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
     }
 
     private CompletionStage<Void> handle(final RpcRequest request, final RpcHandler handler) {
+        if (!request.timeoutAt().isAfter(Instant.now())) {
+            return reject(request, RpcErrorCode.REQUEST_TIMEOUT, "rpc request expired before handler execution");
+        }
         CompletionStage<RpcResponse> stage;
         try {
             observe(RpcTransportEventType.HANDLER_STARTED, request, topicResolver.requestTopic(request),
                     request.group(), null, "kafka rpc handler started");
+            if (!request.timeoutAt().isAfter(Instant.now())) {
+                return reject(request, RpcErrorCode.REQUEST_TIMEOUT, "rpc request expired during handler observation");
+            }
             stage = Objects.requireNonNull(handler.handle(request), "handlerStage");
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             observe(RpcTransportEventType.HANDLER_FAILED, request, topicResolver.requestTopic(request),
                     request.group(), RpcErrorCode.HANDLER_FAILED, messageOf(ex));
             if (request.mode() == RpcMode.ONEWAY) {
@@ -557,6 +591,11 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
             if (request.mode() == RpcMode.ONEWAY) {
                 return CompletableFuture.completedFuture(null);
             }
+            if (!request.timeoutAt().isAfter(Instant.now())) {
+                observe(RpcTransportEventType.REQUEST_REJECTED, request, topicResolver.requestTopic(request),
+                        request.group(), RpcErrorCode.REQUEST_TIMEOUT, "kafka rpc request expired before response sent");
+                return CompletableFuture.completedFuture(null);
+            }
             RpcResponse current = response == null
                     ? errorResponse(request, RpcErrorCode.HANDLER_FAILED, "rpc handler returned null response")
                     : response;
@@ -566,7 +605,9 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
     }
 
     private CompletionStage<Void> reject(final RpcRequest request, final ErrorCode errorCode, final String message) {
-        if (request.mode() == RpcMode.ONEWAY) {
+        observe(RpcTransportEventType.REQUEST_REJECTED, request, topicResolver.requestTopic(request),
+                request.group(), errorCode, message);
+        if (request.mode() == RpcMode.ONEWAY || !request.timeoutAt().isAfter(Instant.now())) {
             return CompletableFuture.completedFuture(null);
         }
         return sendResponse(request.replyTopic(), errorResponse(request, errorCode, message));
@@ -577,21 +618,62 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
                 replyTopic,
                 response.correlationId(),
                 envelopeCodec.encodeResponse(response));
-        CompletionStage<Void> sendStage = gateway.send(message);
+        CompletionStage<Void> sendStage;
+        try {
+            sendStage = gateway.send(message);
+        } catch (RuntimeException | Error failure) {
+            recordResponseSendFailure(response, replyTopic, failure);
+            return completeResponseSendFailure(response, replyTopic, failure);
+        }
+        CompletableFuture<Void> outcome = new CompletableFuture<>();
         sendStage.whenComplete((ignored, throwable) -> {
             if (throwable != null) {
-                lastSendFailure = unwrap(throwable);
-                observe(RpcTransportEventType.SEND_FAILED, response, replyTopic, "",
-                        RpcErrorCode.TRANSPORT_UNAVAILABLE, "send kafka rpc response failed");
-                LOGGER.log(System.Logger.Level.ERROR,
-                        "send kafka rpc response failed: replyTopic=" + replyTopic,
-                        lastSendFailure);
+                recordResponseSendFailure(response, replyTopic, throwable);
+                completeResponseSendFailure(outcome, response, replyTopic, throwable);
             } else {
+                responseSendFailures.remove(response.correlationId());
                 observe(RpcTransportEventType.RESPONSE_SENT, response, replyTopic, "",
                         null, "kafka rpc response sent");
+                outcome.complete(null);
             }
         });
-        return sendStage;
+        return outcome;
+    }
+
+    /** 统一同步与异步 producer 失败的可观测性。 */
+    private void recordResponseSendFailure(
+            final RpcResponse response, final String replyTopic, final Throwable failure) {
+        lastSendFailure = unwrap(failure);
+        observe(RpcTransportEventType.SEND_FAILED, response, replyTopic, "",
+                RpcErrorCode.TRANSPORT_UNAVAILABLE, "send kafka rpc response failed");
+        LOGGER.log(System.Logger.Level.ERROR,
+                "send kafka rpc response failed: replyTopic=" + replyTopic,
+                lastSendFailure);
+    }
+
+    private CompletionStage<Void> completeResponseSendFailure(
+            final RpcResponse response, final String replyTopic, final Throwable failure) {
+        CompletableFuture<Void> outcome = new CompletableFuture<>();
+        completeResponseSendFailure(outcome, response, replyTopic, failure);
+        return outcome;
+    }
+
+    private void completeResponseSendFailure(
+            final CompletableFuture<Void> outcome, final RpcResponse response,
+            final String replyTopic, final Throwable failure) {
+        int attempts = responseSendFailures.computeIfAbsent(response.correlationId(), ignored -> new AtomicInteger())
+                .incrementAndGet();
+        if (attempts >= MAX_RESPONSE_SEND_FAILURES) {
+            LOGGER.log(System.Logger.Level.ERROR,
+                    "dropping kafka rpc response after bounded send failures: replyTopic=" + replyTopic
+                            + ", attempts=" + attempts,
+                    unwrap(failure));
+            responseSendFailures.remove(response.correlationId());
+            // 终止策略：提交消费 offset，避免永久重投；外部观测器已收到 SEND_FAILED 事件。
+            outcome.complete(null);
+        } else {
+            outcome.completeExceptionally(failure);
+        }
     }
 
     private RpcResponse errorResponse(
@@ -615,7 +697,7 @@ public final class KafkaRpcAdapter implements RpcTransport, RpcHandlerRegistry, 
                     "rpc mode mismatch: " + current.mode(),
                     null);
         }
-        if (current.timeoutAt().isBefore(Instant.now())) {
+        if (!current.timeoutAt().isAfter(Instant.now())) {
             throw ZeroException.of(
                     RpcErrorCode.REQUEST_TIMEOUT,
                     "rpc request already timed out: " + current.correlationId(),

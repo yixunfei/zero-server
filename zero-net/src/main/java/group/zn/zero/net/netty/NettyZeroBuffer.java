@@ -19,13 +19,13 @@ final class NettyZeroBuffer extends AbstractZeroBuffer {
     private final int maximum;
     NettyZeroBuffer(final ByteBuf buffer, final int maximum) {
         this.buffer = buffer;
-        this.maximum = maximum;
+        this.maximum = Math.min(maximum, buffer.maxCapacity());
     }
     @Override public int capacity() { return buffer.capacity(); }
     @Override public void ensureCapacity(final int required) {
         if (required < 0 || required > maximum) throw new IllegalArgumentException("encoded frame exceeds capacity");
         if (required > buffer.capacity()) {
-            buffer.capacity(required);
+            buffer.capacity(buffer.alloc().calculateNewCapacity(required, maximum));
             moveView = null;
         }
     }

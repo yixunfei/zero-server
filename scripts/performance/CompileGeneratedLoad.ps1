@@ -6,8 +6,9 @@ param(
 # 真正运行生成器；生成物与 fixture 只编译到显式 evidence 目录。
 $ErrorActionPreference = 'Stop'
 $output = "$Evidence/load-generated"
+$codegenJar = & (Join-Path $PSScriptRoot '../ResolveCodegen.ps1')
 $classes = "$Evidence/load-classes"
-& "$Jdk/bin/java.exe" -jar zero-codegen/target/zero-codegen-0.1.1-all.jar --input scripts/performance/load-fixtures --out $output --pkg group.zn.zero.benchmark.loadgenerated --languages java
+& "$Jdk/bin/java.exe" -jar $codegenJar --input scripts/performance/load-fixtures --out $output --pkg group.zn.zero.benchmark.loadgenerated --languages java
 if ($LASTEXITCODE -ne 0) { throw 'Load codegen failed' }
 New-Item -ItemType Directory -Force $classes | Out-Null
 $sources = @(Get-ChildItem $output -Recurse -Filter '*.java' | ForEach-Object { '"' + $_.FullName.Replace('\', '/') + '"' })

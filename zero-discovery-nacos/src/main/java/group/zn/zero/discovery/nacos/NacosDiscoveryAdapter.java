@@ -8,6 +8,7 @@ import com.alibaba.nacos.api.naming.NamingService;
 import com.alibaba.nacos.api.naming.pojo.Instance;
 import group.zn.zero.core.error.ZeroException;
 import group.zn.zero.core.lifecycle.AbstractLifecycle;
+import group.zn.zero.core.lifecycle.LifecycleState;
 import group.zn.zero.discovery.DiscoveryErrorCode;
 import group.zn.zero.discovery.ServiceDiscovery;
 import group.zn.zero.discovery.ServiceDiscoveryListener;
@@ -61,6 +62,12 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
     /** 短期 lookup 缓存，避免路由热路径每次穿透 Nacos；TTL 可由 extraProperties 配置。 */
     private final ConcurrentMap<ServiceQuery, LookupCacheEntry> lookupCache = new ConcurrentHashMap<>();
 
+    /** 缓存读写及失效代际短锁；禁止在锁内调用 SDK 或业务监听器。 */
+    private final Object lookupMonitor = new Object();
+
+    /** 失效代际，仅在 lookupMonitor 内访问；跨服务事件也禁止旧查询回填。 */
+    private long lookupRevision;
+
     /** lookup 缓存 TTL，默认一秒；配置为 0 可关闭缓存。 */
     private final long lookupCacheTtlNanos;
 
@@ -77,7 +84,10 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
     /**
      * 监听器失败记录。
      */
-    private final CopyOnWriteArrayList<ZeroException> listenerFailures = new CopyOnWriteArrayList<>();
+    private final java.util.ArrayDeque<ZeroException> listenerFailures = new java.util.ArrayDeque<>();
+
+    /** 监听失败累计数，仅在 listenerFailures 锁内访问。 */
+    private long listenerFailureCount;
 
     /**
      * Nacos 命名服务客户端。
@@ -90,7 +100,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
     /** 通知单消费者标记。 */
     private final AtomicBoolean drainingNotifications = new AtomicBoolean();
 
-    /** 生命周期锁内正在执行的 SDK 操作深度。 */
+    /** SDK 操作计数；增减和等待在实例短锁内，SDK 调用在锁外。 */
     private volatile int sdkOperationDepth;
 
     /**
@@ -148,10 +158,20 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
     /**
      * 返回监听器失败快照。
      *
-     * @return 不可变、无序、可能为空、线程安全的失败列表。
+     * @return 最近最多 256 条，按发生顺序排列的不可变快照；可能为空，线程安全。
      */
     public List<ZeroException> listenerFailures() {
-        return List.copyOf(listenerFailures);
+        synchronized (listenerFailures) { return List.copyOf(listenerFailures); }
+    }
+
+    /** @return 累计监听失败数；线程安全，只读，不随历史截断而清零。 */
+    public long listenerFailureCount() {
+        synchronized (listenerFailures) { return listenerFailureCount; }
+    }
+
+    /** @return 因容量限制丢弃的历史记录数；线程安全，只读。 */
+    public long droppedListenerFailureCount() {
+        synchronized (listenerFailures) { return listenerFailureCount - listenerFailures.size(); }
     }
 
     /**
@@ -205,7 +225,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
                 return null;
             });
             registeredInstances.remove(key, removed);
-            lookupCache.clear();
+            invalidateLookupCache();
             notifySnapshot(ServiceEventType.UNREGISTERED, removed.serviceName(), removed.groupName(),
                     List.of(removed.clusterName()), current);
             return null;
@@ -259,7 +279,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
                         DiscoveryErrorCode.HEALTH_UPDATE_UNSUPPORTED,
                         "unknown health update mode: " + settings.healthUpdateMode(), null);
             }
-            lookupCache.clear();
+            invalidateLookupCache();
             notifySnapshot(ServiceEventType.HEALTH_CHANGED, serviceName, groupName,
                     List.of(updated.clusterName()), client);
             return null;
@@ -363,6 +383,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
                 preserveStartupCleanupFailure(startupFailure, created);
                 throw startupFailure;
             }
+            invalidateLookupCache();
             namingService = created;
         } catch (NacosException ex) {
             throw nacosError("create Nacos naming service failed", ex);
@@ -374,12 +395,15 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
      */
     @Override
     protected void doStop() {
-        awaitSdkOperations();
-        NamingService current = namingService;
-        if (current == null) {
-            return;
+        NamingService current;
+        synchronized (this) {
+            awaitSdkOperations();
+            current = namingService;
+            if (current == null) {
+                return;
+            }
+            sdkOperationDepth++;
         }
-        sdkOperationDepth++;
         try {
             ZeroException firstFailure = null;
             for (NacosSubscription subscription : List.copyOf(subscriptions)) {
@@ -407,7 +431,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
                 }
             }
             registeredInstances.clear();
-            lookupCache.clear();
+            invalidateLookupCache();
             try {
                 current.shutDown();
             } catch (NacosException ex) {
@@ -426,7 +450,10 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
                 throw firstFailure;
             }
         } finally {
-            sdkOperationDepth--;
+            synchronized (this) {
+                sdkOperationDepth--;
+                notifyAll();
+            }
         }
     }
 
@@ -436,12 +463,28 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
         }
     }
 
-    /** 停止前等待已获取旧客户端的操作提交，避免清理期间发生半提交。 */
+    /**
+     * 停止前在配置的 SDK 请求预算内等待已获取旧客户端的操作提交。
+     *
+     * <p>调用方必须持实例锁；{@link Object#wait(long)} 会释放该锁。超时后不关闭仍被使用的
+     * client，避免与迟到 SDK 调用并发访问同一资源。</p>
+     */
     private void awaitSdkOperations() {
         boolean interrupted = false;
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(
+                settings.requestTimeoutMillis());
         while (sdkOperationDepth != 0) {
+            long remainingNanos = deadline - System.nanoTime();
+            if (remainingNanos <= 0L) {
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+                throw ZeroException.of(DiscoveryErrorCode.REGISTRY_UNAVAILABLE,
+                        "Nacos SDK operation did not finish before stop deadline", null);
+            }
             try {
-                wait();
+                long millis = Math.max(1L, java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remainingNanos));
+                wait(millis);
             } catch (InterruptedException failure) {
                 interrupted = true;
             }
@@ -456,15 +499,12 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
             final NamingService current,
             final ServiceQuery query) {
         List<Instance> instances = callWithStartupRetry("lookup Nacos instances failed: " + query.serviceName(), () ->
-                query.healthyOnly()
+                query.healthyOnly() && settings.healthUpdateMode() != NacosHealthUpdateMode.LOCAL_ONLY
                         ? current.selectInstances(query.serviceName(), query.groupName(), query.clusters(), true,
                                 query.subscribe())
                         : current.getAllInstances(query.serviceName(), query.groupName(), query.clusters(),
                                 query.subscribe()));
-        return instances.stream()
-                .map(instance -> fromNacosInstance(query.serviceName(), query.groupName(), instance))
-                .filter(instance -> matchesQuery(query, instance))
-                .toList();
+        return convertInstances(query, instances);
     }
 
     /** 在同一生命周期事务内完成远端注册和本地提交。 */
@@ -474,7 +514,7 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
             return null;
         });
         registeredInstances.put(new InstanceKey(instance.serviceName(), instance.groupName(), instance.instanceId()), instance);
-        lookupCache.clear();
+        invalidateLookupCache();
     }
 
     /** 应用服务名、分组、集群和健康过滤。 */
@@ -508,18 +548,36 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
     private List<ServiceInstance> lookupCached(
             final NamingService current,
             final ServiceQuery query) {
-        long now = System.nanoTime();
-        if (lookupCacheTtlNanos > 0L) {
-            LookupCacheEntry cached = lookupCache.get(query);
-            if (cached != null && now - cached.createdAtNanos() < lookupCacheTtlNanos) {
-                return cached.instances();
+        long revision;
+        synchronized (lookupMonitor) {
+            revision = lookupRevision;
+            if (lookupCacheTtlNanos > 0L) {
+                LookupCacheEntry cached = lookupCache.get(query);
+                if (cached != null && System.nanoTime() - cached.createdAtNanos() < lookupCacheTtlNanos) {
+                    return cached.instances();
+                }
             }
         }
         List<ServiceInstance> loaded = lookupFromClient(current, query);
-        if (lookupCacheTtlNanos > 0L) {
-            lookupCache.put(query, new LookupCacheEntry(System.nanoTime(), loaded));
+        synchronized (lookupMonitor) {
+            if (lookupCacheTtlNanos > 0L && revision == lookupRevision && namingService == current) {
+                long now = System.nanoTime();
+                if (lookupCache.size() >= 4096) {
+                    lookupCache.entrySet().removeIf(entry -> now - entry.getValue().createdAtNanos() >= lookupCacheTtlNanos);
+                }
+                if (lookupCache.size() < 4096 || lookupCache.containsKey(query)) {
+                    lookupCache.put(query, new LookupCacheEntry(now, loaded));
+                }
+            }
         }
         return loaded;
+    }
+
+    private void invalidateLookupCache() {
+        synchronized (lookupMonitor) {
+            lookupRevision++;
+            lookupCache.clear();
+        }
     }
 
     /** 排队事件；生命周期锁内或 SDK 操作期间不执行用户代码。 */
@@ -585,6 +643,36 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
                 metadata);
     }
 
+    /** 隔离坏实例，并把 LOCAL_ONLY 的本地健康覆盖应用到查询与事件快照。 */
+    private List<ServiceInstance> convertInstances(final ServiceQuery query, final List<Instance> instances) {
+        if (instances == null) return List.of();
+        List<ServiceInstance> converted = new java.util.ArrayList<>();
+        for (Instance instance : instances) {
+            try {
+                ServiceInstance value = fromNacosInstance(query.serviceName(), query.groupName(), instance);
+                if (settings.healthUpdateMode() == NacosHealthUpdateMode.LOCAL_ONLY) {
+                    for (ServiceInstance local : registeredInstances.values()) {
+                        if (local.serviceName().equals(value.serviceName()) && local.groupName().equals(value.groupName())
+                                && local.clusterName().equals(value.clusterName()) && local.host().equals(value.host())
+                                && local.port() == value.port()) {
+                            value = value.withHealthy(local.healthy());
+                            break;
+                        }
+                    }
+                }
+                if (matchesQuery(query, value)) converted.add(value);
+            } catch (RuntimeException invalidInstance) {
+                synchronized (listenerFailures) {
+                    listenerFailureCount++;
+                    if (listenerFailures.size() == 256) listenerFailures.removeFirst();
+                    listenerFailures.addLast(ZeroException.of(DiscoveryErrorCode.LISTENER_FAILED,
+                            "invalid registry instance rejected", invalidInstance));
+                }
+            }
+        }
+        return List.copyOf(converted);
+    }
+
     private void notifySnapshot(
             final ServiceEventType type,
             final String serviceName,
@@ -608,10 +696,15 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
         try {
             listener.onEvent(event);
         } catch (RuntimeException ex) {
-            listenerFailures.add(ZeroException.of(
+            ZeroException failure = ZeroException.of(
                     DiscoveryErrorCode.LISTENER_FAILED,
                     "service discovery listener failed: " + event.serviceName(),
-                    ex));
+                    ex);
+            synchronized (listenerFailures) {
+                listenerFailureCount++;
+                if (listenerFailures.size() == 256) listenerFailures.removeFirst();
+                listenerFailures.addLast(failure);
+            }
         }
     }
 
@@ -788,12 +881,14 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
             if (!active() || !(event instanceof NamingEvent namingEvent)) {
                 return;
             }
-            List<ServiceInstance> instances = namingEvent.getInstances() == null
-                    ? List.of()
-                    : namingEvent.getInstances().stream()
-                            .map(instance -> fromNacosInstance(query.serviceName(), query.groupName(), instance))
-                            .filter(instance -> matchesQuery(query, instance))
-                            .toList();
+            // 服务端推送时清除该服务的 lookup 缓存，避免故障转移后流量打到已下线实例。
+            // 只清匹配该服务的条目，不影响其它服务的缓存。
+            synchronized (lookupMonitor) {
+                lookupRevision++;
+                lookupCache.keySet().removeIf(key ->
+                        key.serviceName().equals(query.serviceName()) && key.groupName().equals(query.groupName()));
+            }
+            List<ServiceInstance> instances = convertInstances(query, namingEvent.getInstances());
             ServiceEvent serviceEvent = new ServiceEvent(
                     ServiceEventType.SNAPSHOT_CHANGED,
                     query.serviceName(),
@@ -827,6 +922,10 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
         public void close() {
             NamingService current;
             synchronized (NacosDiscoveryAdapter.this) {
+                if (state() == LifecycleState.STOPPING) {
+                    // 停止流程统一取消订阅，禁止在清理快照之后再准入 SDK 调用。
+                    return;
+                }
                 current = namingService;
                 if (current != ownerClient || current == null) {
                     closed.set(true);

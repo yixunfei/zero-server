@@ -16,7 +16,7 @@ public final class InMemoryMigrationStore implements MigrationStore {
     public synchronized MigrationRecord create(final MigrationRecord record) {
         Objects.requireNonNull(record, "record");
         MigrationRecord existing = records.putIfAbsent(record.id(), record);
-        if (existing != null && !existing.equals(record)) {
+        if (existing != null && !existing.sameCreationMetadata(record)) {
             throw new OwnershipException("migration id was reused with different metadata");
         }
         return existing == null ? record : existing;
@@ -41,6 +41,9 @@ public final class InMemoryMigrationStore implements MigrationStore {
         if (current == null) {
             throw new OwnershipException("migration does not exist");
         }
+        if (checkpointVersion.value() < current.checkpointVersion().value()) {
+            throw new OwnershipException("migration checkpoint version cannot move backwards");
+        }
         if (current.state() == next) {
             return current;
         }
@@ -49,6 +52,20 @@ public final class InMemoryMigrationStore implements MigrationStore {
         }
         MigrationRecord updated = new MigrationRecord(current.id(), current.resource(), current.source(), current.target(),
                 next, checkpointVersion, now, current.checkpointMetadata());
+        records.put(id, updated);
+        return updated;
+    }
+
+    /** 原子校验版本及旧元数据，再发布新的 checkpoint 描述。 */
+    @Override
+    public synchronized MigrationRecord updateCheckpoint(final MigrationId id, final StateVersion expectedVersion,
+            final MigrationCheckpointMetadata expectedMetadata, final MigrationCheckpointMetadata metadata,
+            final Instant now) {
+        MigrationRecord current = records.get(Objects.requireNonNull(id, "id"));
+        if (current == null) {
+            throw new OwnershipException("migration does not exist");
+        }
+        MigrationRecord updated = current.updateCheckpoint(expectedVersion, expectedMetadata, metadata, now);
         records.put(id, updated);
         return updated;
     }

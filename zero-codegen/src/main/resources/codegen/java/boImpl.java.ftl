@@ -19,9 +19,9 @@ public class ${implName} implements ${boName} {
      *
      * @param request 协议请求消息；不可为空。
      */
-    @Override
+    @java.lang.Override
     public ${method.signature} {
-        throw new UnsupportedOperationException("implement generated protocol event method: ${method.methodName}");
+        throw new java.lang.UnsupportedOperationException("implement generated protocol event method: ${method.methodName}");
     }
 </#list>
 }

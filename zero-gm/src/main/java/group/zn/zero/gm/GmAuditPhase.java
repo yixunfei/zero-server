@@ -35,5 +35,14 @@ public enum GmAuditPhase {
     /**
      * 正式执行失败后。
      */
-    EXECUTE_FAILED
+    EXECUTE_FAILED,
+
+    /** 本次请求未执行业务；已有幂等操作可能仍在途或提交状态未知。 */
+    REJECTED,
+
+    /** 已完成请求的幂等结果重放，不重复执行业务。 */
+    REPLAYED,
+
+    /** 业务结束后的幂等结果记账失败。 */
+    BOOKKEEPING_FAILED
 }

@@ -61,12 +61,10 @@ public final class LocalSceneService implements SceneService, AutoCloseable {
                 })),
                 scheduler.register(MoveCommand.class, ActorHandler.sync((context, message) -> {
                     MoveCommand command = (MoveCommand) message.payload();
-                    Map<Long, SceneEntityState> entities = scenes.computeIfAbsent(
-                            command.request().sceneId(),
-                            ignored -> new SceneState()).entities;
+                    Map<Long, SceneEntityState> entities = sceneEntities(command.request().sceneId());
                     Optional<SceneEntityState> previous = Optional.ofNullable(entities.get(command.request().uid()));
                     if (previous.isEmpty()) {
-                        command.result().completeExceptionally(new IllegalStateException("scene entity has not entered"));
+                        command.result().completeExceptionally(group.zn.zero.core.error.ZeroException.of(SceneErrorCode.NOT_ENTERED));
                         return;
                     }
                     SceneEntityState state = new SceneEntityState(
@@ -181,7 +179,7 @@ public final class LocalSceneService implements SceneService, AutoCloseable {
         String currentTraceId = requireText(traceId, "traceId");
         CompletableFuture<Optional<SceneEntityState>> result = new CompletableFuture<>();
         linkDispatch(actorGateway.dispatch(
-                GameRequestContext.gm(currentTraceId),
+                GameRequestContext.client(currentTraceId),
                 LaneKey.scene(currentSceneId),
                 new QueryEntityCommand(currentSceneId, uid, result)), result);
         return result;
@@ -200,7 +198,7 @@ public final class LocalSceneService implements SceneService, AutoCloseable {
         String currentTraceId = requireText(traceId, "traceId");
         CompletableFuture<List<SceneEntityState>> result = new CompletableFuture<>();
         linkDispatch(actorGateway.dispatch(
-                GameRequestContext.gm(currentTraceId),
+                GameRequestContext.client(currentTraceId),
                 LaneKey.scene(currentSceneId),
                 new ListEntitiesCommand(currentSceneId, result)), result);
         return result;

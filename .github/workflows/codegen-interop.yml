@@ -28,19 +28,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: actions/cache@v4
+        id: godot-cache
+        with:
+          path: godot
+          key: godot-4.4.1-${{ runner.os }}-${{ runner.arch }}
       - name: Install Godot 4.4.1
+        if: steps.godot-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $asset = if ($IsWindows) { 'Godot_v4.4.1-stable_win64.exe.zip' } else { 'Godot_v4.4.1-stable_linux.x86_64.zip' }
           Invoke-WebRequest "https://github.com/godotengine/godot-builds/releases/download/4.4.1-stable/$asset" -OutFile godot.zip
           Expand-Archive godot.zip godot
+      - name: Locate Godot executable
+        shell: pwsh
+        run: |
           $executable = if ($IsWindows) { Get-ChildItem godot -Filter '*_console.exe' | Select-Object -First 1 } else { Get-ChildItem godot -File | Select-Object -First 1 }
           if (-not $IsWindows) { chmod +x $executable.FullName }
           "GODOT_BIN=$($executable.FullName)" >> $env:GITHUB_ENV
       - name: Quality and all target runtimes
         shell: pwsh
         run: |
-          mvn -Pquality -pl zero-codegen -am verify -q
+          if ($IsWindows) { ./mvnw.cmd -Pquality -pl zero-codegen -am verify -q }
+          else { ./mvnw -Pquality -pl zero-codegen -am verify -q }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./zero-codegen/scripts/smoke-interop.ps1 -GodotExecutable $env:GODOT_BIN -RequireAll
       - uses: actions/upload-artifact@v7

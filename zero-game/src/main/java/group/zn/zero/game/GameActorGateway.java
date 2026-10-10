@@ -112,7 +112,8 @@ public final class GameActorGateway {
         Objects.requireNonNull(laneKey, "laneKey");
         Objects.requireNonNull(command, "command");
         ActorMessage message = new ActorMessage(laneKey, context.traceId(), command);
-        ActorRoute route = Objects.requireNonNull(routeResolver.resolve(message), "actor route");
+        ActorRoute route = routeResolver.resolve(message);
+        if (route == null) throw ZeroException.of(ActorErrorCode.ROUTE_NOT_FOUND, "actor route not found", null);
         validateRoute(message, route);
         if (route.kind() == ActorRouteKind.LOCAL) {
             return actorScheduler.dispatch(message);

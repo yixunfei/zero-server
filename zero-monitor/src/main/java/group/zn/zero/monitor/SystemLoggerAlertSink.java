@@ -54,12 +54,24 @@ public final class SystemLoggerAlertSink implements AlertSink {
     }
 
     private String format(final AlertEvent event) {
-        return "alert rule=" + event.ruleName()
+        return escape("alert rule=" + event.ruleName()
                 + " severity=" + event.severity()
                 + " metric=" + event.metricName()
                 + " value=" + event.value()
                 + " threshold=" + event.threshold()
                 + " labels=" + event.labels()
-                + " message=" + event.message();
+                + " message=" + event.message());
+    }
+
+    /** 转义控制字符和 Unicode 行分隔符，保证单行诊断。 */
+    private String escape(final String value) {
+        StringBuilder result = new StringBuilder(value.length());
+        for (int index = 0; index < value.length(); index++) {
+            char character = value.charAt(index);
+            if (Character.isISOControl(character) || character == '\u2028' || character == '\u2029') {
+                result.append("\\u").append(java.util.HexFormat.of().toHexDigits(character));
+            } else result.append(character);
+        }
+        return result.toString();
     }
 }

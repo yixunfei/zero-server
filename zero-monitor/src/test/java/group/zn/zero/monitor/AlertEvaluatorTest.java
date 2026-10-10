@@ -41,7 +41,7 @@ class AlertEvaluatorTest {
                 0.5D,
                 AlertSeverity.WARNING,
                 Map.of("cache", "profile"),
-                Duration.ofSeconds(30),
+                Duration.ZERO,
                 "cache hit too low");
 
         List<AlertEvent> events = new AlertEvaluator(List.of(rule), List.of(sink)).evaluate(registry);
@@ -68,7 +68,7 @@ class AlertEvaluatorTest {
 
         String yaml = new PrometheusAlertRuleExporter().export("zero-server", List.of(rule));
 
-        assertTrue(yaml.contains("alert: HighCpu"));
+        assertTrue(yaml.contains("alert: \"HighCpu\""));
         assertTrue(yaml.contains(SystemMetricCollector.SYSTEM_CPU_LOAD + " > 0.9"));
         assertTrue(yaml.contains("severity: critical"));
     }
@@ -112,14 +112,14 @@ class AlertEvaluatorTest {
         };
         AlertEvaluator evaluator = new AlertEvaluator(List.of(rule), List.of(sink));
 
-        assertThrows(IllegalStateException.class, () -> evaluator.evaluate(registry));
+        assertThrows(group.zn.zero.core.error.ZeroException.class, () -> evaluator.evaluate(registry));
         assertEquals(1, evaluator.evaluate(registry).size());
         assertEquals(2, attempts.get());
     }
 
-    /** A later sink failure retries the whole event, including sinks that already returned. */
+    /** A later sink failure retries only sinks that have not confirmed delivery. */
     @Test
-    void laterSinkFailureShouldRetryWholeEvent() {
+    void laterSinkFailureRetriesOnlyUnsuccessfulSinks() {
         InMemoryMetricRegistry registry = new InMemoryMetricRegistry();
         registry.register(new MetricDefinition("zero_test_alert", "test", "count", List.of()));
         registry.record(new MetricSample("zero_test_alert", 2, Map.of(), Instant.EPOCH));
@@ -134,10 +134,10 @@ class AlertEvaluatorTest {
         };
         AlertEvaluator evaluator = new AlertEvaluator(List.of(rule), List.of(first, later));
 
-        assertThrows(IllegalStateException.class, () -> evaluator.evaluate(registry));
+        assertThrows(group.zn.zero.core.error.ZeroException.class, () -> evaluator.evaluate(registry));
         assertEquals(1, evaluator.evaluate(registry).size());
         assertTrue(evaluator.evaluate(registry).isEmpty());
-        assertEquals(2, first.events().size());
+        assertEquals(1, first.events().size());
         assertEquals(2, laterAttempts.get());
     }
 }

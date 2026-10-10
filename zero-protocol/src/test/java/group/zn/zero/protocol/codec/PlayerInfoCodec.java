@@ -112,7 +112,7 @@ public final class PlayerInfoCodec implements ZeroPayloadCodec<PlayerInfo> {
         Objects.requireNonNull(reader, "reader");
         int objectEnd = reader.beginObject();
         PlayerInfo message = new PlayerInfo();
-        boolean[] presence = reader.hasRemainingInObject(objectEnd) ? reader.readPresenceBits() : new boolean[0];
+        boolean[] presence = reader.hasRemainingInObject(objectEnd) ? reader.readPresenceBits(1) : new boolean[0];
         if (reader.hasRemainingInObject(objectEnd)) {
             message.uid = reader.readLong();
         }

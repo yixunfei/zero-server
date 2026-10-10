@@ -80,7 +80,7 @@ public final class RedisCacheEnvelopeCodec {
                         null);
             }
             byte[] payload = input.readNBytes(payloadLength);
-            if (payload.length != payloadLength) {
+            if (payload.length != payloadLength || input.available() != 0) {
                 throw ZeroException.of(
                         CacheErrorCode.DESERIALIZE_FAILED,
                         "redis cache envelope payload truncated",

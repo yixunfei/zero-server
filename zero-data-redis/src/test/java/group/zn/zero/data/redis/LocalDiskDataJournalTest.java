@@ -34,14 +34,17 @@ class LocalDiskDataJournalTest {
         Files.write(journal.journalPath("game", "player"), new byte[] {(byte) 0x80},
                 java.nio.file.StandardOpenOption.APPEND);
         var restarted = new LocalDiskDataJournal(tempDir);
-        restarted.appendAll(List.of(second, first, other));
-        assertEquals(List.of("p1", "p2", "p2", "p1"), restarted.readAll("game", "player").stream().map(RedisDataJournalEntry::id).toList());
-        assertEquals(List.of("i1", "i1"), restarted.readAll("game", "item").stream().map(RedisDataJournalEntry::id).toList());
+        assertThrows(group.zn.zero.core.error.ZeroException.class,
+                () -> restarted.appendAll(List.of(second, first, other)));
+        assertThrows(group.zn.zero.core.error.ZeroException.class,
+                () -> restarted.readAll("game", "player"));
+        assertEquals(List.of("i1"), restarted.readAll("game", "item").stream().map(RedisDataJournalEntry::id).toList());
         restarted.appendAll(List.of());
-        assertEquals(4, restarted.readAll("game", "player").size());
+        assertThrows(group.zn.zero.core.error.ZeroException.class,
+                () -> restarted.readAll("game", "player"));
     }
 
-    /** 完整记录后追加撕裂记录时，只读取完整前缀。 */
+    /** 完整记录后追加撕裂记录时，读取必须 fail-closed。 */
     @Test
     void readAllShouldIgnoreTornTailRecord() throws Exception {
         LocalDiskDataJournal journal = new LocalDiskDataJournal(tempDir);
@@ -51,9 +54,8 @@ class LocalDiskDataJournalTest {
         Path path = journal.journalPath("game", "player");
         Files.write(path, new byte[] {(byte) 0x80}, java.nio.file.StandardOpenOption.APPEND);
 
-        List<RedisDataJournalEntry> entries = journal.readAll("game", "player");
-
-        assertEquals(1, entries.size());
+        assertThrows(group.zn.zero.core.error.ZeroException.class,
+                () -> journal.readAll("game", "player"));
     }
 
     /** 重启后丢弃撕裂尾帧再追加，后续完整记录仍可读取。 */
@@ -65,10 +67,15 @@ class LocalDiskDataJournalTest {
             var entry = RedisDataJournalEntry.delete("game", "player", "id", 1L, 1000L);
             journal.append(entry);
             Files.write(journal.journalPath("game", "player"), tail, java.nio.file.StandardOpenOption.APPEND);
-            assertEquals(1, journal.readAll("game", "player").size());
+            assertThrows(group.zn.zero.core.error.ZeroException.class,
+                    () -> journal.readAll("game", "player"));
             var restarted = new LocalDiskDataJournal(root);
-            restarted.append(entry);
-            assertEquals(2, restarted.readAll("game", "player").size());
+            byte[] original = Files.readAllBytes(journal.journalPath("game", "player"));
+            assertThrows(group.zn.zero.core.error.ZeroException.class, () -> restarted.append(entry));
+            org.junit.jupiter.api.Assertions.assertArrayEquals(original,
+                    Files.readAllBytes(journal.journalPath("game", "player")));
+            assertThrows(group.zn.zero.core.error.ZeroException.class,
+                    () -> restarted.readAll("game", "player"));
         }
     }
 

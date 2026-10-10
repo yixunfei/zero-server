@@ -110,8 +110,8 @@ public interface ZeroDataEnvelopeStore {
      * 批量条件保存；每项 CAS 原子，整个批次不保证事务原子性，保留输入执行顺序。
      * @param writes 不可空，元素不可空；允许空集合。
      * @return 不可变、有序、可为空的逐项结果，长度与输入相同；false 表示该项冲突。
-     * @throws group.zn.zero.core.error.ZeroException 驱动无法准确报告逐项结果时可抛 VERSION_CONFLICT；
-     *     IO 失败绑定 WRITE_FAILED。任何异常都可能已有部分项提交，调用方必须重新读取确认。
+     * @throws group.zn.zero.core.error.ZeroException 后端故障绑定数据访问错误码。
+     *     任何异常都可能已有部分项提交，调用方必须重新读取确认；版本冲突返回逐项 false。
      */
     default List<Boolean> saveIfVersionBatch(final Collection<ConditionalWrite> writes) {
         java.util.Objects.requireNonNull(writes, "writes");

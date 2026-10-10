@@ -72,7 +72,8 @@ export class ZeroWriter {
   }
 
   writeString(value: string): void {
-    this.writeByteArray(UTF8_ENCODER.encode(value ?? ''));
+    if (value == null) throw new TypeError('string must not be null');
+    this.writeByteArray(UTF8_ENCODER.encode(value));
   }
 
   writeByteArray(value: Uint8Array | null | undefined): void {
@@ -327,19 +328,26 @@ export class ZeroReader {
     this.limit = this.objectLimits.pop()!;
   }
 
-  readPresenceBits(): boolean[] {
+  /** Decode only schema-known nullable bits; skip unknown bitmap bytes after bounds checking. */
+  readPresenceBits(knownFieldCount: number): boolean[] {
+    if (!Number.isSafeInteger(knownFieldCount) || knownFieldCount < 0 || knownFieldCount > 0x7fffffff) {
+      throw new Error('invalid schema nullable field count');
+    }
     const fieldCount = this.readUnsignedInt();
     const byteCount = Math.floor((fieldCount + 7) / 8);
     this.requireReadable(byteCount);
-    const values = new Array<boolean>(fieldCount);
-    for (let byteIndex = 0; byteIndex < byteCount; byteIndex++) {
+    const knownCount = Math.min(fieldCount, knownFieldCount);
+    const values = new Array<boolean>(knownCount);
+    const knownBytes = Math.ceil(knownCount / 8);
+    for (let byteIndex = 0; byteIndex < knownBytes; byteIndex++) {
       const word = this.readRawByte();
       const base = byteIndex * 8;
-      const end = Math.min(fieldCount, base + 8);
+      const end = Math.min(knownCount, base + 8);
       for (let bitIndex = base; bitIndex < end; bitIndex++) {
         values[bitIndex] = ((word >>> (bitIndex - base)) & 1) !== 0;
       }
     }
+    this.index += byteCount - knownBytes;
     return values;
   }
 

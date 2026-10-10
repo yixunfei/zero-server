@@ -36,6 +36,28 @@ public final class InMemoryLogSink implements LogSink {
      */
     private final Lock writeLock = recordLock.writeLock();
 
+    /** 仅保留最近 capacity 条本地诊断，生产持久日志应使用外部 sink。 */
+    private final int capacity;
+    /** 因容量淘汰的历史记录数。 */
+    private long droppedRecords;
+
+    /** 创建最多保留 4096 条的本地诊断 sink；不启动线程。 */
+    public InMemoryLogSink() { this(4096); }
+
+    /** 创建有界诊断 sink；线程安全，满时淘汰最早记录。
+     * @param capacity 正容量。 @throws IllegalArgumentException 容量非正数。 */
+    public InMemoryLogSink(final int capacity) {
+        if (capacity <= 0) throw new IllegalArgumentException("log capacity must be positive");
+        this.capacity = capacity;
+    }
+
+    /** @return 因容量淘汰的累计条数；线程安全，不随 clear 清零。 */
+    public long droppedRecords() {
+        readLock.lock();
+        try { return droppedRecords; }
+        finally { readLock.unlock(); }
+    }
+
     /**
      * 写入日志记录。
      *
@@ -46,7 +68,9 @@ public final class InMemoryLogSink implements LogSink {
     public void append(final ZeroLogRecord record) {
         writeLock.lock();
         try {
-            recordQueue.add(Objects.requireNonNull(record, "record"));
+            Objects.requireNonNull(record, "record");
+            if (recordQueue.size() == capacity) { recordQueue.remove(); droppedRecords++; }
+            recordQueue.add(record);
         } finally {
             writeLock.unlock();
         }

@@ -11,6 +11,16 @@ import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 
 class RuntimeAdapterResilienceTest {
+    /** drain 后直接 close 必须经过 STOP，重复 drain/close 不得抛出。 */
+    @Test void drainAndCloseAreIdempotent() {
+        var resilience = new RuntimeAdapterResilience(readyHealth(), RuntimeAdapterRecovery.conservative(), BUDGET);
+        resilience.drain();
+        resilience.close();
+        resilience.drain();
+        resilience.close();
+        assertEquals(RuntimeAdapterStateMachine.State.CLOSE, resilience.snapshot().state());
+    }
+
     private static final RuntimeAdapterBudget BUDGET = new RuntimeAdapterBudget(
             Duration.ofSeconds(2), Duration.ofMillis(500), 1, 2,
             Duration.ofMillis(10), Duration.ofMillis(100), 2.0d);

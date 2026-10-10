@@ -27,6 +27,8 @@ public final class RuntimeComposition {
     private RuntimePreset preset;
     private Duration assemblyTimeout = Duration.ofSeconds(30);
     private Duration startupTimeout = Duration.ofSeconds(30);
+    /** 停止及关闭累计预算。 */
+    private Duration shutdownTimeout = Duration.ofSeconds(30);
     private boolean consumed;
 
     private RuntimeComposition(final RuntimeProfile profile) {
@@ -107,6 +109,11 @@ public final class RuntimeComposition {
         return this;
     }
 
+    /** 设置 stop/close 累计预算；仅装配阶段调用，非线程安全。 */
+    public RuntimeComposition shutdownTimeout(final Duration timeout) {
+        mutable(); shutdownTimeout = positive(timeout); return this;
+    }
+
     public RuntimeAssemblyPlan diagnose() {
         mutable();
         return assembler().diagnose();
@@ -134,7 +141,7 @@ public final class RuntimeComposition {
         modules.forEach(module -> module.providers().forEach(provider -> catalog.register(module.id(), provider)));
         providers.forEach(provider -> catalog.register("application", provider));
         RuntimeAssembler.Builder result = RuntimeAssembler.builder(catalog.build(), profile)
-                .assemblyTimeout(assemblyTimeout).startupTimeout(startupTimeout);
+                .assemblyTimeout(assemblyTimeout).startupTimeout(startupTimeout).shutdownTimeout(shutdownTimeout);
         if (preset != null) {
             result.preset(preset);
         }

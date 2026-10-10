@@ -195,6 +195,15 @@ public final class RedisDistributedCacheService<K, V> implements CacheService<K,
     }
 
     /**
+     * 确认对应外部写回已实际成功；线程安全，不替代后端健康与积压检查。
+     * @param failureTicket markWriteBackFailure 返回的故障凭据。
+     * @return 仅最新外部凭据匹配时为 true；不等同于整体健康。
+     */
+    public boolean confirmWriteBackRecovery(final long failureTicket) {
+        return delegate.confirmWriteBackRecovery(failureTicket);
+    }
+
+    /**
      * 增加积压数量。
      *
      * @param amount 新增积压数量；必须大于等于 0。

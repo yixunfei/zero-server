@@ -66,7 +66,13 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
     private final Queue<AcceptedFrame> orderedFrames = new ArrayDeque<>();
 
     /** 是否已有一个顺序帧正在执行业务或等待响应写入完成；仅 EventLoop 访问。 */
-    private boolean orderedFrameActive;
+    private AcceptedFrame activeOrderedFrame;
+
+    /** 包含活动帧的准入计数；仅 EventLoop 访问。 */
+    private int orderedFrameCount;
+
+    /** 包含活动帧的准入字节；仅 EventLoop 访问。 */
+    private long orderedFrameBytes;
 
     /** Channel 是否仍处于 active 状态；仅 EventLoop 访问。 */
     private boolean channelActive;
@@ -172,8 +178,7 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
     @Override
     public void channelInactive(final ChannelHandlerContext context) {
         channelActive = false;
-        orderedFrames.clear();
-        orderedFrameActive = false;
+        discardQueuedFrames();
         if (connection != null) {
             if (productionSession != null) {
                 productionSession.onChannelInactive();
@@ -226,7 +231,21 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
     }
 
     private void submitAcceptedFrame(final ChannelHandlerContext context, final ProtocolFrame frame) {
+        if (!contextIsActive()) return;
         if (preserveTcpFrameOrder()) {
+            long bytes = retainedBytes(frame);
+            if (orderedFrameCount >= options.tuning().maxOrderedInboundFrames()
+                    || bytes > options.tuning().maxOrderedInboundBytes() - orderedFrameBytes) {
+                channelActive = false;
+                completeProductionFrame(context);
+                discardQueuedFrames();
+                fireException(context, ZeroException.of(NetErrorCode.INBOUND_OVERFLOW,
+                        "ordered inbound overflow: frames=" + orderedFrameCount + ", bytes=" + orderedFrameBytes
+                                + ", required=" + bytes, null));
+                return;
+            }
+            orderedFrameCount++;
+            orderedFrameBytes += bytes;
             orderedFrames.add(new AcceptedFrame(context, frame, admittedIdentity()));
             submitNextOrderedFrame();
             return;
@@ -254,18 +273,18 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
      * 启动单连接顺序队列的下一个帧。只有当前 handler 与全部响应写入完成才会推进队列。
      */
     private void submitNextOrderedFrame() {
-        if (orderedFrameActive || !contextIsActive()) {
+        if (activeOrderedFrame != null || !contextIsActive()) {
             return;
         }
         AcceptedFrame next = orderedFrames.poll();
         if (next == null) {
             return;
         }
-        orderedFrameActive = true;
+        activeOrderedFrame = next;
         try {
             handlerExecutor.execute(() -> invokeOrderedHandler(next));
         } catch (RuntimeException | Error ex) {
-            failOrderedFrame(next.context(), ex);
+            failOrderedFrame(next, ex);
         }
     }
 
@@ -278,7 +297,7 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
             stage.whenComplete((responses, cause) -> executeOnEventLoop(
                     accepted.context(), () -> orderedHandlerCompleted(accepted, responses, cause)));
         } catch (Throwable ex) {
-            executeOnEventLoop(accepted.context(), () -> failOrderedFrame(accepted.context(), ex));
+            executeOnEventLoop(accepted.context(), () -> failOrderedFrame(accepted, ex));
         }
     }
 
@@ -289,46 +308,69 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
             final AcceptedFrame accepted,
             final List<ProtocolFrame> responses,
             final Throwable cause) {
-        if (!orderedFrameActive || !contextIsActive()) {
+        if (activeOrderedFrame != accepted) return;
+        if (!contextIsActive()) {
+            releaseActiveFrame(accepted);
             return;
         }
         if (cause != null) {
-            failOrderedFrame(accepted.context(), asHandlerException(cause));
+            failOrderedFrame(accepted, asHandlerException(cause));
             return;
         }
         CompletionStage<Void> sent = writeResponses(responses);
         try {
             sent.whenComplete((ignored, failure) -> executeOnEventLoop(
-                    accepted.context(), () -> orderedResponseCompleted(accepted.context(), failure)));
+                    accepted.context(), () -> orderedResponseCompleted(accepted, failure)));
         } catch (RuntimeException | Error ex) {
-            failOrderedFrame(accepted.context(), asHandlerException(ex));
+            failOrderedFrame(accepted, asHandlerException(ex));
         }
     }
 
     /**
      * 释放顺序帧预算后推进下一帧，保持同一连接的业务和响应因果顺序。
      */
-    private void orderedResponseCompleted(final ChannelHandlerContext context, final Throwable cause) {
-        if (!orderedFrameActive) {
+    private void orderedResponseCompleted(final AcceptedFrame accepted, final Throwable cause) {
+        if (activeOrderedFrame != accepted) {
             return;
         }
         if (cause != null) {
-            failOrderedFrame(context, asHandlerException(cause));
+            failOrderedFrame(accepted, asHandlerException(cause));
             return;
         }
-        completeProductionFrame(context);
-        orderedFrameActive = false;
+        releaseActiveFrame(accepted);
         submitNextOrderedFrame();
     }
 
     /**
      * 终止顺序队列，避免失败连接在 close 回调之前继续执行业务帧。
      */
-    private void failOrderedFrame(final ChannelHandlerContext context, final Throwable cause) {
-        completeProductionFrame(context);
-        orderedFrames.clear();
-        orderedFrameActive = false;
-        fireException(context, asHandlerException(cause));
+    private void failOrderedFrame(final AcceptedFrame accepted, final Throwable cause) {
+        if (activeOrderedFrame != accepted) return;
+        releaseActiveFrame(accepted);
+        channelActive = false;
+        discardQueuedFrames();
+        fireException(accepted.context(), asHandlerException(cause));
+    }
+
+    private void releaseActiveFrame(final AcceptedFrame accepted) {
+        if (activeOrderedFrame != accepted) return;
+        activeOrderedFrame = null;
+        releaseOrderedFrame(accepted);
+    }
+
+    private void discardQueuedFrames() {
+        AcceptedFrame queued;
+        while ((queued = orderedFrames.poll()) != null) releaseOrderedFrame(queued);
+    }
+
+    private void releaseOrderedFrame(final AcceptedFrame accepted) {
+        orderedFrameCount--;
+        orderedFrameBytes -= retainedBytes(accepted.frame());
+        completeProductionFrame(accepted.context());
+    }
+
+    private static long retainedBytes(final ProtocolFrame frame) {
+        return 128L + frame.payloadLength() + frame.extensionLength();
     }
 
     private void invokeHandler(final ChannelHandlerContext context, final ProtocolFrame frame,
@@ -341,15 +383,25 @@ final class NettyFrameChannelHandler extends SimpleChannelInboundHandler<Protoco
                     fireException(context, asHandlerException(cause));
                     return;
                 }
-                try {
-                    writeResponses(responses).whenComplete((ignored, failure) -> {
-                        if (failure != null) {
-                            fireException(context, asHandlerException(failure));
+                // 写出与 fireException/close 统一串行化到 EventLoop，避免并发关闭导致 write 丢失。
+                executeOnEventLoop(context, () -> {
+                    if (!context.channel().isActive()) {
+                        if (responses != null && !responses.isEmpty()) {
+                            fireException(context, ZeroException.of(NetErrorCode.SEND_FAILED,
+                                    "connection closed before response write", null));
                         }
-                    });
-                } catch (RuntimeException | Error ex) {
-                    fireException(context, asHandlerException(ex));
-                }
+                        return;
+                    }
+                    try {
+                        writeResponses(responses).whenComplete((ignored, failure) -> {
+                            if (failure != null) {
+                                fireException(context, asHandlerException(failure));
+                            }
+                        });
+                    } catch (RuntimeException | Error ex) {
+                        fireException(context, asHandlerException(ex));
+                    }
+                });
             });
         } catch (Throwable ex) {
             completeProductionFrame(context);

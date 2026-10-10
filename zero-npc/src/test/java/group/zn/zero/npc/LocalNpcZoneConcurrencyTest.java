@@ -26,12 +26,12 @@ class LocalNpcZoneConcurrencyTest {
 
             CompletableFuture<Void> ticking = CompletableFuture.runAsync(() -> {
                 for (int attempt = 0; attempt < 20; attempt++) {
-                    zone.tick(new TickBudget(1_000, 10), "tick-" + attempt);
+                    zone.tickAsync(new TickBudget(1_000, 10), "tick-" + attempt).toCompletableFuture().join();
                 }
             }, workers);
             CompletableFuture<Void> despawning = CompletableFuture.runAsync(() -> {
                 for (int index = 0; index < 400; index++) {
-                    zone.despawn(new NpcId("npc-" + index), "gm");
+                    zone.despawnAsync(new NpcId("npc-" + index), "gm").toCompletableFuture().join();
                 }
             }, workers);
             CompletableFuture.allOf(ticking, despawning).get(5L, TimeUnit.SECONDS);
@@ -42,9 +42,9 @@ class LocalNpcZoneConcurrencyTest {
     /** 在调用方线程构造已创建 NPC，便于并发测试复用。 */
     private static void spawnRange(final LocalNpcZone zone, final int fromInclusive, final int toExclusive) {
         for (int index = fromInclusive; index < toExclusive; index++) {
-            zone.spawn(new NpcSnapshot(
+            zone.spawnAsync(new NpcSnapshot(
                     new NpcId("npc-" + index), "test", null, null, null,
-                    NpcLifecycleState.CREATED, BehaviorState.idle(), 0L, 0L, 0L, "spawn"));
+                    NpcLifecycleState.CREATED, BehaviorState.idle(), 0L, 0L, 0L, "spawn")).toCompletableFuture().join();
         }
     }
 }

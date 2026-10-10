@@ -24,9 +24,10 @@ public final class KcpTelemetry implements Consumer<KcpSnapshot> {
         this.registry = Objects.requireNonNull(registry); labels = Map.of("listener", listener);
         for (String name : List.of("sessions", "connected", "received_total", "sent_total", "rejected_total", "failures_total",
                 "updates_total", "flushes_total", "pending_send_bytes", "pending_inbound_bytes")) {
-            registry.register(new MetricDefinition("zero_kcp_" + name, "KCP " + name, "count", List.of("listener")));
+            registry.register(new MetricDefinition("zero_kcp_" + name, "KCP " + name, "count", List.of("listener"), name.endsWith("_total")
+                    ? group.zn.zero.monitor.MetricType.COUNTER : group.zn.zero.monitor.MetricType.GAUGE));
         }
-        registry.register(new MetricDefinition("zero_kcp_reason_total", "KCP fixed reason counts", "count", List.of("listener", "reason")));
+        registry.register(new MetricDefinition("zero_kcp_reason_total", "KCP fixed reason counts", "count", List.of("listener", "reason"), group.zn.zero.monitor.MetricType.COUNTER));
     }
     /** @param snapshot 独立快照；在框架后台执行域采样，不阻塞 IO，不修改业务数据。 */
     @Override public void accept(final KcpSnapshot snapshot) {

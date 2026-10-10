@@ -10,10 +10,6 @@ import group.zn.zero.codegen.model.CodegenLanguage;
 import group.zn.zero.codegen.model.CodegenRequest;
 import group.zn.zero.core.error.ZeroException;
 import java.util.Objects;
-import java.util.ArrayList;
-import java.util.List;
-import java.nio.file.Path;
-import group.zn.zero.codegen.model.JavaArtifactKind;
 
 /**
  * 默认代码生成器。
@@ -64,15 +60,7 @@ public final class DefaultCodeGenerator implements CodeGenerator {
         Objects.requireNonNull(request, "request");
         ProtocolDslValidator.validate(request.document());
         validateLanguages(request);
-        List<Path> roots = new ArrayList<>();
-        roots.add(request.outputDir());
-        request.languages().forEach(language -> roots.add(request.outputDir(language)));
-        if (request.languages().contains(CodegenLanguage.JAVA)) {
-            for (JavaArtifactKind kind : JavaArtifactKind.values()) {
-                roots.add(request.javaOutputDir(kind));
-            }
-        }
-        GeneratedOutputPlan outputs = new GeneratedOutputPlan(request.outputDir(), roots);
+        GeneratedOutputPlan outputs = group.zn.zero.codegen.generator.OutputPlans.forRequest(request);
         for (CodegenLanguage language : request.languages()) {
             switch (language) {
                 case JAVA -> javaRenderer.render(request, outputs);

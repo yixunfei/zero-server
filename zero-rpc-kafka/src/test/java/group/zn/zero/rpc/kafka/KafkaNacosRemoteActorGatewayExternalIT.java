@@ -282,7 +282,7 @@ public class KafkaNacosRemoteActorGatewayExternalIT {
 
     /** 跨 JVM Actor 外测使用的固定断言密钥；测试环境不承载生产凭据。 */
     private static SecurityMetadataAssertion securityAssertion() {
-        return SecurityMetadataAssertion.digest("zero-s4b04-actor-test-secret".getBytes(StandardCharsets.UTF_8));
+        return SecurityMetadataAssertion.digest("zero-s4b04-actor-test-secret-01234567890123456789012345678901".getBytes(StandardCharsets.UTF_8));
     }
 
     /** 创建带有效期和权限的 Actor 调用身份。 */

@@ -18,10 +18,6 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 
 /**
  * 本地玩家基础服务。
@@ -59,10 +55,8 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
     /** 外部注入的 IO 执行域；仅纯内存构造允许直接执行，不由本服务关闭。 */
     private final java.util.concurrent.Executor remoteIoExecutor;
 
-    /**
-     * 账号到玩家 ID 的本地会话表。
-     */
-    private final Map<String, Long> sessions = new ConcurrentHashMap<>();
+    /** 会话绑定与待清理身份共用短锁，协调器不调用外部端口。 */
+    private final PlayerSessionBindings sessionBindings = new PlayerSessionBindings();
 
     /**
      * 玩家在线档案表。
@@ -174,20 +168,8 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
         this.playerCache = Objects.requireNonNull(playerCache, "playerCache");
         this.missingPlayerPolicy = Objects.requireNonNull(missingPlayerPolicy, "missingPlayerPolicy");
         this.subscriptions = List.of(
-                scheduler.register(LoginCommand.class, ActorHandler.sync((context, message) -> {
-                    LoginCommand command = (LoginCommand) message.payload();
-                    Long existing = sessions.putIfAbsent(command.request().accountId(), command.uid());
-                    if (existing != null) {
-                        command.result().completeExceptionally(ZeroException.of(
-                                PlayerErrorCode.ACCOUNT_ALREADY_ONLINE,
-                                "account already has an online session", null));
-                        return;
-                    }
-                    command.result().complete(new PlayerLoginResult(
-                            command.request().accountId(),
-                            command.uid(),
-                            command.request().traceId()));
-                })),
+                scheduler.register(LoginCommand.class, ActorHandler.sync((context, message) -> loginSession((LoginCommand) message.payload()))),
+                scheduler.register(LogoutCommand.class, ActorHandler.sync((context, message) -> logoutSession((LogoutCommand) message.payload()))),
                 scheduler.register(LoadPlayerCommand.class, ActorHandler.sync((context, message) -> {
                     LoadPlayerCommand command = (LoadPlayerCommand) message.payload();
                     PlayerProfile profile = command.profile();
@@ -206,41 +188,62 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
                 })),
                 scheduler.register(QuerySessionCommand.class, ActorHandler.sync((context, message) -> {
                     QuerySessionCommand command = (QuerySessionCommand) message.payload();
-                    command.result().complete(Optional.ofNullable(sessions.get(command.accountId())));
+                    command.result().complete(sessionBindings.find(command.accountId()));
+                })),
+                scheduler.register(RemovePlayerIfOfflineCommand.class, ActorHandler.sync((context, message) -> {
+                    RemovePlayerIfOfflineCommand command = (RemovePlayerIfOfflineCommand) message.payload();
+                    sessionBindings.clean(command.attempt(), players::remove);
                 })));
+
     }
 
-    /**
-     * 创建使用稳定 hash UID 的本地玩家服务。
-     *
-     * @param actorScheduler Actor 调度器；不可为空。
-     * @return 本地玩家服务；不可为空；线程安全。
-     */
-    public static LocalPlayerService withStableHashUid(final ActorScheduler actorScheduler) {
-        return new LocalPlayerService(actorScheduler, request -> stableUid(request.accountId()));
+    /** session lane 内绑定；完成业务信号时不持状态锁。 */
+    private void loginSession(final LoginCommand command) {
+        String session = sessionBindings.loginAuthenticated(command.request().accountId(), command.uid(),
+                command.sessionId(), tokenFingerprint(command.request().token()));
+        command.result().complete(new PlayerLoginResult(command.request().accountId(), command.uid(),
+                session, command.request().traceId()));
     }
 
-    /**
-     * 使用稳定 hash UID 并显式选择缺失玩家策略，不创建线程。
-     * @param actorScheduler 调度器；不可为空。
-     * @param missingPlayerPolicy 缺失策略；不可为空。
-     * @return 线程安全的本地玩家服务。
-     * @throws NullPointerException 必填参数为空。
-     */
-    public static LocalPlayerService withStableHashUid(
-            final ActorScheduler actorScheduler, final MissingPlayerPolicy missingPlayerPolicy) {
-        return new LocalPlayerService(actorScheduler, request -> stableUid(request.accountId()),
-                new InMemoryCrudRepository<>(), new InMemoryCacheService<>(), missingPlayerPolicy);
-    }
-
-    private static long stableUid(final String accountId) {
+    /** 凭据仅以摘要参与已认证请求的幂等比较，不用于替代认证。 */
+    private static String tokenFingerprint(final String token) {
         try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(accountId.getBytes(StandardCharsets.UTF_8));
-            long value = ByteBuffer.wrap(digest).getLong() & Long.MAX_VALUE;
-            return value == 0L ? 1L : value;
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 unavailable", exception);
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException failure) {
+            throw ZeroException.of(group.zn.zero.core.error.SystemErrorCode.SYSTEM_ERROR,
+                    "login fingerprint algorithm unavailable", failure);
+        }
+    }
+
+    /** session lane 申请精确解绑或重试，清理投递与结果完成都在状态锁外。 */
+    private void logoutSession(final LogoutCommand command) {
+        PlayerSessionBindings.Attempt attempt = sessionBindings.logout(command.request());
+        if (attempt == null) {
+            command.result().complete(false);
+            return;
+        }
+        attempt.result().whenComplete((removed, failure) -> {
+            if (failure == null) command.result().complete(removed);
+            else command.result().completeExceptionally(failure);
+        });
+        if (!attempt.submit()) return;
+        try {
+            actorGateway.dispatch(GameRequestContext.client(command.request().traceId()),
+                    LaneKey.player(Long.toString(command.request().uid())),
+                    new RemovePlayerIfOfflineCommand(attempt)).whenComplete((ignored, failure) ->
+                            finishCleanup(attempt, failure));
+        } catch (RuntimeException | Error failure) {
+            finishCleanup(attempt, failure);
+        }
+    }
+
+    /** 物理清理尝试失败可重投；替换登录使清理跳过，但不撤销原解绑成功事实。 */
+    private void finishCleanup(final PlayerSessionBindings.Attempt attempt, final Throwable failure) {
+        if (failure == null) attempt.result().complete(true);
+        else {
+            sessionBindings.rejected(attempt);
+            attempt.result().completeExceptionally(failure);
         }
     }
 
@@ -257,7 +260,7 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
         CompletableFuture<PlayerLoginResult> result = new CompletableFuture<>();
         try {
             CompletableFuture.supplyAsync(() -> uidResolver.resolve(request), remoteIoExecutor)
-                    .thenComposeAsync(uid -> loadRepositoryProfile(uid).thenApply(profile -> uid), remoteIoExecutor).whenComplete((uid, failure) -> {
+                    .thenComposeAsync(uid -> loadAndCacheProfile(uid).thenApply(profile -> uid), remoteIoExecutor).whenComplete((uid, failure) -> {
                 if (failure != null) {
                     result.completeExceptionally(failure);
                     return;
@@ -266,7 +269,7 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
                     linkDispatch(actorGateway.dispatch(
                             GameRequestContext.client(request.traceId()),
                             LaneKey.session(request.accountId()),
-                            new LoginCommand(request, uid, result)), result);
+                            new LoginCommand(request, uid, java.util.UUID.randomUUID().toString(), result)), result);
                 } catch (RuntimeException | Error dispatchFailure) {
                     result.completeExceptionally(dispatchFailure);
                 }
@@ -274,7 +277,7 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
         } catch (RuntimeException | Error failure) {
             result.completeExceptionally(failure);
         }
-        return result;
+        return result.minimalCompletionStage();
     }
 
     /**
@@ -306,7 +309,7 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
         } catch (RuntimeException | Error failure) {
             result.completeExceptionally(failure);
         }
-        return result;
+        return result.minimalCompletionStage();
     }
 
     /**
@@ -324,7 +327,7 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
                 GameRequestContext.gm(currentTraceId),
                 LaneKey.player(Long.toString(uid)),
                 new QueryPlayerCommand(uid, result)), result);
-        return result;
+        return result.minimalCompletionStage();
     }
 
     /**
@@ -343,7 +346,20 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
                 GameRequestContext.gm(currentTraceId),
                 LaneKey.session(currentAccountId),
                 new QuerySessionCommand(currentAccountId, result)), result);
-        return result;
+        return result.minimalCompletionStage();
+    }
+
+    /** 解除精确会话绑定并在没有替换会话时回收在线资料。 */
+    @Override public CompletionStage<Boolean> logout(final PlayerLogoutRequest request) {
+        Objects.requireNonNull(request, "request");
+        CompletableFuture<Boolean> result = new CompletableFuture<>();
+        try {
+            linkDispatch(actorGateway.dispatch(GameRequestContext.client(request.traceId()), LaneKey.session(request.accountId()),
+                    new LogoutCommand(request, result)), result);
+        } catch (RuntimeException | Error failure) {
+            result.completeExceptionally(failure);
+        }
+        return result.minimalCompletionStage();
     }
 
     /**
@@ -493,8 +509,16 @@ public final class LocalPlayerService implements PlayerService, AutoCloseable {
     private record LoginCommand(
             PlayerLoginRequest request,
             long uid,
+            String sessionId,
             CompletableFuture<PlayerLoginResult> result) {
     }
+
+    /** session lane 的解绑命令。 */
+    private record LogoutCommand(PlayerLogoutRequest request, CompletableFuture<Boolean> result) { }
+
+    /** player lane 的条件资料回收命令。 */
+    private record RemovePlayerIfOfflineCommand(PlayerSessionBindings.Attempt attempt) { }
+
 
     /**
      * 玩家加载命令。

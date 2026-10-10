@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Objects;
 import java.util.concurrent.Executor;
+import java.util.function.BooleanSupplier;
 
 /**
  * Minimal embedded Prometheus HTTP endpoint.
@@ -21,6 +22,10 @@ public final class PrometheusHttpEndpoint implements AutoCloseable {
     public static final String METRICS_PATH = "/metrics";
     /** Liveness path. */
     public static final String HEALTH_PATH = "/health";
+    /** 业务就绪路径；未提供探针时固定不就绪。 */
+    public static final String READY_PATH = "/ready";
+    /** 非阻塞状态快照探针，必须线程安全，禁止在探针内连接中间件。 */
+    private final BooleanSupplier readiness;
     private static final String PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8";
     private static final String HEALTH_CONTENT_TYPE = "text/plain; charset=utf-8";
 
@@ -58,6 +63,18 @@ public final class PrometheusHttpEndpoint implements AutoCloseable {
             final MetricRegistry registry,
             final Executor executor,
             final String bearerToken) {
+        this(bindAddress, registry, executor, bearerToken, () -> false);
+    }
+
+    /**
+     * 创建带业务就绪探针的端点；/health 仅表明端点存活，/ready 表明调用方允许接流量。
+     * @param bindAddress 监听地址。 @param registry 指标表。 @param executor 受管异步执行器。
+     * @param bearerToken 非回环必须提供。 @param readiness 非阻塞线程安全探针，停服排空时应返回 false。
+     * @throws NullPointerException 必需依赖为空。 @throws IllegalArgumentException 无效 token 或不安全绑定。
+     */
+    public PrometheusHttpEndpoint(final InetSocketAddress bindAddress, final MetricRegistry registry,
+            final Executor executor, final String bearerToken, final BooleanSupplier readiness) {
+        this.readiness = Objects.requireNonNull(readiness, "readiness");
         this.bindAddress = Objects.requireNonNull(bindAddress, "bindAddress");
         this.registry = Objects.requireNonNull(registry, "registry");
         this.exporter = new PrometheusExporter();
@@ -79,6 +96,7 @@ public final class PrometheusHttpEndpoint implements AutoCloseable {
         HttpServer created = HttpServer.create(bindAddress, 0);
         created.createContext(METRICS_PATH, this::handleMetrics);
         created.createContext(HEALTH_PATH, this::handleHealth);
+        created.createContext(READY_PATH, this::handleReady);
         created.setExecutor(executor);
         try {
             created.start();
@@ -130,7 +148,13 @@ public final class PrometheusHttpEndpoint implements AutoCloseable {
             send(exchange, 405, "method not allowed\n", HEALTH_CONTENT_TYPE);
             return;
         }
-        send(exchange, 200, exporter.export(registry), PROMETHEUS_CONTENT_TYPE);
+        String body;
+        try { body = exporter.export(registry); }
+        catch (RuntimeException failure) {
+            send(exchange, 500, MonitorErrorCode.METRIC_SAMPLE_INVALID.code() + "\n", HEALTH_CONTENT_TYPE);
+            return;
+        }
+        send(exchange, 200, body, PROMETHEUS_CONTENT_TYPE);
     }
 
     private void handleHealth(final HttpExchange exchange) throws IOException {
@@ -146,6 +170,25 @@ public final class PrometheusHttpEndpoint implements AutoCloseable {
             return;
         }
         send(exchange, 200, "ok\n", HEALTH_CONTENT_TYPE);
+    }
+
+    private void handleReady(final HttpExchange exchange) throws IOException {
+        if (!authorized(exchange)) return;
+        if (!READY_PATH.equals(exchange.getRequestURI().getPath())) {
+            send(exchange, 404, "not found\n", HEALTH_CONTENT_TYPE);
+            return;
+        }
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            send(exchange, 405, "method not allowed\n", HEALTH_CONTENT_TYPE);
+            return;
+        }
+        try {
+            boolean ready = readiness.getAsBoolean();
+            send(exchange, ready ? 200 : 503, ready ? "ready\n" : "not ready\n", HEALTH_CONTENT_TYPE);
+        } catch (RuntimeException failure) {
+            // 不泄露探针的自由异常文本，明确失败关闭；稳定错误码便于排障。
+            send(exchange, 503, MonitorErrorCode.SYSTEM_PROBE_FAILED.code() + "\n", HEALTH_CONTENT_TYPE);
+        }
     }
 
     private void send(

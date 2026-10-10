@@ -49,6 +49,20 @@ import org.junit.jupiter.api.Test;
  */
 class ZeroDataEnvelopeCrudRepositoryTest {
 
+    @Test void unresolvedCompositeKeyIsMappingErrorInsteadOfStringFallback() {
+        var metadata = new ZeroDataMappingIntrospector().inspect(PlayerItemArchive.class);
+        var codec = new ZeroDataEntityCodec<PlayerItemKey, PlayerItemArchive>(metadata, new PlayerItemArchiveCodec(),
+                new UnresolvedKeyCodec<>(), 1, java.time.Clock.systemUTC());
+        var failure = assertThrows(ZeroException.class, () -> codec.idOf(new PlayerItemArchive("p", 1, 1, "bag")));
+        assertEquals(DataErrorCode.MAPPING_INVALID, failure.errorCode());
+    }
+
+    /** 运行时无法恢复 K 的实际类型，不得据此猜测 String。 @author zn */
+    private static final class UnresolvedKeyCodec<K> implements ZeroDataKeyCodec<K> {
+        @Override public String encode(final K key) { return key.toString(); }
+        @Override public K decode(final String value) { throw new UnsupportedOperationException(); }
+    }
+
     /** 阻塞驱动不能占用调用线程，也不能让同一 Repository 的两个读取相互串行。 */
     @Test
     void blockedReadsRunConcurrentlyInInjectedIoExecutor() throws Exception {
@@ -271,16 +285,21 @@ class ZeroDataEnvelopeCrudRepositoryTest {
     }
 
     /**
-     * 验证配置 ID 生成器的实体可以在保存时回填主键并写入 payload。
+     * 验证调用方显式生成并保留主键，save 不会对无身份重试隐式新增行。
      */
     @Test
     void repositoryShouldGenerateMissingUuidStyleId() {
         ZeroDataObjectMetadata metadata = new ZeroDataMappingIntrospector().inspect(GeneratedArchive.class);
+        ZeroDataEntityCodec<String, GeneratedArchive> codec =
+                new ZeroDataEntityCodec<>(metadata, new GeneratedArchiveCodec(), 1);
         ZeroDataEnvelopeCrudRepository<String, GeneratedArchive> repository = new ZeroDataEnvelopeCrudRepository<>(
-                new ZeroDataEntityCodec<>(metadata, new GeneratedArchiveCodec(), 1),
+                codec,
                 new TestEnvelopeStore(), Runnable::run);
 
-        repository.save(new GeneratedArchive(null, 0L, "created")).toCompletableFuture().join();
+        assertThrows(java.util.concurrent.CompletionException.class,
+                () -> repository.save(new GeneratedArchive(null, 0L, "created")).toCompletableFuture().join());
+        GeneratedArchive prepared = codec.prepareForSave(new GeneratedArchive(null, 0L, "created"));
+        repository.save(prepared).toCompletableFuture().join();
         GeneratedArchive saved = repository.findById("generated-id").toCompletableFuture().join().orElseThrow();
 
         assertEquals("generated-id", saved.id());
@@ -348,6 +367,15 @@ class ZeroDataEnvelopeCrudRepositoryTest {
      */
     private record PlayerItemKey(String playerId, long itemId) {
     }
+
+    /** 多级接口用于验证泛型参数不会在继承边界丢失。 @author zn */
+    private interface KeyContract<K> extends ZeroDataKeyCodec<K> { }
+
+    /** 泛型编码器基类。 @author zn */
+    private abstract static class BaseKeyCodec<K> implements KeyContract<K> { }
+
+    /** 中间层继续转发类型变量。 @author zn */
+    private abstract static class IntermediateKeyCodec<K> extends BaseKeyCodec<K> { }
 
     /**
      * 玩家物品归档对象。
@@ -488,7 +516,7 @@ class ZeroDataEnvelopeCrudRepositoryTest {
      *
      * @author zn
      */
-    private static final class PlayerItemKeyCodec implements ZeroDataKeyCodec<PlayerItemKey> {
+    private static final class PlayerItemKeyCodec extends IntermediateKeyCodec<PlayerItemKey> {
 
         /**
          * 创建玩家物品组合键 codec。

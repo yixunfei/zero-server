@@ -90,7 +90,13 @@ public final class WireVectors {
         }
         rejects(() -> new ZeroReader(HexFormat.of().parseHex("ffffffffffffffffff01")).readUnsignedLong());
         rejects(() -> new ZeroReader(HexFormat.of().parseHex("ffffffff07")).readList(ZeroReader::readByte));
-        rejects(() -> new ZeroReader(HexFormat.of().parseHex("ffffffff07")).readPresenceBits());
+        rejects(() -> new ZeroReader(HexFormat.of().parseHex("ffffffff07")).readPresenceBits(1));
+        byte[] largePresence = new byte[1024 * 1024 + 5];
+        System.arraycopy(new byte[]{(byte) 128, (byte) 128, (byte) 128, 4, 5}, 0, largePresence, 0, 5);
+        largePresence[largePresence.length - 1] = 42;
+        var presenceReader = new ZeroReader(largePresence);
+        if (!java.util.Arrays.equals(new boolean[]{true, false, true}, presenceReader.readPresenceBits(3))
+                || presenceReader.readByte() != 42) throw new AssertionError("schema presence boundary failed");
         rejects(() -> new ZeroReader(HexFormat.of().parseHex("808004")).readShort());
         rejects(() -> { ZeroReader r = new ZeroReader(new byte[]{1, (byte) 128, 1});
             r.beginObject(); r.readInt(); });

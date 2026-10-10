@@ -5,15 +5,6 @@ import io.netty.buffer.ByteBuf;
 /** 双端共用的完整 KCP 段边界校验；只读线程安全，调用方保证缓冲生命周期。 @author zn */
 final class KcpSegments {
     private KcpSegments() { }
-    /** 只接受已通过 valid 的缓冲；冻结时允许 ACK，拒绝所有新 PUSH。 */
-    static boolean hasPush(final ByteBuf body) {
-        int offset = body.readerIndex();
-        while (offset < body.writerIndex()) {
-            if (body.getUnsignedByte(offset + 4) == 81) return true;
-            offset += 24 + body.getIntLE(offset + 20);
-        }
-        return false;
-    }
     static boolean valid(final ByteBuf body, final int conv, final KcpOptions options) {
         int offset = body.readerIndex();
         while (offset < body.writerIndex()) {

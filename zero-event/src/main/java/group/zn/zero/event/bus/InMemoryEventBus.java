@@ -72,7 +72,7 @@ public final class InMemoryEventBus implements EventBus {
      */
     private final Clock clock;
 
-    /** 处理器执行域；默认直接执行以保持兼容，可由 starter 注入受管执行器。 */
+    /** 处理器执行域；生产必须由 starter 注入受管执行器。 */
     private final Executor dispatchExecutor;
 
     /**
@@ -81,6 +81,7 @@ public final class InMemoryEventBus implements EventBus {
      * @param deadLetterSink 死信接收器；不可为空。
      * @throws NullPointerException 当死信接收器为空时抛出。
      */
+    @Deprecated
     public InMemoryEventBus(final DeadLetterSink deadLetterSink) {
         this(deadLetterSink, Clock.systemUTC(), Runnable::run);
     }
@@ -92,6 +93,7 @@ public final class InMemoryEventBus implements EventBus {
      * @param clock 时钟；不可为空。
      * @throws NullPointerException 当死信接收器或时钟为空时抛出。
      */
+    @Deprecated
     public InMemoryEventBus(final DeadLetterSink deadLetterSink, final Clock clock) {
         this(deadLetterSink, clock, Runnable::run);
     }
@@ -176,25 +178,47 @@ public final class InMemoryEventBus implements EventBus {
         RegistrationSnapshot registrations = snapshot;
         List<HandlerRegistration> handlerSnapshot = registrations.handlers().getOrDefault(event.eventType(), List.of());
 
+        if (registrations.interceptors().isEmpty()) {
+            return handlerSnapshot.isEmpty() ? SUCCESS : scheduleDispatch(event, handlerSnapshot);
+        }
+        List<EventInterceptor> entered = new ArrayList<>(registrations.interceptors().size());
+        CompletionStage<Void> published;
         try {
             for (InterceptorRegistration registration : registrations.interceptors()) {
+                entered.add(registration.interceptor());
                 if (!registration.interceptor().beforePublish(event)) {
-                    ZeroException rejection = ZeroException.of(
-                            SystemErrorCode.SYSTEM_ERROR,
-                            "event publication rejected by interceptor: " + event.eventId(),
-                            null);
-                    recordDeadLetter(event, rejection);
-                    return CompletableFuture.failedFuture(rejection);
+                    throw ZeroException.of(EventErrorCode.PUBLICATION_REJECTED);
                 }
             }
-        } catch (RuntimeException | Error ex) {
-            ZeroException zeroException = asZeroException(ex);
-            recordDeadLetter(event, zeroException);
-            return CompletableFuture.failedFuture(zeroException);
+            published = handlerSnapshot.isEmpty() ? SUCCESS : scheduleDispatch(event, handlerSnapshot);
+        } catch (RuntimeException | Error cause) {
+            ZeroException failure = asZeroException(cause);
+            recordDeadLetter(event, failure);
+            published = CompletableFuture.failedFuture(failure);
         }
+        return afterPublish(event, entered, published);
+    }
 
-        if (handlerSnapshot.isEmpty()) return SUCCESS;
-        return scheduleDispatch(event, handlerSnapshot);
+    private CompletionStage<Void> afterPublish(final ZeroEvent event, final List<EventInterceptor> entered,
+            final CompletionStage<Void> published) {
+        CompletableFuture<Void> result = new CompletableFuture<>();
+        published.whenComplete((ignored, cause) -> {
+            // published 属于本总线的私有完成链，外部 handler 异常已复制为本次发布的失败。
+            Throwable failure = cause instanceof java.util.concurrent.CompletionException && cause.getCause() != null
+                    ? cause.getCause() : cause;
+            for (int index = entered.size() - 1; index >= 0; index--) {
+                try { entered.get(index).afterPublish(event, failure); }
+                catch (RuntimeException | Error hookFailure) {
+                    ZeroException wrapped = asZeroException(hookFailure);
+                    recordDeadLetter(event, wrapped);
+                    if (failure == null) failure = wrapped;
+                    else failure.addSuppressed(wrapped);
+                }
+            }
+            if (failure == null) result.complete(null);
+            else result.completeExceptionally(failure);
+        });
+        return result.minimalCompletionStage();
     }
 
     private CompletionStage<Void> scheduleDispatch(
@@ -214,7 +238,9 @@ public final class InMemoryEventBus implements EventBus {
                         }
                     });
                 } catch (RuntimeException | Error failure) {
-                    completion.completeExceptionally(failure);
+                    ZeroException wrapped = asZeroException(failure);
+                    recordDeadLetter(event, wrapped);
+                    completion.completeExceptionally(wrapped);
                 }
             });
         } catch (RuntimeException | Error failure) {
@@ -255,15 +281,14 @@ public final class InMemoryEventBus implements EventBus {
 
     /** 把异步 handler 的续调重新送回配置的执行域，避免完成线程劫持发布者线程。 */
     private void resume(final Continuation continuation) {
+        // 先记账已完成 handler，再尝试提交；拒绝不能丢失原业务失败。
+        List<ZeroException> failures = continuation.failuresAfterCompletion();
         try {
             dispatchExecutor.execute(() -> dispatch(
-                    continuation.event,
-                    continuation.registrations,
-                    continuation.next,
-                    continuation.failuresAfterCompletion(),
-                    continuation.completion));
+                    continuation.event, continuation.registrations, continuation.next,
+                    failures, continuation.completion));
         } catch (RuntimeException | Error failure) {
-            continuation.completion.completeExceptionally(asZeroException(failure));
+            finish(appendFailure(continuation.event, failures, failure), continuation.completion);
         }
     }
 
@@ -377,8 +402,12 @@ public final class InMemoryEventBus implements EventBus {
         if (current instanceof ZeroException zeroException) {
             return ZeroException.of(zeroException.errorCode(), zeroException.getMessage(), zeroException);
         }
+        // 对外消息不拷贝底层异常文本：getMessage() 可能含 SQL/连接串/凭据/玩家输入，且会经
+        // DeadLetter.reason 进入长期保留的内存死信队列。对外统一用稳定错误说明，原始异常仅作
+        // cause 保留（cause 链不序列化进 DeadLetter 文本），与 RuntimeAssemblyException 的
+        // 安全消息裁剪一致。
         ErrorCode errorCode = SystemErrorCode.SYSTEM_ERROR;
-        return ZeroException.of(errorCode, current.getMessage() == null ? errorCode.message() : current.getMessage(), current);
+        return ZeroException.of(errorCode, errorCode.message(), current);
     }
 
     /**

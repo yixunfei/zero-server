@@ -556,8 +556,8 @@ final class NettyProductionLifecycleSession {
         }
         next.timeoutTask = context.executor().schedule(
                 () -> replayCompleted(next, null, new TimeoutException("network replay check timed out")),
-                30L,
-                TimeUnit.SECONDS);
+                lifecycle.config().authenticationTimeout().toNanos(),
+                TimeUnit.NANOSECONDS);
         try {
             stage.whenComplete((replay, cause) -> executeOnEventLoop(
                     () -> replayCompleted(next, replay, cause)));
@@ -591,16 +591,20 @@ final class NettyProductionLifecycleSession {
         if (cause != null || replay == null || replay != ReplayProtection.ReplayDecision.ACCEPTED) {
             ReplayProtection.ReplayDecision decision = replay == null
                     ? ReplayProtection.ReplayDecision.INVALID : replay;
+            NetErrorCode errorCode = decision == ReplayProtection.ReplayDecision.EXPIRED
+                    ? NetErrorCode.AUTHENTICATION_EXPIRED : NetErrorCode.REPLAY_DETECTED;
+            ConnectionRejectionReason reason = decision == ReplayProtection.ReplayDecision.EXPIRED
+                    ? ConnectionRejectionReason.AUTHENTICATION_EXPIRED
+                    : ConnectionRejectionReason.REPLAY_DETECTED;
             emit(
                     ConnectionLifecycleEventType.FRAME_REJECTED,
                     ConnectionLifecycleResult.REJECTED,
-                    decision == ReplayProtection.ReplayDecision.EXPIRED
-                            ? ConnectionRejectionReason.AUTHENTICATION_EXPIRED
-                            : ConnectionRejectionReason.REPLAY_DETECTED,
+                    reason,
                     NetworkRateLimitScope.FRAME,
-                    decision == ReplayProtection.ReplayDecision.EXPIRED
-                            ? NetErrorCode.AUTHENTICATION_EXPIRED : NetErrorCode.REPLAY_DETECTED,
+                    errorCode,
                     0L);
+            // 向客户端发送错误帧，避免 replay 拒绝被静默丢弃导致客户端永久等待。
+            sendErrorFrame(check.frame(), errorCode);
             scheduleNextReplayCheck();
             return;
         }
@@ -617,6 +621,24 @@ final class NettyProductionLifecycleSession {
         if (state == ConnectionLifecycleState.ESTABLISHED && !pendingReplayChecks.isEmpty()) {
             context.executor().execute(this::startNextReplayCheck);
         }
+    }
+
+    /** 向客户端发送关联原请求的错误帧；仅 EventLoop 调用，发送失败进入生命周期观测并关闭。 */
+    private void sendErrorFrame(final ProtocolFrame request, final NetErrorCode errorCode) {
+        if (!context.channel().isActive()) return;
+        try {
+            connection.send(group.zn.zero.protocol.ProtocolErrorFrames.response(request, errorCode.code()))
+                    .whenComplete((ignored, failure) -> {
+                        if (failure != null) context.executor().execute(() -> errorFrameFailed(failure));
+                    });
+        } catch (RuntimeException failure) {
+            errorFrameFailed(failure);
+        }
+    }
+
+    private void errorFrameFailed(final Throwable failure) {
+        reject(ConnectionLifecycleEventType.CHANNEL_ERROR, NetErrorCode.HANDLER_FAILED,
+                ConnectionRejectionReason.INTERNAL_FAILURE, NetworkRateLimitScope.FRAME, failure);
     }
 
     private boolean admitEstablishedFrame(final ProtocolFrame frame) {

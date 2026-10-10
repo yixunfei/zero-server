@@ -39,6 +39,7 @@ services:
       postgres:
         condition: service_healthy
         required: false
+    # Liveness only; route traffic using an explicitly wired /ready probe.
     healthcheck:
       test: ["CMD-SHELL", "${ZERO_HEALTHCHECK_CMD:-wget -q -O - http://127.0.0.1:8080/health >/dev/null}"]
       interval: ${ZERO_HEALTHCHECK_INTERVAL:-30s}

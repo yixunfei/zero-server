@@ -22,4 +22,15 @@ class InMemoryAoiIndexTest {
         assertEquals(VisibilityEvent.Type.LEAVE, index.observe("o", new Position(9, 9), 1).getFirst().type());
         assertEquals(AoiIndex.Result.Status.NOT_FOUND, index.remove("missing").status());
     }
+
+    @Test void equalReplacementUpdatesObserverReferenceAndStabilizes() {
+        InMemoryAoiIndex index = new InMemoryAoiIndex();
+        var first = new AoiEntity("e", new Position(0, 0), 1, "same");
+        var replacement = new AoiEntity("e", new Position(0, 0), 1, "same");
+        index.add(first);
+        index.observe("o", new Position(0, 0), 1);
+        index.update(replacement);
+        assertTrue(index.observe("o", new Position(0, 0), 1).isEmpty());
+        assertTrue(index.observe("o", new Position(0, 0), 1).isEmpty());
+    }
 }

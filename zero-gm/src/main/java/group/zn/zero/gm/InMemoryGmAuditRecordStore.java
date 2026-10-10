@@ -17,6 +17,12 @@ public final class InMemoryGmAuditRecordStore implements GmAuditRecordStore {
                 : GmAuditAppendResult.DUPLICATE;
     }
 
+    /** 核实完整记录是否一致；无变更，线程安全。 */
+    @Override
+    public boolean containsExact(final GmAuditRecord record) {
+        return Objects.requireNonNull(record, "record").equals(records.get(record.eventId()));
+    }
+
     /** Returns the current number of unique records. */
     public int size() {
         return records.size();

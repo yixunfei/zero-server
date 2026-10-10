@@ -21,13 +21,13 @@ class WorldAsyncEntryTest {
             service.createWorld("w", "a");
             var result = new CompletableFuture<Entity>();
             scheduler.register(String.class, ActorHandler.sync((context, message) ->
-                    service.enterWorldAsync("e", "w")
-                            .thenCompose(entity -> service.moveEntityAsync("e", "a", 3, 4))
+                    service.enterWorldAsync("d", "w")
+                            .thenCompose(entity -> service.moveEntityAsync("d", "a", 3, 4))
                             .whenComplete((entity, failure) -> {
                                 if (failure != null) result.completeExceptionally(failure);
                                 else result.complete(entity);
                             })));
-            scheduler.dispatch(new ActorMessage(LaneKey.entity("e"), "begin"))
+            scheduler.dispatch(new ActorMessage(LaneKey.entity("d"), "begin"))
                     .toCompletableFuture().get(2, TimeUnit.SECONDS);
             assertEquals(3, result.get(2, TimeUnit.SECONDS).x());
         }

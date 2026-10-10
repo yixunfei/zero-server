@@ -41,7 +41,7 @@ class PlayerIoBoundaryTest {
                     .toCompletableFuture().get(2, TimeUnit.SECONDS).uid());
             assertEquals(7, service.loadPlayer(new PlayerLoadRequest(7, "trace"))
                     .toCompletableFuture().get(2, TimeUnit.SECONDS).uid());
-            assertEquals(2, reads.get());
+            assertEquals(1, reads.get());
         }
     }
 }

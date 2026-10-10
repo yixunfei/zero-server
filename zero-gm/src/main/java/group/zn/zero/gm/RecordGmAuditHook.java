@@ -14,9 +14,16 @@ public final class RecordGmAuditHook implements GmAuditHook {
     /** Converts and appends an event; store failures are propagated. */
     @Override
     public void record(final GmAuditEvent event) {
-        GmAuditAppendResult result = store.append(GmAuditRecord.from(Objects.requireNonNull(event, "event")));
-        if (result == null) {
-            throw new IllegalStateException("gm audit store returned null result");
+        Objects.requireNonNull(event, "event");
+        try {
+            GmAuditRecord record = GmAuditRecord.from(event);
+            GmAuditAppendResult result = store.append(record);
+            if (result != GmAuditAppendResult.ACCEPTED
+                    && !(result == GmAuditAppendResult.DUPLICATE && store.containsExact(record))) {
+                throw new IllegalStateException("gm audit append was not accepted: " + result);
+            }
+        } catch (RuntimeException failure) {
+            throw new GmAuditFailureException(event.phase(), event.businessCommitState(), failure);
         }
     }
 }

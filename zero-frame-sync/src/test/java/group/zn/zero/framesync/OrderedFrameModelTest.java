@@ -39,7 +39,11 @@ class OrderedFrameModelTest {
                 pending.forEach((uid, frames) -> {
                     FrameInput input = frames.remove(next);
                     if (input != null) { expected.add(input); last.put(uid, input); }
-                    else if (policy == MissingInputPolicy.REPEAT_LAST && last.containsKey(uid)) expected.add(last.get(uid));
+                    else if (policy == MissingInputPolicy.REPEAT_LAST && last.containsKey(uid)) {
+                        FrameInput prior = last.get(uid);
+                        expected.add(new FrameInput(prior.uid(), prior.inputSeq(), next, prior.clientFrame(),
+                                prior.payload(), prior.traceId()));
+                    }
                 });
                 if (policy == MissingInputPolicy.EMPTY) { pending.values().removeIf(Map::isEmpty); last.clear(); }
                 expectedBatches.add(List.copyOf(expected));
@@ -56,7 +60,7 @@ class OrderedFrameModelTest {
 
     @Test void repeatHistoryCannotGrowPastParticipantBudget() {
         var runtime = new FrameMatchRuntime("bounded", new FrameMatchConfig(InputTimingPolicy.REJECT,
-                MissingInputPolicy.REPEAT_LAST, 128, 2), (frame, batch) -> { }, event -> { }, event -> { });
+                MissingInputPolicy.REPEAT_LAST, 128, 2, 120, 2), (frame, batch) -> { }, event -> { }, event -> { });
         runtime.submit(new FrameInput("a", 1, 1, 0, new byte[0], "t")).toCompletableFuture().join();
         runtime.tick().toCompletableFuture().join();
         runtime.submit(new FrameInput("b", 1, 2, 0, new byte[0], "t")).toCompletableFuture().join();

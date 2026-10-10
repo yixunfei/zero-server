@@ -13,6 +13,7 @@ import java.util.Objects;
  * @param maxConcurrentLoads 最大并发加载数。
  * @param allowStaleOnBackendFailure 后端失败时是否允许返回过期本地值。
  * @param loadTimeout 单次加载最长等待时间；必须为正数。
+ * @param writeTimeout 已准入写入的观察期限；结果超时不撤销物理写入，必须为正数。
  * @author zn
  */
 public record CachePolicy(
@@ -22,10 +23,14 @@ public record CachePolicy(
         int maxLocalEntries,
         int maxConcurrentLoads,
         boolean allowStaleOnBackendFailure,
-        Duration loadTimeout) {
+        Duration loadTimeout,
+        Duration writeTimeout) {
 
     /** 默认加载超时，防止无响应加载永久占用单飞许可。 */
     public static final Duration DEFAULT_LOAD_TIMEOUT = Duration.ofSeconds(3);
+
+    /** 默认写入观察期限；不是后端取消期限。 */
+    public static final Duration DEFAULT_WRITE_TIMEOUT = Duration.ofSeconds(3);
 
     /**
      * 使用默认加载超时创建缓存策略；策略不可变，可并发共享。
@@ -40,7 +45,7 @@ public record CachePolicy(
     public CachePolicy(final Duration ttl, final Duration negativeTtl, final Duration ttlJitter,
             final int maxLocalEntries, final int maxConcurrentLoads, final boolean allowStaleOnBackendFailure) {
         this(ttl, negativeTtl, ttlJitter, maxLocalEntries, maxConcurrentLoads,
-                allowStaleOnBackendFailure, DEFAULT_LOAD_TIMEOUT);
+                allowStaleOnBackendFailure, DEFAULT_LOAD_TIMEOUT, DEFAULT_WRITE_TIMEOUT);
     }
 
     /**
@@ -79,6 +84,8 @@ public record CachePolicy(
         negativeTtl = positive(negativeTtl, "negativeTtl");
         ttlJitter = nonNegative(ttlJitter, "ttlJitter");
         loadTimeout = positive(loadTimeout, "loadTimeout");
+        writeTimeout = positive(writeTimeout, "writeTimeout");
+        writeTimeout.toNanos();
         if (maxLocalEntries <= 0) {
             throw new IllegalArgumentException("maxLocalEntries must be positive");
         }

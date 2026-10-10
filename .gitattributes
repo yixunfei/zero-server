@@ -10,6 +10,8 @@
 *.proto text eol=lf
 *.fbs text eol=lf
 *.si text eol=lf
+*.tpl text eol=lf
+*.ftl text eol=lf
 *.ps1 text eol=crlf
 
 *.png binary

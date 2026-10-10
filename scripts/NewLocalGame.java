@@ -1,9 +1,7 @@
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
@@ -80,25 +78,26 @@ public final class NewLocalGame {
         throw new IllegalStateException("run this launcher from the zeroServer repository");
     }
 
-    private static Path locateToolJar(final Path repositoryRoot) throws IOException {
-        Path target = repositoryRoot.resolve("zero-codegen/target");
-        if (!Files.isDirectory(target)) {
-            return null;
-        }
-        try (var files = Files.list(target)) {
-            return files.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().matches("zero-codegen-.+-all\\.jar"))
-                    .max(Comparator.comparing(NewLocalGame::lastModified))
-                    .orElse(null);
+    /** 当前根 POM 的字面版本；禁用外部实体，不回退历史构件。 */
+    private static String reactorVersion(final Path repositoryRoot) throws IOException {
+        try {
+            var factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            var model = factory.newDocumentBuilder().parse(repositoryRoot.resolve("pom.xml").toFile());
+            String value = javax.xml.xpath.XPathFactory.newInstance().newXPath().evaluate("/project/version", model).trim();
+            if (!value.matches("[A-Za-z0-9][A-Za-z0-9_.-]*")) throw new IOException("invalid reactor version");
+            return value;
+        } catch (javax.xml.parsers.ParserConfigurationException | org.xml.sax.SAXException
+                | javax.xml.xpath.XPathExpressionException failure) {
+            throw new IOException("cannot read reactor version", failure);
         }
     }
 
-    private static FileTime lastModified(final Path path) {
-        try {
-            return Files.getLastModifiedTime(path);
-        } catch (IOException ignored) {
-            return FileTime.fromMillis(0L);
-        }
+    private static Path locateToolJar(final Path repositoryRoot) throws IOException {
+        Path jar = repositoryRoot.resolve("zero-codegen/target/zero-codegen-" + reactorVersion(repositoryRoot) + "-all.jar");
+        return Files.isRegularFile(jar) ? jar : null;
     }
 
     private static void buildTool(final Path repositoryRoot) throws IOException, InterruptedException {

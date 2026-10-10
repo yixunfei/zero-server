@@ -12,10 +12,11 @@ final class ActorMessageIds {
     /** 全线程共享序号，溢出后拒绝生成。 */
     private static final AtomicLong SEQUENCE = new AtomicLong();
     private ActorMessageIds() { }
-    /** 返回新的内部 ID；线程安全，修改全局计数，耗尽时抛出 IllegalStateException。 */
+    /** 返回新的内部 ID；线程安全，修改全局计数，耗尽时抛出绑定系统错误码的 ZeroException。 */
     static String next() {
         long sequence = SEQUENCE.incrementAndGet();
-        if (sequence <= 0) throw new IllegalStateException("actor message ID sequence exhausted");
+        if (sequence <= 0) throw group.zn.zero.core.error.ZeroException.of(
+                group.zn.zero.core.error.SystemErrorCode.SYSTEM_ERROR, "actor message ID sequence exhausted", null);
         byte[] value = new byte[PREFIX_BYTES.length + 13];
         int start = value.length;
         do {

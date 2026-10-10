@@ -6,8 +6,9 @@ param(
 # 生成物只写 target；实验代码独立编译，不为业务模块增加 codegen/JMH 依赖。
 $ErrorActionPreference = 'Stop'
 $output = "$Evidence/generated-dto"
+$codegenJar = & (Join-Path $PSScriptRoot '../ResolveCodegen.ps1')
 $classes = "$Evidence/generated-experiment-classes"
-& "$Jdk/bin/java.exe" -jar zero-codegen/target/zero-codegen-0.1.1-all.jar --input scripts/performance/fixtures --out $output --pkg group.zn.zero.benchmark.generated --languages java
+& "$Jdk/bin/java.exe" -jar $codegenJar --input scripts/performance/fixtures --out $output --pkg group.zn.zero.benchmark.generated --languages java
 if ($LASTEXITCODE -ne 0) { throw 'Fixture codegen failed' }
 New-Item -ItemType Directory -Force $classes | Out-Null
 $sources = @(Get-ChildItem $output -Recurse -Filter '*.java' | ForEach-Object { '"' + $_.FullName.Replace('\', '/') + '"' })

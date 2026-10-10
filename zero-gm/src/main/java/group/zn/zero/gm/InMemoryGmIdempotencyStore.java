@@ -19,12 +19,12 @@ public final class InMemoryGmIdempotencyStore implements GmIdempotencyStore {
     private final TreeMap<Instant, Set<String>> expirations = new TreeMap<>();
 
     /**
-     * 原子认领请求并回收已过期记录；线程安全，保留既有 TTL 重用语义。
+     * 原子认领请求并仅回收已过期终态；线程安全，在途操作不因 TTL 被回收。
      * @param key 请求键；非空、无控制字符，最多 256 字符。
      * @param fingerprint 请求指纹；约束同 key。
      * @param now 当前时间；不可为空。
-     * @param ttl 存活时间；必须为正。
-     * @return 认领结果；容量已满时新键返回 FAILED，重复键继续返回原状态。
+     * @param ttl 终态保留预算提示；必须为正，实际到期由 complete/fail 提供。
+     * @return 认领结果；容量已满时新键返回 CAPACITY_REJECTED，重复键继续返回原状态。
      * @throws IllegalArgumentException 参数无效时抛出。
      */
     @Override
@@ -37,13 +37,12 @@ public final class InMemoryGmIdempotencyStore implements GmIdempotencyStore {
         require(fingerprint, "fingerprint", 256);
         Objects.requireNonNull(now, "now");
         positive(ttl, "ttl");
-        Instant expiresAt = now.plus(ttl);
         expire(now);
         Entry existing = entries.get(key);
         if (existing == null) {
-            if (entries.size() >= CAPACITY) return new Claim(State.FAILED, null);
-            entries.put(key, new Entry(fingerprint, State.IN_PROGRESS, null, expiresAt));
-            index(key, expiresAt);
+            if (entries.size() >= CAPACITY) return new Claim(State.CAPACITY_REJECTED, null);
+            // 在途操作不按保留 TTL 回收，否则原执行者仍可能提交副作用。
+            entries.put(key, new Entry(fingerprint, State.IN_PROGRESS, null, null));
             return new Claim(State.CLAIMED, null);
         }
         if (!existing.fingerprint().equals(fingerprint)) {
@@ -89,9 +88,9 @@ public final class InMemoryGmIdempotencyStore implements GmIdempotencyStore {
         if (existing == null || !existing.fingerprint().equals(fingerprint)) {
             throw new IllegalStateException("idempotency claim is missing or conflicts");
         }
-        Set<String> previousKeys = expirations.get(existing.expiresAt());
-        previousKeys.remove(key);
-        if (previousKeys.isEmpty()) expirations.remove(existing.expiresAt());
+        if (existing.state() != State.IN_PROGRESS) {
+            throw new IllegalStateException("idempotency claim is already terminal");
+        }
         entries.put(key, new Entry(fingerprint, state, response, expiresAt));
         index(key, expiresAt);
     }

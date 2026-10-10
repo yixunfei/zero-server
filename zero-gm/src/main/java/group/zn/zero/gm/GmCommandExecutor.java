@@ -114,8 +114,12 @@ public final class GmCommandExecutor {
      * @throws ZeroException 当 DSL、解析结果、handler 结果或审计失败时抛出。
      * @throws RuntimeException 当 handler 抛出非 ZeroException 时原样向上抛出。
      */
-    public GmCommandExecutionResult dryRun(final GmCommandContext context, final String rawText) {
-        GmCommandResolution resolution = resolve(rawText);
+    GmCommandExecutionResult dryRun(final GmCommandContext context, final String rawText) {
+        return dryRun(context, resolve(rawText));
+    }
+
+    /** 复用端点已授权的解析结果，避免授权和执行分别解析命令。 */
+    GmCommandExecutionResult dryRun(final GmCommandContext context, final GmCommandResolution resolution) {
         GmCommandExecutionRequest request = resolution.toRequest(Objects.requireNonNull(context, "context"));
         AuditMetadata metadata = prepareMetadata(
                 request,
@@ -132,7 +136,7 @@ public final class GmCommandExecutor {
         GmDryRunResult dryRunResult;
         try {
             dryRunResult = validateDryRunResult(request, resolution.handler().dryRun(request));
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             appendFailureSafely(metadata, GmAuditPhase.DRY_RUN_FAILED, true, ex);
             throw ex;
         }
@@ -162,8 +166,12 @@ public final class GmCommandExecutor {
      * @throws ZeroException 当 DSL、解析结果、handler 结果或审计失败时抛出。
      * @throws RuntimeException 当 handler 抛出非 ZeroException 时原样向上抛出。
      */
-    public GmCommandExecutionResult execute(final GmCommandContext context, final String rawText) {
-        GmCommandResolution resolution = resolve(rawText);
+    GmCommandExecutionResult execute(final GmCommandContext context, final String rawText) {
+        return execute(context, resolve(rawText));
+    }
+
+    /** 执行端点已授权的同一解析结果；仅包内授权链调用。 */
+    GmCommandExecutionResult execute(final GmCommandContext context, final GmCommandResolution resolution) {
         GmCommandExecutionRequest request = resolution.toRequest(Objects.requireNonNull(context, "context"));
         AuditMetadata metadata = prepareMetadata(
                 request,
@@ -180,7 +188,7 @@ public final class GmCommandExecutor {
         GmCommandExecutionResult result;
         try {
             result = validateExecutionResult(request, resolution.handler().execute(request));
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             appendFailureSafely(metadata, GmAuditPhase.EXECUTE_FAILED, false, ex);
             throw ex;
         }
@@ -198,9 +206,34 @@ public final class GmCommandExecutor {
         return result;
     }
 
-    private GmCommandResolution resolve(final String rawText) {
+    /** 在任何业务调用前解析一次，返回包含不可变参数的指令快照。 */
+    GmCommandResolution resolve(final String rawText) {
         Objects.requireNonNull(rawText, "rawText");
         return registry.resolve(GmCommandDsl.parse(rawText));
+    }
+
+    /** 记录未进入 handler 的边界结果；仅保存安全归因，不记录未解析命令文本。 */
+    void auditBoundary(final GmOperationRequest request, final GmCommandResolution resolution,
+            final GmAuditPhase phase, final GmOperationResponse response) {
+        String commandKey = resolution == null ? "operation" : resolution.definition().commandKey();
+        List<String> names = resolution == null ? List.of() : resolution.definition().parameterNames();
+        GmBusinessCommitState state = response.businessCommitState();
+        try {
+            GmAuditAttribution attribution = attributionFactory.boundary(request.context(), request.target());
+            AuditMetadata metadata = new AuditMetadata(attribution, request.context().traceId(), commandKey, names,
+                    names.size(), fingerprintPolicy.structureFingerprint(commandKey, names, "operation", names.size()), "");
+            ErrorCode code = null;
+            if (!"ZERO-OK".equals(response.code())) {
+                code = response.result() != null && !response.result().success() ? response.result().errorCode()
+                        : java.util.Arrays.stream(GmErrorCode.values()).filter(c -> c.code().equals(response.code()))
+                                .findFirst().orElse(GmErrorCode.COMMAND_REJECTED);
+            }
+            LogResult outcome = phase == GmAuditPhase.BOOKKEEPING_FAILED ? LogResult.FAILURE
+                    : code == null ? LogResult.SUCCESS : LogResult.REJECTED;
+            appendAudit(metadata, phase, request.dryRun(), outcome, state, code, "gm operation boundary outcome");
+        } catch (RuntimeException failure) {
+            throw new GmAuditFailureException(phase, state, failure);
+        }
     }
 
     private AuditMetadata prepareMetadata(
@@ -250,7 +283,7 @@ public final class GmCommandExecutor {
             final AuditMetadata metadata,
             final GmAuditPhase phase,
             final boolean dryRun,
-            final RuntimeException primaryFailure) {
+            final Throwable primaryFailure) {
         try {
             appendAudit(
                     metadata,
@@ -260,8 +293,8 @@ public final class GmCommandExecutor {
                     dryRun ? GmBusinessCommitState.NOT_APPLICABLE : GmBusinessCommitState.UNKNOWN,
                     errorCode(primaryFailure),
                     dryRun ? "gm dry-run failed" : "gm execute failed");
-        } catch (RuntimeException auditFailure) {
-            primaryFailure.addSuppressed(auditFailure);
+        } catch (RuntimeException | Error auditFailure) {
+            if (auditFailure != primaryFailure) primaryFailure.addSuppressed(auditFailure);
         }
     }
 
@@ -275,6 +308,7 @@ public final class GmCommandExecutor {
             final String safeMessage) {
         try {
             auditHook.record(new GmAuditEvent(
+                    metadata.operationId,
                     Instant.now(clock),
                     phase,
                     metadata.attribution,
@@ -294,7 +328,7 @@ public final class GmCommandExecutor {
         }
     }
 
-    private ErrorCode errorCode(final RuntimeException ex) {
+    private ErrorCode errorCode(final Throwable ex) {
         if (ex instanceof ZeroException zeroException) {
             ErrorCode candidate = zeroException.errorCode();
             return SystemErrorCode.OK.code().equals(candidate.code())
@@ -312,6 +346,8 @@ public final class GmCommandExecutor {
      * @author zn
      */
     private static final class AuditMetadata {
+        /** 一次执行内各阶段共享，与请求值无关。 */
+        private final String operationId = java.util.UUID.randomUUID().toString();
 
         /** 已完成构造前安全转换的归因。 */
         private final GmAuditAttribution attribution;

@@ -21,6 +21,9 @@ public record ProjectScaffoldRequest(
         packageName = requireText(packageName, "packageName");
         outputDirectory = Objects.requireNonNull(outputDirectory, "outputDirectory").toAbsolutePath().normalize();
         zeroVersion = requireText(zeroVersion, "zeroVersion");
+        if (!zeroVersion.matches("[A-Za-z0-9][A-Za-z0-9_.-]*") || zeroVersion.contains("__")) {
+            throw new IllegalArgumentException("zeroVersion must be a literal Maven version without placeholders");
+        }
         template = Objects.requireNonNull(template, "template");
         templateRoot = Objects.requireNonNull(templateRoot, "templateRoot").toAbsolutePath().normalize();
         selectedFromKeywords = Objects.requireNonNull(selectedFromKeywords, "selectedFromKeywords").trim();

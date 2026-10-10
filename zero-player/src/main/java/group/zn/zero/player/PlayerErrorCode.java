@@ -8,8 +8,14 @@ public enum PlayerErrorCode implements ErrorCode {
     /** 账号已有在线会话；当前实现拒绝第二次登录。 */
     ACCOUNT_ALREADY_ONLINE(ErrorCategory.CLIENT_REQUEST, "ZERO-PLAYER-ACCOUNT-ALREADY-ONLINE",
             "account already has an online session"),
+    /** 玩家 UID 已被另一个账号会话占用。 */
+    UID_ALREADY_ONLINE(ErrorCategory.CLIENT_REQUEST, "ZERO-PLAYER-UID-ALREADY-ONLINE",
+            "player uid already has an online session"),
     /** 登录或加载的 UID 尚未完成玩家建档。 */
-    PLAYER_NOT_FOUND(ErrorCategory.CLIENT_REQUEST, "ZERO-PLAYER-NOT-FOUND", "player profile not found");
+    PLAYER_NOT_FOUND(ErrorCategory.CLIENT_REQUEST, "ZERO-PLAYER-NOT-FOUND", "player profile not found"),
+    /** 待清理意图达到上限；本次拒绝发生在解除会话绑定之前。 */
+    CLEANUP_CAPACITY_EXCEEDED(ErrorCategory.SYSTEM, "ZERO-PLAYER-CLEANUP-CAPACITY-EXCEEDED",
+            "player cleanup capacity exceeded; retry pending logout requests");
 
     private final ErrorCategory category;
     private final String code;

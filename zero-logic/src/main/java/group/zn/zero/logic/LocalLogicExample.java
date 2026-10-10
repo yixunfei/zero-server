@@ -63,7 +63,7 @@ public final class LocalLogicExample {
             "zero_logic_flow_total",
             "本地逻辑示例流程次数",
             "count",
-            List.of("module", "operation", "result"));
+            List.of("module", "operation", "result"), group.zn.zero.monitor.MetricType.COUNTER);
 
     /**
      * 返回示例协议定义。

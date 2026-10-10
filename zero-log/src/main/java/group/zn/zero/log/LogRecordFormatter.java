@@ -85,6 +85,6 @@ public final class LogRecordFormatter {
      * @param value 文本；不可为空。
      */
     private static void appendSafe(final StringBuilder target, final String value) {
-        target.append(LogTextEscaper.escapeControls(value));
+        target.append(LogTextEscaper.escapeControls(value).replace(",", "\\u002c").replace("=", "\\u003d"));
     }
 }

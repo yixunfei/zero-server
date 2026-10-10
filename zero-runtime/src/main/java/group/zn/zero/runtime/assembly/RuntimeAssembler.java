@@ -51,6 +51,8 @@ public final class RuntimeAssembler {
         private final List<ConfigSource> configSources = new ArrayList<>();
         private Duration assemblyTimeout = Duration.ofSeconds(30);
         private Duration startupTimeout = Duration.ofSeconds(30);
+        /** stop 与 close 资源阶段共享预算。 */
+        private Duration shutdownTimeout = Duration.ofSeconds(30);
         private LongSupplier nanoTime = System::nanoTime;
         private String presetName;
 
@@ -133,6 +135,12 @@ public final class RuntimeAssembler {
             return this;
         }
 
+        /** 设置停止及资源关闭的单次累计预算；非线程安全，不启动任务。 */
+        public Builder shutdownTimeout(final Duration timeout) {
+            shutdownTimeout = requirePositive(timeout, "shutdown timeout");
+            return this;
+        }
+
         Builder monotonicClock(final LongSupplier clock) {
             nanoTime = Objects.requireNonNull(clock, "clock");
             return this;
@@ -169,7 +177,7 @@ public final class RuntimeAssembler {
                         "runtime=planning");
             }
             return new RuntimeBuildTransaction().build(
-                    planned, assemblyDeadline, startupTimeout, nanoTime);
+                    planned, assemblyDeadline, startupTimeout, shutdownTimeout, nanoTime);
         }
 
         private Duration requirePositive(final Duration timeout, final String label) {

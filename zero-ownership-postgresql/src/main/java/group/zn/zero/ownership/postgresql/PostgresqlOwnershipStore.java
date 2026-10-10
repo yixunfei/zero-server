@@ -5,6 +5,7 @@ import group.zn.zero.ownership.OwnershipLease;
 import group.zn.zero.ownership.OwnershipResource;
 import group.zn.zero.ownership.OwnershipStore;
 import group.zn.zero.ownership.ProcessIncarnation;
+import group.zn.zero.core.error.SystemErrorCode;
 import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -38,6 +39,7 @@ public final class PostgresqlOwnershipStore implements OwnershipStore {
         Objects.requireNonNull(lease, "lease");
         requireDuration(leaseDuration);
         try (Connection connection = database.connection()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
             try {
                 String sql = "update " + database.ownershipTable() + " set expires_at="
@@ -68,6 +70,12 @@ public final class PostgresqlOwnershipStore implements OwnershipStore {
                     throw PostgresqlOwnershipSupport.failure("PostgreSQL ownership renew failed", sqlFailure);
                 }
                 throw failure;
+            } finally {
+                try {
+                    connection.setAutoCommit(originalAutoCommit);
+                } catch (SQLException failure) {
+                    throw PostgresqlOwnershipSupport.failure("PostgreSQL ownership renew cleanup failed", failure);
+                }
             }
         } catch (SQLException failure) {
             throw PostgresqlOwnershipSupport.failure("PostgreSQL ownership connection failed", failure);
@@ -125,6 +133,7 @@ public final class PostgresqlOwnershipStore implements OwnershipStore {
     public void assertCurrent(final OwnershipLease lease) {
         Objects.requireNonNull(lease, "lease");
         try (Connection connection = database.connection()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
             try {
                 String sql = "select process_id, incarnation_id, epoch, expires_at from " + database.ownershipTable()
@@ -146,6 +155,12 @@ public final class PostgresqlOwnershipStore implements OwnershipStore {
             } catch (SQLException | RuntimeException failure) {
                 PostgresqlOwnershipSupport.rollback(connection, failure);
                 throw failure;
+            } finally {
+                try {
+                    connection.setAutoCommit(originalAutoCommit);
+                } catch (SQLException failure) {
+                    throw PostgresqlOwnershipSupport.failure("PostgreSQL ownership assertion cleanup failed", failure);
+                }
             }
         } catch (OwnershipException failure) {
             throw failure;
@@ -160,6 +175,7 @@ public final class PostgresqlOwnershipStore implements OwnershipStore {
         Objects.requireNonNull(owner, "owner");
         requireDuration(leaseDuration);
         try (Connection connection = database.connection()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
             try {
                 String select = "select process_id, incarnation_id, epoch, expires_at from " + database.ownershipTable()
@@ -177,7 +193,12 @@ public final class PostgresqlOwnershipStore implements OwnershipStore {
                 if (existing != null && !existing.expiresAt().isBefore(now)) {
                     throw new OwnershipException(claim ? "resource has not expired" : "resource is already owned");
                 }
-                long epoch = existing == null ? 1L : Math.addExact(existing.epoch(), 1L);
+                long epoch;
+                try {
+                    epoch = existing == null ? 1L : Math.addExact(existing.epoch(), 1L);
+                } catch (ArithmeticException failure) {
+                    throw new OwnershipException(SystemErrorCode.SYSTEM_ERROR, "ownership epoch is exhausted", failure);
+                }
                 Instant expiresAt = PostgresqlOwnershipSupport.timestamp(now.plus(leaseDuration)).toInstant();
                 String sql = existing == null
                         ? "insert into " + database.ownershipTable() + " (resource_type, resource_id, generation, "
@@ -205,6 +226,12 @@ public final class PostgresqlOwnershipStore implements OwnershipStore {
             } catch (SQLException | RuntimeException failure) {
                 PostgresqlOwnershipSupport.rollback(connection, failure);
                 throw failure;
+            } finally {
+                try {
+                    connection.setAutoCommit(originalAutoCommit);
+                } catch (SQLException failure) {
+                    throw PostgresqlOwnershipSupport.failure("PostgreSQL ownership acquire cleanup failed", failure);
+                }
             }
         } catch (OwnershipException failure) {
             throw failure;
@@ -215,8 +242,8 @@ public final class PostgresqlOwnershipStore implements OwnershipStore {
 
     private static void requireDuration(final Duration duration) {
         Objects.requireNonNull(duration, "leaseDuration");
-        if (duration.isZero() || duration.isNegative()) {
-            throw new IllegalArgumentException("leaseDuration must be positive");
+        if (duration.compareTo(Duration.ofNanos(1_000)) < 0) {
+            throw new IllegalArgumentException("leaseDuration must be at least one microsecond");
         }
     }
 

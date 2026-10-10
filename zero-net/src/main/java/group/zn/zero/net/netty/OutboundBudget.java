@@ -19,4 +19,5 @@ final class OutboundBudget {
     }
     void release(final long bytes) { used.addAndGet(-bytes); }
     long used() { return used.get(); }
+    long maximum() { return maximum; }
 }

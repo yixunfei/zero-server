@@ -15,16 +15,16 @@ class WorldConcurrencyBoundaryTest {
         LocalWorldService service = new LocalWorldService();
         service.createWorld(new World("w", 0), List.of(new Shard("a", "w", 0), new Shard("b", "w", 0)));
         service.createWorld("other", "c");
-        service.enterWorldAsync("e", "w").toCompletableFuture().join();
-        assertThrows(RuntimeException.class, () -> service.requestMigrationAsync("cross", "e", "c").toCompletableFuture().join());
-        service.requestMigrationAsync("m1", "e", "b").toCompletableFuture().join();
-        assertThrows(RuntimeException.class, () -> service.requestMigrationAsync("m2", "e", "a").toCompletableFuture().join());
+        service.enterWorldAsync("d", "w").toCompletableFuture().join();
+        assertThrows(RuntimeException.class, () -> service.requestMigrationAsync("cross", "d", "c").toCompletableFuture().join());
+        service.requestMigrationAsync("m1", "d", "b").toCompletableFuture().join();
+        assertThrows(RuntimeException.class, () -> service.requestMigrationAsync("m2", "d", "a").toCompletableFuture().join());
         service.prepareMigrationAsync("m1").toCompletableFuture().join();
         service.commitMigrationAsync("m1").toCompletableFuture().join();
         service.releaseSourceAsync("m1").toCompletableFuture().join();
-        service.migrateAsync("m3", "e", "a").toCompletableFuture().join();
+        service.migrateAsync("m3", "d", "a").toCompletableFuture().join();
         service.commitMigrationAsync("m1").toCompletableFuture().join();
-        assertEquals("a", service.snapshot("e").ownerShardId());
+        assertEquals("a", service.snapshot("d").ownerShardId());
     }
     /** 校验失败后同 world ID 可以重试，不留下部分 shard。 */
     @Test void failedWorldCreationDoesNotPublishPartialState() {
@@ -32,7 +32,7 @@ class WorldConcurrencyBoundaryTest {
         assertThrows(IllegalStateException.class, () -> service.createWorld(new World("w", 0),
                 List.of(new Shard("a", "w", 0), new Shard("b", "wrong", 0))));
         service.createWorld("w", "a");
-        assertEquals("a", service.enterWorldAsync("e", "w").toCompletableFuture().join().ownerShardId());
+        assertEquals("a", service.enterWorldAsync("d", "w").toCompletableFuture().join().ownerShardId());
         assertThrows(IllegalStateException.class, () -> service.createWorld(new World("x", 0),
                 List.of(new Shard("b", "x", 0), new Shard("b", "x", 0))));
         service.createWorld("x", "b");
@@ -42,15 +42,15 @@ class WorldConcurrencyBoundaryTest {
         var ref = new AtomicReference<LocalWorldService>();
         var nested = new AtomicReference<java.util.concurrent.CompletionStage<Entity>>();
         LocalWorldService service = new LocalWorldService(new group.zn.zero.actor.scheduler.LocalActorScheduler(), event -> {
-            if (event.type() == WorldEvent.Type.MOVED && ref.get().snapshot("e").x() == 1) {
-                nested.set(ref.get().moveEntityAsync("e", "a", 2, 2));
+            if (event.type() == WorldEvent.Type.MOVED && ref.get().snapshot("d").x() == 1) {
+                nested.set(ref.get().moveEntityAsync("d", "a", 2, 2));
             }
         }, WorldMetrics.NOOP);
         ref.set(service);
         service.createWorld("w", "a");
-        service.enterWorldAsync("e", "w").toCompletableFuture().join();
+        service.enterWorldAsync("d", "w").toCompletableFuture().join();
         var done = new CompletableFuture<Void>();
-        Thread.ofVirtual().start(() -> { try { service.moveEntityAsync("e", "a", 1, 1).toCompletableFuture().join(); done.complete(null); }
+        Thread.ofVirtual().start(() -> { try { service.moveEntityAsync("d", "a", 1, 1).toCompletableFuture().join(); done.complete(null); }
             catch (Throwable ex) { done.completeExceptionally(ex); } });
         done.get(2, TimeUnit.SECONDS);
         assertEquals(2, nested.get().toCompletableFuture().get(2, TimeUnit.SECONDS).x());

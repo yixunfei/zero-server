@@ -77,6 +77,9 @@ public final class FailoverCoordinator {
      */
     public OwnershipLease recover(final MigrationId id, final Duration leaseDuration) {
         MigrationRecord record = require(id);
+        if (!record.checkpointMetadata().historyComplete()) {
+            throw new OwnershipException("migration checkpoint does not contain complete history");
+        }
         if (record.state() == MigrationState.CHECKPOINTED) {
             commitCheckpoint(id, record.checkpointVersion());
         }

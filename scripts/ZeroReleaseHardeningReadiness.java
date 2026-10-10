@@ -55,9 +55,9 @@ public final class ZeroReleaseHardeningReadiness {
             marker("design-performance", ".github/ISSUE_TEMPLATE/design_proposal.md", "zero-design-performance-and-verification=required"),
             marker("design-verification", ".github/ISSUE_TEMPLATE/design_proposal.md", "zero-design-performance-and-verification=required"),
             marker("ci-java-21", ".github/workflows/ci.yml", "java-version: '21'"),
-            marker("ci-validate", ".github/workflows/ci.yml", "mvn -B -ntp -DskipTests validate"),
-            marker("ci-default-tests", ".github/workflows/ci.yml", "mvn -B -ntp test"),
-            marker("ci-quality", ".github/workflows/ci.yml", "mvn -B -ntp -Pquality verify"),
+            marker("ci-validate", ".github/workflows/ci.yml", "./mvnw -B -ntp -DskipTests validate"),
+            marker("ci-default-tests", ".github/workflows/ci.yml", "./mvnw -B -ntp test"),
+            marker("ci-quality", ".github/workflows/ci.yml", "./mvnw -B -ntp -Pquality verify"),
             marker("ci-manual", ".github/workflows/ci.yml", "workflow_dispatch:"),
             marker("maven-java-21", "zero-parent/pom.xml", "<maven.compiler.release>21"),
             marker("maven-quality", "zero-parent/pom.xml", "<id>quality</id>"),
@@ -178,8 +178,8 @@ public final class ZeroReleaseHardeningReadiness {
         System.out.println("  Read docs/operations/release-checklist.zh-CN.md");
         System.out.println("  Copy docs/migrations/template.zh-CN.md for a concrete breaking release");
         System.out.println("  java scripts/ZeroUnifiedEntryVerifier.java --full-smoke");
-        System.out.println("  mvn -B -ntp test");
-        System.out.println("  mvn -B -ntp -Pquality verify");
+        System.out.println("  ./mvnw -B -ntp test");
+        System.out.println("  ./mvnw -B -ntp -Pquality verify");
         System.out.println();
         System.out.println("Note: this checks materials only; it does not execute or authorize a release.");
     }

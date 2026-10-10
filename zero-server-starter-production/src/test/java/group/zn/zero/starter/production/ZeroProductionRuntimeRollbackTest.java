@@ -44,8 +44,8 @@ class ZeroProductionRuntimeRollbackTest {
 
         assertEquals("production-runtime", failure.adapterName());
         assertEquals(ProductionAdapterFailurePhase.STARTUP, failure.failurePhase());
-        assertSame(ProductionAdapterErrorCode.STARTUP_FAILED, failure.errorCode());
-        assertEquals(ProductionAdapterErrorCode.STARTUP_FAILED.message(), failure.message());
+        assertSame(group.zn.zero.runtime.diagnostics.RuntimeErrorCode.RUNTIME_COMPONENT_START_FAILED, failure.errorCode());
+        assertEquals(group.zn.zero.runtime.diagnostics.RuntimeErrorCode.RUNTIME_COMPONENT_START_FAILED.message(), failure.message());
         assertNull(failure.getCause());
         assertFalse(stackTrace(failure).contains(SECRET), stackTrace(failure));
         assertEquals(RuntimeState.FAILED, runtime.runtimeState());

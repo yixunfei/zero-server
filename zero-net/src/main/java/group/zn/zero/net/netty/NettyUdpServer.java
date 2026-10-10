@@ -193,11 +193,14 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
             boundAddress.set((InetSocketAddress) channel.localAddress());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            shutdownGroup();
+            cleanupAfterFailure(ex);
             throw ZeroException.of(NetErrorCode.START_FAILED, "start netty UDP server interrupted", ex);
         } catch (Exception ex) {
-            shutdownGroup();
+            cleanupAfterFailure(ex);
             throw ZeroException.of(NetErrorCode.START_FAILED, "start netty UDP server failed", ex);
+        } catch (Error failure) {
+            cleanupAfterFailure(failure);
+            throw failure;
         }
     }
 
@@ -212,10 +215,19 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
         finally { boundAddress.set(null); }
     }
 
+    /** 启动清理保留原始异常，资源清理失败作为次要诊断。 */
+    private void cleanupAfterFailure(final Throwable failure) {
+        try { shutdownGroup(); }
+        catch (RuntimeException | Error cleanupFailure) {
+            if (cleanupFailure != failure) failure.addSuppressed(cleanupFailure);
+        } finally { boundAddress.set(null); }
+    }
+
     private void shutdownGroup() {
         if (resources != null) {
-            resources.close();
+            NettyServerResources current = resources;
             resources = null;
+            current.close();
         }
     }
 
@@ -259,8 +271,9 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
             ProtocolFrame frame;
             try {
                 frame = frameCodec.decode(bytes);
-            } catch (RuntimeException failure) {
-                context.fireExceptionCaught(ZeroException.of(
+            } catch (RuntimeException | Error failure) {
+                safeException(new NettyUdpConnection(udpConnectionId(packet.sender()),
+                        context.channel(), packet.sender(), frameCodec), ZeroException.of(
                         NetErrorCode.INVALID_MESSAGE,
                         "decode UDP frame failed",
                         failure));
@@ -269,8 +282,8 @@ public final class NettyUdpServer extends AbstractLifecycle implements IServer {
             NettyUdpConnection connection = peer(context, packet.sender()).connection;
             try {
                 handlerExecutor.execute(() -> invokeFrameHandler(context, connection, frame));
-            } catch (RuntimeException ex) {
-                context.fireExceptionCaught(ZeroException.of(
+            } catch (RuntimeException | Error ex) {
+                reportFailure(context, connection, ZeroException.of(
                         NetErrorCode.HANDLER_FAILED,
                         "submit UDP net handler failed",
                         ex));

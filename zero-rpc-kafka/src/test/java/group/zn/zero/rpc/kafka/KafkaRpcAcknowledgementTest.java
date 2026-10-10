@@ -25,7 +25,7 @@ class KafkaRpcAcknowledgementTest {
     @org.junit.jupiter.api.extension.RegisterExtension
     private final KafkaTestTimer timer = new KafkaTestTimer();
     /** 本地签名测试材料。 */
-    private final SecurityMetadataAssertion assertion = SecurityMetadataAssertion.digest(new byte[] {1, 5});
+    private final SecurityMetadataAssertion assertion = SecurityMetadataAssertion.digest(java.util.Arrays.copyOf(new byte[] {1, 5}, 32));
 
     /** 缺 verifier 时，即使是结构正确的签名快照也不得进入业务。 */
     @Test
@@ -65,10 +65,52 @@ class KafkaRpcAcknowledgementTest {
         }
     }
 
+    /** producer 同步抛异常也必须保留与异步失败一致的观测。 */
+    @Test
+    void synchronousResponseSendFailureIsObserved() {
+        HoldingGateway gateway = new HoldingGateway();
+        gateway.sendFailure = new IllegalStateException("producer failed synchronously");
+        AtomicInteger failures = new AtomicInteger();
+        try (KafkaRpcAdapter adapter = new KafkaRpcAdapter(
+                KafkaRpcSettings.defaults("localhost:9092"), gateway,
+                event -> {
+                    if (event.type() == group.zn.zero.rpc.observer.RpcTransportEventType.SEND_FAILED) {
+                        failures.incrementAndGet();
+                    }
+                }, timer.executor())) {
+            adapter.securityMetadataVerifier(SecurityMetadataAssertion.verifier(assertion));
+            adapter.register("svc", "method", request -> CompletableFuture.completedFuture(
+                    new RpcResponse("corr", "trace", SystemErrorCode.OK, "ok", new byte[0])));
+
+            var processing = gateway.receive(request(metadata())).toCompletableFuture();
+
+            assertTrue(processing.isCompletedExceptionally());
+            assertEquals(1, failures.get());
+        }
+    }
+
     private SecurityMetadataSnapshot metadata() {
         Instant now = Instant.now();
         return SecurityMetadataAssertion.signed(new SecurityContext("subject", now, now.plusSeconds(60),
                 "kafka", "peer", "trusted", "trace", "corr", Set.of("rpc"), Map.of()), "ref", assertion);
+    }
+
+    /** 过期毒消息无需再次发送不可达 reply；确认消费且不执行 handler。 */
+    @Test void expiredRequestDoesNotRetryUnavailableReply() {
+        HoldingGateway gateway = new HoldingGateway();
+        try (KafkaRpcAdapter adapter = new KafkaRpcAdapter(KafkaRpcSettings.defaults("localhost:9092"),
+                gateway, timer.executor())) {
+            AtomicInteger calls = new AtomicInteger();
+            adapter.register("svc", "method", request -> {
+                calls.incrementAndGet();
+                return CompletableFuture.completedFuture(null);
+            });
+            var expired = new RpcRequest("expired", "reply", "svc", "method", "trace", Instant.EPOCH,
+                    RpcMode.REQUEST_RESPONSE, "", "", "", null, new byte[0]);
+            gateway.receive(expired).toCompletableFuture().join();
+            assertEquals(0, gateway.sends.get());
+            assertEquals(0, calls.get());
+        }
     }
 
     private RpcRequest request(final SecurityMetadataSnapshot metadata) {
@@ -84,10 +126,13 @@ class KafkaRpcAcknowledgementTest {
         private final CompletableFuture<Void> sent = new CompletableFuture<>();
         /** 发送尝试次数。 */
         private final AtomicInteger sends = new AtomicInteger();
+        /** 可选同步 producer 故障。 */
+        private RuntimeException sendFailure;
 
         /** 返回尚未完成的 producer ack。 */
         @Override public CompletionStage<Void> send(final KafkaRpcMessage message) {
             sends.incrementAndGet();
+            if (sendFailure != null) throw sendFailure;
             return sent;
         }
         /** 测试构造期只使用带 group 的订阅。 */

@@ -112,8 +112,8 @@ public final class RpcActorMessageCodec {
             String traceId = readText(input);
             Class<?> payloadType = loadPayloadType(readText(input));
             int payloadLength = input.readInt();
-            if (payloadLength < 0) {
-                throw ZeroException.of(RpcErrorCode.CODEC_FAILED, "negative actor rpc payload length", null);
+            if (payloadLength < 0 || payloadLength > input.available()) {
+                throw ZeroException.of(RpcErrorCode.CODEC_FAILED, "invalid actor rpc payload length", null);
             }
             byte[] payload = input.readNBytes(payloadLength);
             if (payload.length != payloadLength || input.available() != 0) {
@@ -156,8 +156,8 @@ public final class RpcActorMessageCodec {
 
     private String readText(final DataInputStream input) throws IOException {
         int length = input.readInt();
-        if (length < 0) {
-            throw ZeroException.of(RpcErrorCode.CODEC_FAILED, "negative actor rpc text length", null);
+        if (length < 0 || length > input.available()) {
+            throw ZeroException.of(RpcErrorCode.CODEC_FAILED, "invalid actor rpc text length", null);
         }
         byte[] bytes = input.readNBytes(length);
         if (bytes.length != length) {

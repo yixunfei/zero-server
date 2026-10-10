@@ -302,7 +302,7 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
         return write(validateEnvelope(envelope), expectedVersion, "cas");
     }
 
-    /** 有界 pipeline CAS；目录登记先成功，逐项结果不可变且有序，成功提交后统一本地刷盘。 */
+    /** 有界 pipeline CAS；目录登记与对象写入并入同一 pipeline flush，逐项结果不可变且有序，成功提交后统一本地刷盘。 */
     @Override
     public List<Boolean> saveIfVersionBatch(final Collection<ConditionalWrite> writes) {
         List<ConditionalWrite> current = List.copyOf(writes);
@@ -315,8 +315,12 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
                     batch.add(prepareScriptWrite(write.envelope(), write.expectedVersion(), "cas"));
                 }
                 String[] buckets = batch.stream().map(ScriptWrite::indexKey).distinct().toArray(String[]::new);
-                client.sadd(collectionIndexKey(), buckets);
+                // 目录登记与对象 CAS 并入同一 pipeline：崩溃窗口从两次独立 round-trip 收敛为单次 flush。
+                // 残余窗口：pipeline 非事务，flush 中途连接断开仍可能只提交前缀命令；
+                // 目录 key（zero:indexes:{ns:coll}）与对象 key（{ns:coll:bucket} tag）在 Cluster 下不同 slot，
+                // 无法并入同一 Lua 脚本，空桶目录由读取端 MGET null 跳过容错。
                 try (var pipeline = client.pipelined()) {
+                    pipeline.sadd(collectionIndexKey(), buckets);
                     List<redis.clients.jedis.Response<Object>> replies = new ArrayList<>(batch.size());
                     for (ScriptWrite write : batch) replies.add(pipeline.eval(SAVE_IF_VERSION_SCRIPT, write.keys(), write.args()));
                     pipeline.sync();
@@ -381,22 +385,28 @@ public final class RedisDriverEnvelopeStore implements ZeroDataEnvelopeStore {
         RedisDataJournalEntry entry = RedisDataJournalEntry.put(current, envelopeCodec);
         try {
             RedisDataSnapshot snapshot = RedisDataSnapshot.fromEnvelope(current, keyStrategy, envelopeCodec);
-            // 先登记保守桶目录；目录失败不得发生在对象 CAS 已提交之后。
-            // CAS 拒绝可能留下空桶目录，扫描空桶不产生对象，也不破坏同槽原子写。
-            client.sadd(collectionIndexKey(), snapshot.indexKey());
-            Object result = client.eval(
-                    SAVE_IF_VERSION_SCRIPT,
-                    List.of(
-                            bytes(snapshot.dataKey()),
-                            bytes(versionKey(snapshot.id())),
-                            bytes(snapshot.indexKey()),
-                            bytes(snapshot.journalKey())),
-                    List.of(
-                            bytes(String.valueOf(expectedVersion)),
-                            bytes(String.valueOf(current.version())),
-                            snapshot.envelopeBytes(),
-                            bytes(snapshot.id()),
-                            journalEntryCodec.encode(entry), bytes(mode)));
+            // 目录登记与对象 CAS 并入同一 pipeline，与批量路径同模式；崩溃窗口收敛为单次 flush。
+            // 目录 key 与对象 key 在 Cluster 下不同 slot，无法并入同一 Lua 脚本；
+            // 残余 flush 中途断开窗口留下的空桶目录由读取端 MGET null 跳过容错。
+            Object result;
+            try (var pipeline = client.pipelined()) {
+                pipeline.sadd(collectionIndexKey(), snapshot.indexKey());
+                redis.clients.jedis.Response<Object> reply = pipeline.eval(
+                        SAVE_IF_VERSION_SCRIPT,
+                        List.of(
+                                bytes(snapshot.dataKey()),
+                                bytes(versionKey(snapshot.id())),
+                                bytes(snapshot.indexKey()),
+                                bytes(snapshot.journalKey())),
+                        List.of(
+                                bytes(String.valueOf(expectedVersion)),
+                                bytes(String.valueOf(current.version())),
+                                snapshot.envelopeBytes(),
+                                bytes(snapshot.id()),
+                                journalEntryCodec.encode(entry), bytes(mode)));
+                pipeline.sync();
+                result = reply.get();
+            }
             if (!(result instanceof Number number) || (number.longValue() != 0L && number.longValue() != 1L)) {
                 throw ZeroException.of(DataErrorCode.WRITE_FAILED, "unexpected redis save result", null);
             }

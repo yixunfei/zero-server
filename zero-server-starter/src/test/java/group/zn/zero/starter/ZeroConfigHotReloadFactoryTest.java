@@ -143,6 +143,7 @@ class ZeroConfigHotReloadFactoryTest {
         LocalConfigHotReloadService service = ZeroConfigHotReloadFactory
                 .configure(builder, config, builder.logAppender(), executors)
                 .orElseThrow();
+        service.authorizer((name, request, automatic) -> true);
         AtomicReference<String> decoderThread = new AtomicReference<>();
         ConfigTable<Integer, StarterItem> table = service.register(ConfigTableDefinition.of(
                 "items",

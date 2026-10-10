@@ -14,11 +14,15 @@ import org.junit.jupiter.api.Test;
 class MonitorErrorCodeTest {
 
     /**
-     * 验证八码的分类、稳定字符串和默认说明与冻结契约完全一致。
+     * 验证错误码的分类、稳定字符串和默认说明与冻结契约完全一致。
      */
     @Test
     void errorCodesShouldMatchFrozenContract() {
         List<ExpectedCode> expected = List.of(
+                new ExpectedCode(
+                        MonitorErrorCode.ALERT_DELIVERY_FAILED,
+                        "ZERO-MONITOR-ALERT-DELIVERY-FAILED",
+                        "alert publication failed"),
                 new ExpectedCode(
                         MonitorErrorCode.METRIC_DEFINITION_INVALID,
                         "ZERO-MONITOR-METRIC-DEFINITION-INVALID",

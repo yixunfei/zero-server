@@ -103,7 +103,8 @@ final class KcpRuntimeConfig {
                 network.bossThreads(), network.workerThreads(), network.maxFrameLength(), network.codecType(),
                 new NetworkTuning(t.transport(), t.backlog(), t.writeLowWaterMark(), t.writeHighWaterMark(),
                         number(config, "maxPendingBytesPerConnection", t.maxPendingBytesPerConnection()),
-                        number(config, "maxPendingBytesTotal", t.maxPendingBytesTotal()), t.flushConsolidationLimit()));
+                        number(config, "maxPendingBytesTotal", t.maxPendingBytesTotal()), t.flushConsolidationLimit(),
+                        t.preserveTcpFrameOrder(), t.maxOrderedInboundFrames(), t.maxOrderedInboundBytes()));
     }
     private String value(final ComponentConfig config, final String key) { return config.require(keys.get(key)); }
     private long number(final ComponentConfig config, final String key, final long fallback) {

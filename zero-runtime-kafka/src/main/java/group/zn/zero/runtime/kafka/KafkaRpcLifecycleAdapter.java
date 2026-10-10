@@ -17,8 +17,10 @@ import group.zn.zero.runtime.production.ProductionAdapterException;
 import group.zn.zero.runtime.production.ProductionAdapterFailurePhase;
 import group.zn.zero.runtime.production.ProductionAdapterFailures;
 import group.zn.zero.runtime.production.ProductionAdapterNames;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -47,11 +49,14 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
     /** 创建尚未发布 Kafka RPC 资源的工厂。 */
     private final KafkaRpcAdapterResourceFactory resourceFactory;
 
-    /** handler replay、动态注册、发布与关闭共用的冷路径线性化监视器。 */
-    private final Object handlerLifecycleMonitor = new Object();
+    /** handler replay map 与已发布资源的短期状态监视器；不得在其内调用外部资源。 */
+    private final Object handlerStateMonitor = new Object();
+
+    /** 已排队的冷路径操作尾部；只在 {@link #handlerStateMonitor} 内更新。 */
+    private CompletableFuture<Void> handlerOperationTail = CompletableFuture.completedFuture(null);
 
     /**
-     * 延迟回放的 handler 注册表；仅允许在 {@link #handlerLifecycleMonitor} 内访问。
+     * 延迟回放的 handler 注册表；仅允许在 {@link #handlerStateMonitor} 内访问。
      */
     private final Map<RpcRoute, HandlerRegistration> handlers = new LinkedHashMap<>();
 
@@ -183,22 +188,7 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
                 topic == null ? "" : topic,
                 group == null ? "" : group,
                 Objects.requireNonNull(handler, "handler"));
-        synchronized (handlerLifecycleMonitor) {
-            KafkaRpcAdapterResource current = delegate;
-            HandlerRegistration previous = handlers.get(route);
-            if (current == null) {
-                commitRegistration(route, registration);
-                return;
-            }
-            try {
-                registration.registerTo(current);
-                commitRegistration(route, registration);
-            } catch (RuntimeException | Error failure) {
-                ProductionAdapterException safeFailure = registrationFailure(failure);
-                restorePublishedRegistration(current, route, previous, safeFailure);
-                throw safeFailure;
-            }
-        }
+        registerRegistration(registration, false);
     }
 
     /**
@@ -216,25 +206,18 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
         RpcRoute route = new RpcRoute(
                 Objects.requireNonNull(serviceName, "serviceName"),
                 Objects.requireNonNull(methodName, "methodName"));
-        synchronized (handlerLifecycleMonitor) {
-            HandlerRegistration previous = handlers.get(route);
-            if (previous == null) {
-                return;
-            }
-            KafkaRpcAdapterResource current = delegate;
-            if (current == null) {
-                handlers.remove(route);
-                return;
-            }
-            try {
-                current.unregister(serviceName, methodName);
-                handlers.remove(route);
-            } catch (RuntimeException | Error failure) {
-                ProductionAdapterException safeFailure = registrationFailure(failure);
-                restorePublishedRegistration(current, route, previous, safeFailure);
-                throw safeFailure;
-            }
-        }
+        unregisterRoute(route, null);
+    }
+
+    /** 独占拥有 replay 路由；关闭旧句柄不能删除新的动态注册。 */
+    @Override
+    public group.zn.zero.rpc.spi.RpcHandlerRegistration registerScoped(final String serviceName,
+            final String methodName, final String topic, final String group, final RpcHandler handler) {
+        RpcRoute route = new RpcRoute(serviceName, methodName);
+        HandlerRegistration owned = new HandlerRegistration(route, topic == null ? "" : topic,
+                group == null ? "" : group, Objects.requireNonNull(handler, "handler"));
+        registerRegistration(owned, true);
+        return () -> unregisterRoute(route, owned);
     }
 
     /**
@@ -263,16 +246,22 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
      */
     @Override
     protected void doStart() {
-        synchronized (handlerLifecycleMonitor) {
+        serializedOperation(() -> {
             KafkaRpcAdapterResource created = null;
             try {
+                List<HandlerRegistration> replay;
+                synchronized (handlerStateMonitor) {
+                    replay = List.copyOf(handlers.values());
+                }
                 created = Objects.requireNonNull(
                         resourceFactory.create(settings, observer),
                         "created kafka rpc resource");
-                for (HandlerRegistration registration : handlers.values()) {
+                for (HandlerRegistration registration : replay) {
                     registration.registerTo(created);
                 }
-                delegate = created;
+                synchronized (handlerStateMonitor) {
+                    delegate = created;
+                }
             } catch (RuntimeException | Error failure) {
                 ProductionAdapterException safeFailure = ProductionAdapterFailures.sanitize(
                         ProductionAdapterNames.ADAPTER_KAFKA_RPC,
@@ -283,7 +272,7 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
                 rollbackCreatedAdapter(created, safeFailure);
                 throw safeFailure;
             }
-        }
+        });
     }
 
     /**
@@ -311,9 +300,12 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
      * @throws ProductionAdapterException 底层关闭失败时抛出不保留原始异常图的安全异常。
      */
     private void closeDelegate() {
-        synchronized (handlerLifecycleMonitor) {
-            KafkaRpcAdapterResource current = delegate;
-            delegate = null;
+        serializedOperation(() -> {
+            KafkaRpcAdapterResource current;
+            synchronized (handlerStateMonitor) {
+                current = delegate;
+                delegate = null;
+            }
             if (current == null) {
                 return;
             }
@@ -327,7 +319,89 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
                         ProductionAdapterErrorCode.CLOSE_FAILED.message(),
                         failure);
             }
+        });
+    }
+
+    /**
+     * 按串行顺序执行一个会触碰外部 Kafka 资源的冷路径操作。
+     *
+     * <p>只在短状态锁内登记操作尾部；等待前序、SDK 调用和补偿均在锁外完成，避免外部阻塞导致
+     * 注册表与生命周期状态锁饥饿。</p>
+     *
+     * @param operation 操作；不可为空。
+     */
+    private void serializedOperation(final Runnable operation) {
+        CompletableFuture<Void> previous;
+        CompletableFuture<Void> completed = new CompletableFuture<>();
+        synchronized (handlerStateMonitor) {
+            previous = handlerOperationTail;
+            handlerOperationTail = completed;
         }
+        try {
+            previous.join();
+            operation.run();
+        } finally {
+            completed.complete(null);
+        }
+    }
+
+    /** 注册一条 handler，并在已启动资源上完成物理注册后提交回放表。 */
+    private void registerRegistration(final HandlerRegistration registration, final boolean exclusive) {
+        serializedOperation(() -> {
+            RpcRoute route = registration.route();
+            KafkaRpcAdapterResource current;
+            HandlerRegistration previous;
+            synchronized (handlerStateMonitor) {
+                previous = handlers.get(route);
+                if (exclusive && previous != null) {
+                    throw ZeroException.of(RpcErrorCode.CONTRACT_INVALID, "rpc route already registered", null);
+                }
+                current = delegate;
+                if (current == null) {
+                    commitRegistration(route, registration);
+                    return;
+                }
+            }
+            try {
+                registration.registerTo(current);
+                synchronized (handlerStateMonitor) {
+                    commitRegistration(route, registration);
+                }
+            } catch (RuntimeException | Error failure) {
+                ProductionAdapterException safeFailure = registrationFailure(failure);
+                restorePublishedRegistration(current, route, previous, safeFailure);
+                throw safeFailure;
+            }
+        });
+    }
+
+    /** 注销指定路由；expected 非空时只有仍由该注册拥有时才会实际注销。 */
+    private void unregisterRoute(final RpcRoute route, final HandlerRegistration expected) {
+        serializedOperation(() -> {
+            HandlerRegistration previous;
+            KafkaRpcAdapterResource current;
+            synchronized (handlerStateMonitor) {
+                previous = handlers.get(route);
+                if (previous == null || (expected != null && previous != expected)) {
+                    return;
+                }
+                current = delegate;
+                if (current == null) {
+                    handlers.remove(route);
+                    return;
+                }
+            }
+            try {
+                current.unregister(route.serviceName(), route.methodName());
+                synchronized (handlerStateMonitor) {
+                    handlers.remove(route);
+                }
+            } catch (RuntimeException | Error failure) {
+                ProductionAdapterException safeFailure = registrationFailure(failure);
+                restorePublishedRegistration(current, route, previous, safeFailure);
+                throw safeFailure;
+            }
+        });
     }
 
     /**

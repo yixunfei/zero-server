@@ -9,6 +9,25 @@ import org.junit.jupiter.api.Test;
 
 /** 输入拒绝与实际缓冲容量回归。 @author zn */
 class FrameReportAuditTest {
+    /** 模拟在副作用后失败不能重放同帧，也不能伪造已提交帧。 */
+    @Test void partialSimulationFailureIsolatesMatch() {
+        var effects = new java.util.concurrent.atomic.AtomicInteger();
+        List<FrameCommitted> committed = new ArrayList<>();
+        try (var runtime = new FrameMatchRuntime("failed", FrameMatchConfig.defaults(), (frame, batch) -> {
+            effects.incrementAndGet();
+            throw new IllegalStateException("partial simulation");
+        }, committed::add, committed::add)) {
+            runtime.submit(input(1, 1)).toCompletableFuture().join();
+            assertThrows(CompletionException.class, () -> runtime.tick().toCompletableFuture().join());
+            assertThrows(CompletionException.class, () -> runtime.tick().toCompletableFuture().join());
+            assertThrows(CompletionException.class, () -> runtime.submit(input(2, 1)).toCompletableFuture().join());
+            assertEquals(1, effects.get());
+            assertEquals(0, runtime.frameNo());
+            assertEquals(0, committed.size());
+            assertEquals("partial simulation", runtime.simulationFailure().orElseThrow().getMessage());
+            runtime.closeAsync().toCompletableFuture().join();
+        }
+    }
     /** 拒绝的输入重传仍然报告拒绝。 */
     @Test void rejectedInputIsNotMarkedAsAccepted() {
         try (FrameMatchRuntime runtime = runtime(new ArrayList<>())) {
@@ -58,6 +77,36 @@ class FrameReportAuditTest {
     private FrameMatchRuntime runtime(List<FrameCommitted> events) {
         return new FrameMatchRuntime("m", new FrameMatchConfig(InputTimingPolicy.REJECT,
                 MissingInputPolicy.EMPTY, 8, 1), (frame, batch) -> { }, events::add, event -> { });
+    }
+    /** 关闭前已入队但尚未执行的输入和 tick 均失败，其他对局仍能推进。 */
+    @Test void queuedCommandsRejectAfterCloseWithoutStoppingSharedScheduler() {
+        var tasks = new java.util.ArrayDeque<Runnable>();
+        var advances = new java.util.concurrent.atomic.AtomicInteger();
+        var notifications = new ArrayList<FrameCommitted>();
+        try (var scheduler = new group.zn.zero.actor.scheduler.ExecutorActorScheduler(tasks::addLast);
+             var first = new FrameMatchRuntime("closing", FrameMatchConfig.defaults(),
+                     (frame, batch) -> advances.incrementAndGet(), notifications::add, notifications::add, scheduler);
+             var second = new FrameMatchRuntime("continuing", FrameMatchConfig.defaults(),
+                     (frame, batch) -> { }, event -> { }, event -> { }, scheduler)) {
+            var submit = first.submit(input(1, 1)).toCompletableFuture();
+            var tick = first.tick().toCompletableFuture();
+            var leave = first.leave("u").toCompletableFuture();
+            var closing = first.closeAsync();
+            var other = second.tick().toCompletableFuture();
+            while (!tasks.isEmpty()) tasks.removeFirst().run();
+            assertThrows(CompletionException.class, submit::join);
+            assertThrows(CompletionException.class, tick::join);
+            assertThrows(CompletionException.class, leave::join);
+            other.join();
+            assertEquals(0, advances.get());
+            assertEquals(0, notifications.size());
+            assertEquals(0, first.frameNo());
+            assertEquals(1, second.frameNo());
+            closing.toCompletableFuture().join();
+            var secondClose = second.closeAsync();
+            while (!tasks.isEmpty()) tasks.removeFirst().run();
+            secondClose.toCompletableFuture().join();
+        }
     }
     private FrameInput input(long seq, long frame) { return new FrameInput("u", seq, frame, 0, new byte[0], "t"); }
 }

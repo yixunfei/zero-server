@@ -35,20 +35,45 @@ public final class ProjectScaffoldGenerator {
     }
 
     /**
-     * 生成项目；force 只覆盖模型明确列出的脚手架文件。
+     * 完整渲染后事务创建项目；force 允许非空目录但拒绝覆盖不同内容。
      *
      * @param request 生成请求。
      * @return 生成结果。
      * @throws IOException 模板读取或项目写入失败。
      */
     public ProjectScaffoldResult generate(final ProjectScaffoldRequest request) throws IOException {
-        ProjectScaffoldRequest current = Objects.requireNonNull(request, "request");
-        Path target = current.outputDirectory();
-        if (Files.exists(target) && !current.force() && hasAnyChild(target)) {
-            throw new IllegalStateException(
-                    "outputDirectory already exists and is not empty; use --force to overwrite scaffold files: "
-                            + target);
+        Objects.requireNonNull(request, "request");
+        Path staged = Files.createTempDirectory("zero-scaffold-stage-");
+        Throwable failure = null;
+        try {
+            ProjectScaffoldRequest rendering = new ProjectScaffoldRequest(request.projectName(), request.packageName(),
+                    staged, request.zeroVersion(), request.template(), request.templateRoot(),
+                    request.selectedFromKeywords(), request.components(), false);
+            ProjectScaffoldResult result = renderProject(rendering);
+            new ScaffoldCreationTransaction().commit(staged, request);
+            return new ProjectScaffoldResult(request.outputDirectory(), result.templateId(), result.projectName(), result.fileCount());
+        } catch (IOException | RuntimeException | Error ex) {
+            failure = ex;
+            throw ex;
+        } finally {
+            try {
+                deleteStaging(staged);
+            } catch (IOException cleanup) {
+                if (failure != null) failure.addSuppressed(cleanup);
+                else throw cleanup;
+            }
         }
+    }
+
+    private static void deleteStaging(final Path staged) throws IOException {
+        try (var paths = Files.walk(staged)) {
+            for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(path);
+        }
+    }
+
+    /** 仅供升级服务在独占 scratch 中渲染，不创建事务元数据。 */
+    ProjectScaffoldResult renderProject(final ProjectScaffoldRequest current) throws IOException {
+        Path target = current.outputDirectory();
         Path sourceRoot = current.templateRoot().resolve(current.template().directory()).normalize();
         if (!sourceRoot.startsWith(current.templateRoot()) || !Files.isDirectory(sourceRoot)) {
             throw new IllegalStateException("template directory not found: " + sourceRoot);
@@ -122,7 +147,7 @@ public final class ProjectScaffoldGenerator {
         values.put("__SELECTED_PROVIDERS_JSON__", jsonLines(selection.providers()));
         values.put("__SELECTED_COMPONENTS__", String.join(", ", selection.components()));
         values.put("__RUNTIME_PROFILE__", selection.external() ? "external-test" : "local");
-        values.put("__EXTERNAL_COMPONENTS__", Boolean.toString(selection.external()));
+        values.put("__EXTERNAL_COMPONENTS__", Boolean.toString(components.requiresExternalServices(selection)));
         values.put("__DEFAULT_START__", Boolean.toString(!selection.external()));
         values.put("__CONFIG_DEFAULTS__", ScaffoldConfiguration.defaults(selection));
         values.put("__DIAGNOSIS_STATUS__", "report.missingConfigKeys().isEmpty() ? \"ok\" : \"incomplete\"");
@@ -195,6 +220,10 @@ public final class ProjectScaffoldGenerator {
             addIfPresent(result, sourceRoot, "LocalGameFlow.java.tpl", "src/main/java/" + packagePath + "/LocalGameFlow.java");
             addIfPresent(result, sourceRoot, "LocalGameAsyncTest.java.tpl", "src/test/java/" + packagePath + "/LocalGameAsyncTest.java");
             if (selection.components().contains("net")) {
+                addIfPresent(result, sourceRoot, "LocalGameServerTest.java.tpl",
+                        "src/test/java/" + packagePath + "/LocalGameServerTest.java");
+                addIfPresent(result, sourceRoot, "LocalGameLifecycle.java.tpl",
+                        "src/main/java/" + packagePath + "/LocalGameLifecycle.java");
                 addIfPresent(result, sourceRoot, "LocalGameServer.java.tpl",
                         "src/main/java/" + packagePath + '/' + serverClass + ".java");
                 addIfPresent(result, sourceRoot, "LocalGameTcpClient.java.tpl",
@@ -226,9 +255,7 @@ public final class ProjectScaffoldGenerator {
             throw new IllegalStateException("scaffold mapping escapes its root");
         }
         String content = Files.readString(template, StandardCharsets.UTF_8);
-        for (Map.Entry<String, String> entry : values.entrySet()) {
-            content = content.replace(entry.getKey(), entry.getValue());
-        }
+        content = ScaffoldTemplateTokens.render(content, values);
         write(targetRoot, mapping.output(), content);
     }
 
@@ -249,7 +276,7 @@ public final class ProjectScaffoldGenerator {
             return;
         }
         Files.createDirectories(Objects.requireNonNull(output.getParent(), "output.parent"));
-        Files.writeString(output, content, StandardCharsets.UTF_8);
+        Files.writeString(output, content.replace("\r\n", "\n").replace("\r", "\n"), StandardCharsets.UTF_8);
     }
 
     private void writeOwnershipManifest(
@@ -281,7 +308,7 @@ public final class ProjectScaffoldGenerator {
         String manifest = Files.readString(
                 request.templateRoot().resolve(request.template().directory()).resolve("zero-scaffold.json.tpl"),
                 StandardCharsets.UTF_8);
-        for (Map.Entry<String, String> entry : values.entrySet()) manifest = manifest.replace(entry.getKey(), entry.getValue());
+        manifest = ScaffoldTemplateTokens.render(manifest, values);
         write(target, "zero-scaffold.json", manifest);
     }
 
@@ -297,12 +324,6 @@ public final class ProjectScaffoldGenerator {
     }
 
     private record OwnedFile(String path, String owner, String template, String sha256) {
-    }
-
-    private boolean hasAnyChild(final Path path) throws IOException {
-        try (var stream = Files.list(path)) {
-            return stream.findAny().isPresent();
-        }
     }
 
     private String jsonString(final String value) {

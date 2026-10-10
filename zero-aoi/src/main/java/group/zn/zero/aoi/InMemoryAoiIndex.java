@@ -132,12 +132,16 @@ public final class InMemoryAoiIndex implements AoiIndex {
                 if (firstUpdated == null) firstUpdated = current;
                 else updated = append(updated, current);
             }
-            else if (current != previous.entity) stableIdentity = false;
+            else if (current != previous.identity) stableIdentity = false;
         }
         long generation = state.nextGeneration();
         for (AoiEntity current : next) {
             ObserverState.Seen previous = state.entities.get(current.entityId());
-            if (previous != null) previous.generation = generation;
+            if (previous != null) {
+                // 更新身份引用以恢复快速路径；保留比较快照，避免共享可变 state 后丢失后续变化。
+                previous.identity = current;
+                previous.generation = generation;
+            }
         }
         var iterator = state.entities.values().iterator();
         while (iterator.hasNext()) {

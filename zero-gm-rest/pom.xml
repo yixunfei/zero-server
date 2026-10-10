@@ -10,6 +10,7 @@
     <name>zeroServer GM REST Adapter</name>
     <description>上层 GM REST transport boundary；不内置身份或持久化实现。</description>
     <dependencies>
+        <dependency><groupId>com.google.code.gson</groupId><artifactId>gson</artifactId><version>2.13.2</version></dependency>
         <dependency><groupId>group.zn.zero</groupId><artifactId>zero-gm</artifactId></dependency>
         <dependency><groupId>group.zn.zero</groupId><artifactId>zero-net</artifactId></dependency>
     </dependencies>

@@ -39,6 +39,11 @@ public final class DataRuntime {
         return RuntimeModule.of("zero.data", providers(), PERSISTENCE_MANAGER, REPOSITORY_SOURCES);
     }
 
+    /** 注入快照所属执行域；传入 Actor 适配器即可在绑定 lane 捕获，资源由调用方管理。 */
+    public static RuntimeModule module(final group.zn.zero.data.persistence.PersistenceBindingExecutor executor) {
+        return RuntimeModule.of("zero.data", providers(executor), PERSISTENCE_MANAGER, REPOSITORY_SOURCES);
+    }
+
     /** Binds application roles explicitly, for example game -> mongo or game -> local. */
     public static RuntimeModule repositories(final Map<String, String> roleBindings) {
         Map<String, String> checked = Map.copyOf(roleBindings);
@@ -50,11 +55,18 @@ public final class DataRuntime {
     }
 
     public static List<RuntimeComponentProvider> providers() {
+        return providers(new UnboundSnapshotExecutor());
+    }
+
+    /** 创建使用指定快照执行器的 provider；不可为空，不创建线程。 */
+    public static List<RuntimeComponentProvider> providers(
+            final group.zn.zero.data.persistence.PersistenceBindingExecutor executor) {
+        java.util.Objects.requireNonNull(executor, "executor");
         return List.of(RuntimeProviders.create(ComponentDescriptor.builder(StandardRuntimeCapabilityModel.LOCAL_PERSISTENCE)
                 .provide(PERSISTENCE_MANAGER).optional(RuntimeLifecycleCapabilities.INFRASTRUCTURE_LIFECYCLES)
                 .kind(ComponentKind.LOCAL).build(), context -> {
                     context.requireAll(RuntimeLifecycleCapabilities.INFRASTRUCTURE_LIFECYCLES);
-                    DefaultPersistenceManager persistence = new DefaultPersistenceManager();
+                    DefaultPersistenceManager persistence = new DefaultPersistenceManager(executor);
                     return ComponentContribution.builder().bind(PERSISTENCE_MANAGER, persistence)
                             .lifecycle(persistence).build();
                 }), RuntimeProviders.create(ComponentDescriptor.builder(StandardRuntimeCapabilityModel.LOCAL_REPOSITORIES)
@@ -64,5 +76,21 @@ public final class DataRuntime {
                     return ComponentContribution.builder()
                             .contribute(REPOSITORY_SOURCES, new RepositorySource("local", factory)).build();
                 }));
+    }
+
+    /** 默认仅接受明确未绑定的快照；有绑定实体必须显式装配其执行域。 */
+    private static final class UnboundSnapshotExecutor implements group.zn.zero.data.persistence.PersistenceBindingExecutor {
+        /** 纯内存未绑定快照执行器。 */
+        private final group.zn.zero.data.persistence.DirectPersistenceBindingExecutor direct =
+                new group.zn.zero.data.persistence.DirectPersistenceBindingExecutor();
+
+        @Override public <T> java.util.concurrent.CompletionStage<T> capture(
+                final group.zn.zero.data.persistence.DataThreadBinding binding,
+                final java.util.function.Supplier<T> snapshotSupplier) {
+            if (!binding.isUnbound()) return java.util.concurrent.CompletableFuture.failedFuture(
+                    group.zn.zero.core.error.ZeroException.of(group.zn.zero.data.error.DataErrorCode.PERSISTENCE_FLUSH_FAILED,
+                            "bound snapshots require an explicit persistence binding executor", null));
+            return direct.capture(binding, snapshotSupplier);
+        }
     }
 }
