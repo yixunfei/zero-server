@@ -228,7 +228,7 @@ Java：
 - `--genBoImpl true` 只创建不存在的 BOImp，已有实现即使保留旧生成标记也不会覆盖。接口变化需要手工更新业务实现。
 - DTO、codec、协议号、BO 接口和 dispatcher 等工具管理文件内容相同时不重写；非生成文件仍拒绝覆盖。请勿手工修改工具管理文件。
 - 四端源码先完整渲染并统一预检路径和归属；使用摘要清单记录已生成内容，拒绝覆盖手改生成物，全部源码规范为 LF。
-- 工程写入使用目录文件锁、恢复日志和同目录临时替换。IO 失败时回滚；进程中断留下 `.zero-codegen/pending.json` 时用 `--mode recover` 恢复后再生成。恢复发现外部编辑会停止并保留现场。多文件输出并非同时对外可见，不应与构建并行运行；不承诺断电持久性。
+- 工程写入使用目录文件锁、恢复日志和同目录临时替换。提交标记前失败回滚，标记后清理失败保留产物并明确报告；进程中断留下 `.zero-codegen/pending.json` 时用 `--mode recover` 恢复后再生成。恢复发现外部编辑会停止并保留现场。多文件输出并非同时对外可见，不应与构建并行运行；不承诺断电持久性。
 - `--mode plan` 预览过期文件；`--mode prune` 重新生成并清理摘要一致的过期文件。手改过期文件显示 `stale-modified`，移出当前输出配置的文件显示 `stale-outside-config`，两者均保留。BOImp 不进入清理清单。
 
 四端回归可在仓库根运行 `zero-codegen/scripts/smoke-interop.ps1 -GodotExecutable <Godot 控制台程序路径>`。需要 Java 21、.NET 8 SDK、Node.js/npm 和 Godot 4；脚本生成标准 `.si` 工程，编译 Java/C#/TypeScript，并在 Godot 中运行 GDScript，比较固定协议字节向量和各端往返结果。不提供 Godot 路径且本机找不到 `godot` 时，只检查 GDScript 结构并明确提示未完成运行验证。
@@ -271,12 +271,12 @@ java -jar zero-codegen-<version>-all.jar --config codegen.json --mode check --js
 
 | 模式 | 用途 | 是否写入 |
 | --- | --- | --- |
-| validate | 解析、全工程校验和全部模板渲染 | 否 |
+| validate | 解析、全工程校验、全部模板渲染和输出归属预检；合法空目录成功 | 否 |
 | plan | 预检当前产物，列出创建/更新/保留/过期 | 否 |
 | check | CI 检查待生成、变化或过期产物；漂移退出 3 | 否 |
 | generate | 默认；更新生成物并保留旧产物 | 是 |
 | prune | 生成并清理未手改的过期产物 | 是 |
-| recover | 回滚上次未完成事务；不要求 DSL 可解析 | 是 |
+| recover | PREPARED 回滚，COMMITTED 校验后像后仅清理；不要求 DSL 可解析 | 是 |
 
 退出码 0 为成功，1 为解析/输出失败，2 为参数/配置错误，3 为生成漂移。`--json` 只输出一份 JSON，成功包含文件状态和解析渲染/输出耗时；失败包含 `exitCode/error/message`。不要删除 `.zero-codegen` 清单和锁文件来绕过保护；工具停止后可连同所有纯生成产物一起重新建立输出目录。
 
@@ -301,3 +301,15 @@ Godot 编解码失败不会交付部分 DTO：`Codec.read(reader)` 返回 null�
 ```
 
 `-RequireAll` 要求 Godot 和 Chrome/Chromium/Edge 均实际运行，不允许结构检查替代。浏览器可用 `-BrowserExecutable` 指定。本机 Edge 未提供 headless 输出，Chrome 已验证。脚本固定 TS/esbuild 版本，首次运行需要网络；CI 使用 Windows/Linux 矩阵并保留生成产物。性能脚本报告首次与内容不变时的耗时；数值只代表本机测试负载，不作为生产 SLA。
+
+## 2026-10-08 工具契约
+
+受管生成物手改使 validate/check/generate 返回 1，BOImp 业务修改仍 preserve，不算漂移。只读模式不清理 pending，也不创建锁目录。新 journal 使用 schema 2；schema 1 必须先用原版本和原配置 recover，再升级。COMMITTED 的 recover 只清理；不得删除恢复材料绕过保护。
+
+直接调用单后端 render(request) 也受归属、锁和恢复保护；自建计划必须提供 root 与 allowedRoots。输出默认 LF。跨语言名称、派生符号、设备路径和深度 64 限额在写入前验证。锁不能阻止任意外部编辑器在最后检查后写入，生成期间请停止编辑/构建。
+
+仓库脚本从根 POM 解析精确构件版本。先运行 `./mvnw.cmd -B -ntp -pl zero-codegen -am package`（POSIX 用 `./mvnw`），再执行 BAT 或性能辅助；缺当前构件明确失败。完整迁移与首建恢复见 [B6 迁移](../../docs/migrations/20261008-audit-b6.zh-CN.md)。
+
+### 2026-10-08 Java 输出更新
+
+升级后重新生成受管文件以应用 JDK 类型、注解和异常的全限定名称。若使用 ZeroPayloadCodec、ZeroException、ProtocolErrorCode 或 java 作类型名，请先改名；冲突现在于生成前拒绝。不要手改生成物或摘要清单。

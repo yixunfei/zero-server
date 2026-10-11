@@ -477,4 +477,10 @@ mvn -B -ntp -q -f target/my-runtime/pom.xml exec:java
 
 `VerifyGeneratedCompositions` 从代码生成器组件目录读取选择集合，不单独维护另一份组件目录。当前包含五条代表消费路径、十六个单组件选择、两条混合路径及中心—逻辑/分布式组合，共二十五个生成消费者。清单/POM 的结构检查使用 JSON/XML 解析，runtime 模板测试再对照实际 runtime plan 检查所选 provider 与 capability。
 
+## 首建失败与恢复（2026-10-08）
+
+首次创建先完整渲染、再全目标预检，使用与升级相同的工程锁。`--force` 允许非空目录但不覆盖不同内容；正常失败撤销本次新建文件，空目录与锁可能保留且可直接重试。未完成首建日志 `.zero/scaffold/create.json` 通过 `NewLocalGame --outputDir <工程> --rollback` 恢复：PREPARED 撤销新建内容，COMMITTED 只清理元数据。外部编辑导致恢复失败时保留现场。
+
+模板变量单次替换，未知 token 拒绝；zeroVersion 为安全字面量，禁止 XML 字符、换行及 `__`。所有产物在摘要前规范为 LF，旧 CRLF 工程升级应先检查 plan。完整状态与回退步骤见 [B6 迁移说明](migrations/20261008-audit-b6.zh-CN.md)。
+
 生成工程携带 `mvnw`、`mvnw.cmd` 和 `.mvn/wrapper/maven-wrapper.properties`，纳入 ownership manifest 与升级事务。最小项目通过 Runner 的 `--template runtime --components ... --catalog ...` 一次生成、安装所选依赖并验证；自定义单值组件优先使用 `bindings` 简写。

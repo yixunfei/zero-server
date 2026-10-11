@@ -427,4 +427,8 @@ frame-sync scaffold
 
 ## 2026-09-17 报告核实修订
 
-targetFrame <= 已提交帧号视为迟到；REJECT 每次明确拒绝，MARK 丢弃且在近期窗口记录，BUFFER 转入下一帧。同一玩家目标帧的替换不增加容量；只在接受成功后登记幂等键。近期去重窗口最多 maxBufferedInputs 个键，窗口之外的历史输入依照时序策略处理，不承诺全局永久去重。多个 FrameMatchRuntime 可共用一个 ActorScheduler，通过 FrameDispatchRegistry 的无状态命令路由器进入各自 lane；关闭某个对局不影响其他对局。
+targetFrame <= 已提交帧号视为迟到；REJECT 每次明确拒绝，MARK 丢弃，BUFFER 转入下一帧。同一玩家目标帧的替换不增加容量；接受后的 inputSeq 成为该活跃参与者的最高水位，重复或旧序号不重新排队。`maxParticipants` 限制尚未 leave 的水位数量，EMPTY/MARK 消费输入后也保留此容量，迟到 MARK 输入同样受限。`leave(uid)` 会释放该 UID 的水位、pending 和 last input；接入层必须在连接断开时调用它。`REPEAT_LAST` 为当前 targetFrame 构造输入，不复用旧帧目标；`tick(traceId)` 使 FrameCommitted 使用帧推进命令的 trace，无参 tick 使用 `frame-tick:<matchId>`。多个 FrameMatchRuntime 可共用一个 ActorScheduler，通过 FrameDispatchRegistry 的无状态命令路由器进入各自 lane；关闭某个对局不影响其他对局。
+
+## 2026-10-08 关闭契约修正
+
+`closeAsync()` 立即停止准入，清理在 match lane 执行；返回本次尝试的只读完成视图，失败可重试、在途合并、成功幂等。共享 scheduler 必须在清理成功后由其所有者关闭。同步 `close()` 不阻塞，清理未完成时明确报错要求观察异步结果；不得在 match lane 中 join 自己的清理。详见[迁移说明](../migrations/20261008-audit-followup.zh-CN.md)。

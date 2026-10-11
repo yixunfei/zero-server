@@ -1,5 +1,11 @@
 # 协议 DSL 与代码生成设计
 
+## 2026-10-07 presence 分配边界
+
+Java `ZeroReader.readPresenceBits(int knownFieldCount)` 和 C#/TypeScript/GDScript 对应方法要求显式传入可信 schema 的 nullable 字段数；无参方法已删除。重新生成各端协议代码，手写 codec 同步传参，不得传入网络声明长度。
+
+完整打包位图先按当前对象边界检查，只分配并展开 `min(线上字段数, schema 字段数)` 个布尔位，再跳过未知位图字节。保持原线格式和尾部追加字段的既有跳过语义，超大声明值不再放大为完整布尔数组。截断、溢出或跨对象边界依旧拒绝。见[迁移说明](migrations/20261007-audit-n-series.zh-CN.md)。
+
 
 2026-09-23 Java 生成分发新增 `dispatchFrame(ProtocolFrame)`：从自持有 payload 直接构建只读 reader，BO 仍接收原有 DTO/业务参数。已有数组 dispatch 同样使用只读 reader；两种入口均在调用 BO 前拒绝对象外尾随数据。自定义 `ProtocolCodec` 的 `decodeView` 默认委托数组解码。用原协议生成命令更新工具管理的源码；已有 BOImp 始终保留，内容相同的各语言产物不重写。见[性能迁移](migrations/20260923-performance-incremental.md)与[codegen 对接迁移](migrations/20260923-codegen-integration.md)。
 
@@ -302,3 +308,21 @@ Java 包名覆盖须为合法 Java 21 限定标识符，Java DTO 后缀须能组
 ### 2026-09-23 网络缓冲入口
 
 `ProtocolFrameCodec` 增加 `encodeTo/decodeFrom/encodedLength`；默认 Netty codec 直接连接协议 ZeroReader/ZeroWriter 与 ByteBuf，线格式与生成 DTO 不变。业务帧仍自持有数据，数组 getter 仍复制；只读视图和无复制长度用于安全消除中转。自定义 codec 的所有权及上界要求见[迁移说明](migrations/20260923-performance-plan.md)。直接 UTF-8 实验未达到吞吐要求，默认保留 JDK 字符编码。
+
+## 通用错误帧（2026-10-07）
+
+`ProtocolFeature.ERROR=0x0010` 与 `COMPRESSED=0x0001` 独立。生产 replay 拒绝及 local TCP 模板使用 `ProtocolErrorFrames.response`：保留请求 protocolId/version，负载为 UTF-8 `error|protocol=<id>|reason=<CODE>`；新纯文本负载不继承请求压缩、加密、扩展标志。客户端按 ERROR 位判错。旧 bit0 失败约定不兼容，应同步重生成或修改客户端，见 [迁移说明](migrations/20261007-full-code-audit-remediation.zh-CN.md)。
+
+发送 stage 表示本地 transport 写的完成或失败，不是对端业务确认。安全/协议异常可以立即关闭连接并使在途发送失败；业务需要独立请求幂等和确认语义。
+
+## 2026-10-08 生成输入边界
+
+名称采用 `[A-Za-z_][A-Za-z0-9_]*`，并按选定后端实际位置检查关键字、保留类型、派生 codec/BO 名称和文件冲突；不自动改名。Java contextual 词可作为合法字段，TypeScript 属性也不机械套类型关键字限制。非法声明在写盘前失败。
+
+Java 还检查完整生成类型与所有生成包前缀，以及每个生成单元的声明、实际导入和同包类型引用之间的简单名称冲突；自定义 artifact 包、输出目录与 DTO 后缀同样受检。冲突以 `DSL_VALIDATION_FAILED` 在应用输出计划前拒绝，validate 不写盘，generate 不留下半套文件。无引用的合法跨包同名不受此限制，示例与升级要求见 [F1/F2 迁移说明](migrations/20261009-audit-f1-f2.zh-CN.md)。
+
+类型结构最多 64 层，根类型计 1，每层容器、数组及 nullable/optional 都计入；直接构造 ProtocolDslDocument 同样校验。解析超限返回 DSL_PARSE_FAILED，模型超限返回 DSL_VALIDATION_FAILED，避免递归栈溢出。feature 输出按 ProtocolFeature 声明顺序，生成物统一 LF；这些变更不修改协议 ID 或线格式。
+
+### 2026-10-08 Java 目标名称修正
+
+Java 模板对 Class、注解与异常等 JDK 基础设施使用全限定名，合法同名枚举可生成编译。ZeroPayloadCodec、ZeroException、ProtocolErrorCode 是模板真实导入保留名；类型名 java 会遮蔽 JDK 包根，也作为保留名，冲突在生成前拒绝。升级后重新生成受管源码；线格式不变。

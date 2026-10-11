@@ -259,3 +259,9 @@ ZeroProductionNetworkFocusedTestPlan
 UDP 的 peer 表只提供远端地址上下文、open/close 生命周期、容量和空闲回收。它不提供 KCP 级可靠传输、重传、拥塞控制或自动鉴权。超长 datagram 被计数并丢弃，socket 继续服务其他 peer；来源封禁由上层网关或业务策略选择。
 
 KCP 现由独立 `zero-net-kcp` 实现，复用 TCP 登录身份但拥有独立票据与 UDP 绑定；不直接复用 TCP 状态机。`ServerFactory.kcpUnsupported(...)` 已移除，迁移见 [KCP 说明](../migrations/20260928-kcp-support.md)。
+
+## B4 TCP 顺序模式预算（2026-10-08）
+
+`NetworkTuning` 的 `maxOrderedInboundFrames`/`maxOrderedInboundBytes` 默认 1024/16MiB，仅用于开启 preserveTcpFrameOrder 的 TCP 连接，包含当前 handler 和等待响应完成的帧。每帧计 payload + extension + 128 字节，超限 INBOUND_OVERFLOW 并关闭；production lifecycle 原有更严格限制继续生效。`withOrderedInboundLimits` 可设置预算。
+
+`NettyConnection.close` 失败改用 CONNECTION_CLOSE_FAILED，出站 OUTBOUND_OVERFLOW 的诊断区分静态超限与暂时预算耗尽。启动失败尽力清理自有 IO，借用组仍归组合根所有。详见 [B4 迁移](../migrations/20261008-audit-b4.zh-CN.md)。

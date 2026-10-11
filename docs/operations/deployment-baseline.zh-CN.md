@@ -76,3 +76,9 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d app
 5. 完成备份恢复演练、故障注入、升级/回滚验证和容量压测后，才能评估是否适合具体环境。
 
 相关流程见[备份与恢复 Runbook](backup-recovery-runbook.zh-CN.md)。
+
+## 就绪检查接线
+
+默认 Compose /health 只用于存活检查。负载均衡和编排 readiness 应指向 /ready，并携带与监控端点一致的认证信息。使用 PrometheusHttpEndpoint 时必须显式注入业务就绪快照，否则 /ready 为 503；先确认运行时、实际监听器和应用必需依赖可用再置为 true，停服排空前先置 false。
+
+Compose 的 healthy 状态不能替代业务就绪判定；按部署平台分别配置 liveness 和 readiness。就绪探针的快照更新与密钥注入由应用负责，见[日志与可观测性](../logging-observability.zh-CN.md)。

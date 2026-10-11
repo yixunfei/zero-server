@@ -363,3 +363,13 @@ zero-codegen/src/test/resources/protocol-dsl/sample/
 ```
 
 该示例覆盖目录递归、enum、struct、方法 DTO、`protoId`、List、Set、Map、数组、多维数组、嵌套泛型和 nullable。
+
+## 2026-10-08 生成输入边界
+
+名称采用 `[A-Za-z_][A-Za-z0-9_]*`，并按选定后端实际位置检查关键字、保留类型、派生 codec/BO 名称和文件冲突；不自动改名。Java contextual 词可作为合法字段，TypeScript 属性也不机械套类型关键字限制。非法声明在写盘前失败。
+
+类型结构最多 64 层，根类型计 1，每层容器、数组及 nullable/optional 都计入；直接构造 ProtocolDslDocument 同样校验。解析超限返回 DSL_PARSE_FAILED，模型超限返回 DSL_VALIDATION_FAILED，避免递归栈溢出。feature 输出按 ProtocolFeature 声明顺序，生成物统一 LF；这些变更不修改协议 ID 或线格式。
+
+### 2026-10-08 Java 名称边界
+
+合法 Class/JDK 注解或异常同名枚举使用全限定基础设施类型生成。ZeroPayloadCodec、ZeroException、ProtocolErrorCode 及遮蔽包根的类型名 java 提前拒绝；升级后重新生成受管源码，线格式不变。详见[迁移](../../docs/migrations/20261008-audit-followup.zh-CN.md)。

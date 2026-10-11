@@ -6,6 +6,10 @@
 
 Production Redis 数据与缓存共用 client owner 和健康/准入状态；MongoDB、PostgreSQL 也通过运行时监测驱动 IO。已知连接或超时故障触发降级，周期探测成功后恢复准入；容量拒绝不触发写入。可能已发送的写入返回 `WRITE_OUTCOME_UNKNOWN`，不自动重试，业务需通过版本/请求 ID 或对账确认结果。SQL 完整性约束等确定性错误保留原业务失败，不触发远程故障降级。驱动原生超时仍是实际阻塞上限；Actor/Netty 路径应使用现有受管异步 Repository/Cache 入口，不能直接调用同步驱动接口。
 
+## 2026-10-09 重放水位与显式保留
+
+耐久日志保存 replay watermark，World 和 Ranking 的幂等收据只可在业务显式确认归档/导出边界后压缩。低于确认水位的迟到重试明确拒绝，不能用墙钟 TTL 或 LRU 静默淘汰未确认历史。World 删除须在 entity lane 执行且迁移中禁止删除；Ranking 赛季必须先完成终态导出。详见 [迁移说明](migrations/20261009-audit-round2.zh-CN.md)。
+
 ## 2026-10-05 Repository 与持久化性能
 
 Envelope CRUD 不再持有仓库级同步锁，所有同步 Store IO 交给必填的受管 Executor；保存前在实体所属调用域编码不可变 envelope，查询解码及完成回调可能在 IO 域执行。production 数据 provider 拒绝内联执行器，便利工厂默认提供 Java 21 虚拟线程 remote IO。自定义 Store/codec 必须支持并发，业务仍需按驱动容量限制在途请求。
@@ -154,6 +158,8 @@ CacheService / LayeredCacheService
 
 `LocalPlayerService` 默认使用 `MissingPlayerPolicy.REJECT`，仓库未命中返回 `PLAYER_NOT_FOUND`，不自动建档。登录建立会话前查询权威仓库；认证和账号对 UID 的授权仍由业务负责。原型或明确需要自动建档的业务可通过构造函数选择 `CREATE_DEFAULT`。普通加载可以读缓存，删档需同步失效缓存。
 
+登录结果的 `sessionId` 是不透明的精确会话身份。连接断开时，接入层必须使用登录返回的 accountId、uid 和 sessionId 创建 `PlayerLogoutRequest` 并调用 `PlayerService.logout`；迟到连接只能得到 `false`，不会删除之后的替换会话。服务同时拒绝同一 UID 被两个账号会话绑定。logout 先在 session lane 移除匹配绑定，再回投 player lane；该 UID 没有替换会话时才移除在线档案。
+
 保存策略：
 
 - 定时异步落库。
@@ -253,3 +259,21 @@ LayeredCacheService(policy, store, true) 与 RedisDistributedCacheService(name, 
 生产 Redis cache 每秒最多重试 128 个写回项，队列按键合并、满额拒绝并计数，原代际防止 invalidate 后旧值复活。核心 Cache 仍无自建后台线程，手动构造者须装配调度。未版本化 put 先观察 L2 版本，最多 3 次冲突重试；不能覆盖 entity-versioned 值。
 
 完整接入、0.x API 变更与报告误判说明见 [可靠性迁移](migrations/20261001-audit-reliability.zh-CN.md)。
+
+## 2026-10-07 批量 CAS 与准入补充
+
+Mongo `saveIfVersionBatch` 按输入顺序逐项执行 CAS；版本冲突返回 false 且继续后续项，同 ID 的连续版本写保持顺序。为逐项真实结果接受额外往返。Repository `saveAll` 遇到冲突异常完成，但其他项可能已提交；驱动/网络失败也不保证整批未写，重试前须重读核验。分页仍为非事务弱一致。
+
+内存缓存单飞注册和许可准入在同一短临界区完成，loader 在锁外；新 key 满额快速失败。分层缓存同步/异步 L2 失败在写回队列满时均返回 failed CompletionStage，不回填 L1。停机持久化在最终批次失败时退出并保留脏数据，不反复忽略退避重试。迁移及验证见 [全量审计收尾](migrations/20261007-full-code-audit-remediation.zh-CN.md)。
+
+## B4 观察期限、健康恢复与类型映射（2026-10-08）
+
+CachePolicy 新增 `writeTimeout`，默认 3 秒，从 mutate/backfill 准入计时，含排队；超时返回 WRITE_TIMEOUT，实际结果未知。只结束独立观察句柄，已接受写仍可能稍后完成，不取消物理 IO、不释放同键屏障或写入容量。应用不能据此自动重试。条件失效在 L2 成功后删除当前同版/旧版 L1，包括操作期间回填的条目，保护更新版本。
+
+后端成功只能确认其开始时的故障代际，冷却结束、补偿及外部 backlog 清零后可恢复健康；历史失败计数保留。L1 命中、时间流逝或清队列本身不证明恢复。外部写回调用者保存 `markWriteBackFailure()` 的凭据，实际恢复成功后调用 `confirmWriteBackRecovery(ticket)`；旧凭据不覆盖新故障，确认成功不等于整体健康。Redis wrapper 提供相同入口。
+
+组合键 codec/generator 的类型参数沿父类和接口绑定传递，无法解析则 MAPPING_INVALID；不再猜测 String。durable 信封比较覆盖全部元数据（含编码时间）与 payload，不复制 payload 或重编码，也不改存储格式。键级重试隔离、APPLIED 收据占容量、补偿队列满读失败及插入序淘汰策略保留。迁移见 [B4 说明](migrations/20261008-audit-b4.zh-CN.md)。
+
+## 2026-10-08 Player logout 结果修正
+
+精确 account/uid/sessionId 解绑成功后，即使替换登录先于 player lane 清理，logout 仍返回 true；新会话和玩家数据被保留。旧 session 登出仍返回 false，调度失败仍异常完成。独立 `loadPlayer` 仍不要求在线 session，不能把该加载能力当作登录授权。

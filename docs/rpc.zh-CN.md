@@ -1,5 +1,13 @@
 # RPC 设计
 
+## 2026-10-10 运行时恢复边界
+
+Production Kafka RPC 的异步请求/oneway 参与运行时准入，槽位在完成阶段释放；远程故障触发降级，健康探测成功才恢复。请求超时或断连后的发送结果可能未知，不透明重发，既有 pending、至少一次消费与业务幂等要求不变。Production Nacos 注册、查询与订阅参与同一状态监测；订阅句柄关闭仍可在降级时清理。Nacos 公共接口是同步的，监测不负责把调用自动切换到 IO 线程，调用方仍须避免在 Actor/Netty 线程直接执行。
+
+## 2026-10-09 生命周期边界
+
+Kafka RPC 的创建、注册、注销和关闭不再在内部状态锁中执行外部调用，生命周期事务仍以串行队列保持顺序。Nacos 在关闭时以 request timeout 为 SDK 在途操作的等待上限；超时会报告不可用并保留 client，防止关闭仍被调用的资源。详见 [迁移说明](migrations/20261009-audit-round2.zh-CN.md)。
+
 ## 2026-10-05 独占 reply 与成功计数
 
 production `zero.rpc.kafka.reply-topic` 包括显式配置在内，现为实例 topic 前缀：每次 runtime 添加随机 UUID 后缀。Lifecycle 对 request/response 实际重写 replyTopic 为该实例所属 topic，保留 payload、超时、路由及安全签名字段，oneway 保持原样。多个独占 consumer group 不再订阅同一共享 reply topic。部署需准备前缀 ACL、动态 topic provisioning、retention 与清理；直接 `KafkaRpcAdapter` 仍由调用方负责唯一 replyTopic。
@@ -219,3 +227,17 @@ consumer 侧默认调用路径仍由 `RpcClientFactory`、`RpcRoute` 和具体 t
 ## 2026-10-01 Kafka 计时资源接入
 
 `KafkaRpcAdapter` / `KafkaRpcPendingRequests` 构造现在必须显式接收 `ScheduledExecutorService`。生产 Provider 依赖 `RuntimeBasics.EXECUTORS` 并注入 `scheduledExecutor("kafka-rpc")`；时间轮不再创建裸线程。Adapter close 取消自身周期句柄，运行时统一关闭执行器。自定义组合根必须管理相同的关闭顺序；请求超时/完成语义不变。详见 [0.x 迁移](migrations/20261001-audit-reliability.zh-CN.md)。
+
+## Kafka consumer 默认预算（2026-10-07）
+
+`ApacheKafkaRpcMessageGateway` 默认 `max.poll.records=16`、`fetch.max.bytes=33554432`、`max.partition.fetch.bytes=20971520`，应用通过 `KafkaRpcSettings.consumerProperties` 覆盖。fetch 预算是 Kafka 软限制，首个超大 record batch 为保证进展可以越界；poll 记录数不代表堆占用硬上限。部署须同时设置 codec payload、producer、broker/topic 和并发内存预算。配置工厂与覆盖回归不等同真实集群容量测试。
+
+Metadata canonical 编码及本地签名帮助方法已升级，旧签名需重新签发，见 [迁移说明](migrations/20261007-full-code-audit-remediation.zh-CN.md)。
+
+## B4 期限、整包预算与发现缓存（2026-10-08）
+
+Kafka 发送/消费统一按 `timeoutAt <= now` 拒绝，HANDLER_STARTED observer 返回后、进入 handler 前再次检查；超时不能回滚已开始的业务。metadata、verifier、期限和缺失路由拒绝统一记录一次 REQUEST_REJECTED，oneway 不回包。pending 预算精度为毫秒，亚毫秒预算不隐式向上延长。
+
+envelope 编解码增加 32MiB 总量预算，保留 16MiB payload、1MiB 字符串及更严格的安全字段限制，线版本不变。此预算在字段解析前生效，不能阻止 Kafka 已经分配原始 byte[]，fetch 仍是软限制。
+
+Nacos 在途查询只有失效代际未变化时才回填 TTL 缓存，SDK IO 在缓存锁外；事件、注册/注销、健康及生命周期变化会阻止旧查询重新填充。监听失败只保留最近 256 条有序不可变快照，另提供累计/丢弃计数。详见 [B4 迁移](migrations/20261008-audit-b4.zh-CN.md)。

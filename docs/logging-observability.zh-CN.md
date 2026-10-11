@@ -2,6 +2,10 @@
 
 2026-10-11：GameRuntime.healthSnapshot 提供缓存状态的 READINESS，STARTUP 保留为历史。Production Adapter 报告的 runtime/settings 字段提供安全原因码、在途数及有效预算；读取不触发 IO，降级/恢复中不报告就绪。
 
+## 2026-10-07 告警 YAML 导出边界
+
+`PrometheusAlertRuleExporter` 在导出时拒绝 ISO 控制字符、Unicode 行/段分隔符、YAML 禁止的 U+FFFE/U+FFFF 和孤立 UTF-16 代理项，指标和标签键必须是合法 PromQL 标识符。组名、告警名、表达式和摘要均输出带引号的 YAML 字符串；标签值先做 PromQL 转义，再随表达式做 YAML 转义。按码点校验保留合法补充字符（如 emoji）；中文、引号、反斜杠及 `: #` 文本保留原语义。配置含非法 Unicode、换行或非法标识符需修正后重新导出，不能把完整 PromQL 表达式填入 metricName。
+
 ## 2026-10-05 Kafka 成功事件开销
 
 默认 production `KafkaProductionTelemetryObserver` 在创建日志记录前省略 STARTED/SUCCESS，成功调用与 pending 状态由既有 transport snapshot 计数观测。失败、超时、拒绝和降级仍同步进入 LogPipeline，绑定 ErrorCode，不记录业务异常原文或 payload。处理器前后两次安全校验保护不同信任边界，继续保留。
@@ -109,7 +113,7 @@ processor 无法绕过终端复验；附加 `SensitiveFieldPolicy` 只能增加�
 - `MetricSample`：值、标签和值发生时间；标签必须与定义 schema 完全匹配。
 - `MetricRegistry` / `InMemoryMetricRegistry`：定义注册、样本记录和不可变快照。
 - `SystemMetricCollector`：显式采集 JVM 内存、线程、GC、CPU、磁盘和网络接口状态。
-- `PrometheusExporter`：确定性 Prometheus 文本导出；`PrometheusHttpEndpoint`：显式 bind/stop 的 JDK HTTP `/metrics` 与 `/health`，使用外部管理的异步执行器，支持 Bearer token；非回环必须配置 token。TLS 由部署入口提供。
+- `PrometheusExporter`：确定性 Prometheus 文本导出；`PrometheusHttpEndpoint`：显式 bind/stop 的 JDK HTTP `/metrics`、存活 `/health` 与业务就绪 `/ready`，使用外部管理的异步执行器，支持 Bearer token；非回环必须配置 token。TLS 由部署入口提供。
 - `GrafanaDashboardTemplate`：最小 dashboard JSON 模板生成。
 - `AlertRule` / `AlertEvaluator` / `AlertSink`：本地告警评估与落地扩展点。
 - `PrometheusAlertRuleExporter`：Prometheus alert rules YAML 导出。
@@ -183,3 +187,24 @@ mvn -Pbenchmarks -pl :zero-benchmarks -am -DskipTests package
 ## 2026-09-17 报告核实修订
 
 InMemoryMetricRegistry 是本地样本历史，默认保留最近 4096 条，支持配置 sampleCapacity；满时淘汰最早样本并增加 droppedSamples。它不提供生产计数器聚合语义，历史导出仅覆盖保留窗口。
+
+## 存活与业务就绪
+
+PrometheusHttpEndpoint 的 /health 只证明 HTTP 端点存活，不能证明业务可以接流量。新增 /ready：注入的 BooleanSupplier 返回 true 时 200，否则 503；探针抛异常时以稳定 ZERO-MONITOR-SYSTEM-PROBE-FAILED 错误码返回 503。旧构造器未提供探针，/ready 默认 503。三条路径使用相同 Bearer 认证。
+
+应用应把运行时、listener 和所需依赖的检查结果汇总为一个线程安全快照；探针仅读取，不能在 HTTP 请求中连接数据库或阻塞等待。例如在组合根接入应用自己维护的 AtomicBoolean：
+
+~~~java
+AtomicBoolean acceptingTraffic = new AtomicBoolean(false);
+PrometheusHttpEndpoint endpoint = new PrometheusHttpEndpoint(
+        bindAddress, registry, managedHttpExecutor, bearerToken, acceptingTraffic::get);
+// runtime/listener 启动且应用依赖检查通过后设置 true；失联和排空前设为 false。
+~~~
+
+该标记由应用生命周期与既有健康采样更新；框架不会自动替你检查所有依赖。本地模板另通过 LocalGameLifecycle 的就绪文件供开发入口管理，不自动创建上述 HTTP 端点。
+
+## 文本输出边界（2026-10-07）
+
+日志除 C0/DEL/C1 外，还转义 Unicode 行/段分隔符及双向控制符。Prometheus HELP 与 label 共用转义规则，反斜杠、换行及 label 引号按文本格式处理；CR/LF 都变为字面量 `\n`。MetricContract 仍在模型入口拒绝控制字符，输出层转义属于纵深防御。
+
+本地统一入口默认保持单行错误；`ZERO_DEBUG=1` 开启 Java/PowerShell 栈诊断。停止后清理令牌控制文件，保留日志以支持诊断，见 [迁移说明](migrations/20261007-full-code-audit-remediation.zh-CN.md)。

@@ -20,6 +20,100 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 - 真实 Redis 断连/无响应演练修复 Repository 作用域覆盖准入与未知结果错误码的问题，保留跨模块框架 ErrorCode；无需增加数据模块对 runtime 的依赖。
 - `RuntimeModule.value(id, key, value)` 提供 Java 最短显式安装入口，scaffold catalog 示例使用同一模块安装方式。新增的执行器依赖在规划阶段显式校验。限制和验证见 [迁移说明](docs/migrations/20261010-runtime-adapter-recovery.zh-CN.md)。
 
+### 全量审计第二轮复核增量（2026-10-10）
+
+- 修复 World/Ranking 归档水位使用字符串字典序的问题，新增显式单调 `long` 序号契约；日志尾帧读取改为 fail-closed，Actor/Event 执行域配置与热更能力描述同步收紧。
+
+- HTTP 请求/响应期限接入 `ServerOptions`，保留 30 秒默认值；修正迁移退役 ID 语义和磁盘容量指标类型。详见 [复核增量迁移说明](docs/migrations/20261009-audit-round2.zh-CN.md)。
+
+- AOI 等值换引用、KCP 冻结期进度超时和监控标签命名空间已补齐；GM 幂等容量达到上限时继续 fail-closed，未知副作用结果需经业务状态核对后人工收敛。
+- EventRuntime 按共享能力模型声明执行器依赖，并使用受管 backgroundExecutor 派发，避免逻辑执行器上同步等待事件时自等待；Kafka RPC 响应发送增加三次失败终止边界，终止后提交 offset 并产生观测，不提供持久 DLQ。
+
+### 全量审计第二轮收口（2026-10-09）
+
+- Actor handler 超时会隔离对应 lane 并拒绝后续消息，实际异步任务完成前不释放串行许可；运行时生命周期、Nacos SDK 等待和 Kafka 生命周期操作采用有界预算及状态隔离。
+- durable journal 升级到 schema v2，保存重放水位；World 和 Ranking 通过显式确认/归档边界保留幂等收据，拒绝无法安全重放的过期请求。
+- CSV 热重载必须经过显式授权端口；当前仅交付本地 CSV 配置替换，CGLIB 修复、ClassLoader 插件化和集群同步仍未交付。
+- 玩家连接关闭通过 `PlayerConnectionCloseCoordinator` 携带精确 `sessionId` 协调 logout，迟到关闭不会移除替换后的新会话；Windows 输出路径拒绝 Unicode 上标数字形式的 COM/LPT 保留设备名。
+- 保留 `ZeroReader.readPresenceBits(int)` 既有 API。0.x 调整、验证和能力边界见 [迁移说明](docs/migrations/20261009-audit-round2.zh-CN.md)。
+
+### 审计遗漏 F1/F2 修复（2026-10-09）
+
+- 玩家 logout 清理投递失败后保留有界精确身份意图，支持相同请求重试；在途合并、观察者取消隔离，替换登录使旧清理失效。待清理 UID 上限 4096，满额在解绑前以 `ZERO-PLAYER-CLEANUP-CAPACITY-EXCEEDED` 拒绝。
+- Java 生成计划校验类型与包前缀、单元声明与真实导入、不同导入之间的名称冲突；冲突绑定 `DSL_VALIDATION_FAILED`，在写盘前拒绝。合法跨包无引用同名及 `Class` 枚举继续支持。
+- 0.x 调用方调整与验证见 [迁移说明](docs/migrations/20261009-audit-f1-f2.zh-CN.md)。
+
+### 审计复查后续修复（2026-10-08）
+
+- 修正替换登录与 logout 清理交错时的成功结果；Frame 新增可观察、失败可重试的 `closeAsync()`，同步 `close()` 不再把排队清理当成完成。
+- Java 生成模板避免 JDK 类型/注解/异常名称遮蔽，补齐真实 runtime 导入符号冲突校验和生成后编译回归。
+- 架构门禁增加继承/profile 生产图、环检测及审核清单，CI 接入隔离正负夹具；Redis 独立消费者显式接入受管 IO。
+- API 检查改用进程内 javap；消费者脚本支持 Windows 本地编码日志的 ASCII 成功标记读取，保留退出码和新鲜 XML 校验。
+- 0.x 关闭行为及生成命名迁移见[后续修复迁移说明](docs/migrations/20261008-audit-followup.zh-CN.md)。
+
+### 审计 B6 修复（2026-10-08）
+
+- validate 增加只读输出归属预检；类型深度、目标语言名称与可移植路径提前校验，feature 顺序和生成行尾固定。
+- 输出事务 schema 2 区分 PREPARED 回滚与 COMMITTED 清理；四个公开单语言入口统一受管，删除 GeneratedOutputPlan 无参构造。
+- 脚手架首建完整 staging、全量冲突预检、共用工程锁和恢复日志；force 不覆盖不同内容，模板替换只执行一次。
+- 当前版本构件解析、Adapter 新报告覆盖与 CI 模式/退出码门禁加强。迁移及验证边界见 [B6 迁移说明](docs/migrations/20261008-audit-b6.zh-CN.md)。
+
+### 审计 B5 修复（2026-10-08）
+
+- 生命周期状态申请与用户钩子分离，相反过渡快速拒绝；STOPPED 后 close 直接到 CLOSED。维护停止使用可配置预算，执行器按 timer→worker 顺序共享累计关闭预算。
+- Event 增加逆序 `afterPublish` 完成钩子，续调拒绝保留原业务失败和死信；通用重试/幂等仍未实现。
+- World 迁移收据默认最多 4096 条且不淘汰旧收据，共享 scheduler 支持多服务；Scene 缺失移动统一领域错误。Room 创建回调锁外执行，准入有界且 CLOSED 冻结。
+- NPC 修改入口改为 `spawnAsync`、`despawnAsync`、`tickAsync`，与 zone lane 串行；Logic 会话加强连接身份、关闭、容量、属性类型及请求统计原子性。
+- 0.x API 和行为迁移见 [B5 迁移说明](docs/migrations/20261008-audit-b5.zh-CN.md)。
+
+### 审计 B4 修复（2026-10-08）
+
+- TCP 顺序入站增加活动帧与排队帧的计数/字节预算；扩容、启动资源回收、出站预算诊断和连接关闭错误码修正。
+- Kafka handler 前重检期限，统一拒绝观测并限制 envelope 总量；Nacos 缓存填充受失效代际约束，监听失败历史最多保留 256 条。
+- 缓存条件失效处理并发同版回填，写入增加独立观察超时，健康恢复需要成功证据及外部故障凭据；泛型组合键沿继承链解析，耐久信封比较避免重复编码。
+- KCP 响应逐帧等待本地接收，静默接收屏障覆盖 ACK-only、未完整/乱序分片和延迟 FEC；可能保守拒绝迁移。
+- 0.x API、配置和行为迁移见 [`docs/migrations/20261008-audit-b4.zh-CN.md`](docs/migrations/20261008-audit-b4.zh-CN.md)。
+
+### 审计 B3 修复（2026-10-08）
+
+- ownership 迁移拒绝 checkpoint 回退和不完整历史恢复；fenced state 在重放 request receipt 前验证当前 lease。内存 receipt 与 ranking receipt 达到容量后明确拒绝新键，不淘汰仍可重放的历史。
+- `PlayerLoginResult` 增加不透明 `sessionId`，`PlayerService` 增加 `logout(PlayerLogoutRequest)`；本地服务拒绝 UID 双重在线，迟到连接不会解除替换会话。
+- 本地排行榜按 `(uid, idempotencyKey)` 保存精确请求指纹和结果，同键不同请求拒绝；帧同步按活跃参与者保存输入序号水位，重放输入对齐当前帧，提交 trace 由 tick 命令提供。
+- 0.x API 和运行时接入变化见 [`docs/migrations/20261008-audit-b3.zh-CN.md`](docs/migrations/20261008-audit-b3.zh-CN.md)。
+
+### 审计 B0–B2 修复（2026-10-08）
+
+- 完成审计编号建账、重复项归并和历史处置核对；修复 GM 授权默认拒绝、可信双人复核、审计写入确认、代理链来源解析、幂等终态留存和失败可观测性。
+- GM 指纹改为长度前缀 HMAC；风险等级强制审批；拒绝、重放、幂等和审计失败进入统一安全边界记录。
+- `SecurityContext` 改为不可变类并加入本地单调到期预算，防止墙钟回拨复活已过期上下文。
+- GM 响应新增业务提交状态、审计失败和幂等记账失败字段；DSL、权限和诊断输出边界收紧。
+- 0.x 迁移细节见 [`docs/migrations/20261008-audit-b0-b2.zh-CN.md`](docs/migrations/20261008-audit-b0-b2.zh-CN.md)。
+
+### 审计 N1–N9 事实复核（2026-10-07）
+
+- GM 标准入口绑定 DSL 实际目标和请求目标，命令或策略任一要求审批即验证，预演和幂等重放同样受闸门约束。
+- Java/C#/TypeScript/GDScript presence 读取改为显式传入 schema 字段数，仅展开已知位并跳过未知位图；删除无参读取入口，需重新生成协议代码。
+- 内存 ownership 路由过期后仍拒绝 epoch 倒退和同代其他 owner；保留同 owner 同代续租。
+- 告警 YAML 拒绝控制字符及非法 PromQL 标识符，分别处理 PromQL 与 YAML 转义。
+- N9 独立复核补齐 YAML 非法 Unicode 校验：拒绝 U+FFFE/U+FFFF 和孤立 UTF-16 代理项，避免整份规则无法解析；保留合法补充字符（如 emoji）。
+- N1/N2/N5/N8 经源码、契约和针对性测试复核不作为缺陷修复。详见[复核报告](docs/audits/2026-10-06-full-code-audit.zh-CN.md)和[迁移说明](docs/migrations/20261007-audit-n-series.zh-CN.md)。
+
+### 全量审计收尾（2026-10-07）
+
+- 修复共享调度器 Room 实例错路由、Mongo 批量 CAS 逐项结果、缓存单飞准入与失败返回形式、本地进程控制令牌残留。
+- 错误帧使用独立 ERROR 位，HTTP metadata 校验增加超时，KCP 拒绝无法覆盖绑定预算的票据；签名采用无歧义编码与 HMAC，补齐指标及日志转义。
+- 删除不保证唯一性的 hash UID 工厂，要求权威账号映射；World 确定性分片并移除无效枚举，Frame 拆分参与者预算并提供 leave，GM 区分幂等错误状态。
+- 收紧 Kafka 默认 fetch/poll 预算、ownership 时间粒度及 epoch 溢出，统一 Actor 关闭责任与 NPC 领域错误。原审计误判和既有设计约束按证据关闭。
+- 破坏性 API、旧签名失效、无旧 UID 数据兼容和完整验证边界见[迁移说明](docs/migrations/20261007-full-code-audit-remediation.zh-CN.md)。
+
+### 用户流程可靠性修复（2026-10-06）
+
+- local demo 与 TCP 共用异步 BO，业务完成后记录成功/回包，失败保留稳定错误码；本地 TCP 显式使用仅限回环的 unmanaged 工厂，生产工厂策略不变。
+- GM REST 改为严格 JSON；dryRun 必须是显式 boolean，响应增加追踪及安全结果字段，并按错误分类返回 HTTP 状态。
+- run/demo 改为前台示例；serve/status/stop 通过真实 JVM 身份和就绪令牌管理本地长驻进程，等待优雅退出并保留日志。
+- /health 保持存活语义，新增显式注入的 /ready（未接线默认 503）；修正 net-only manifest 对外部中间件的误报。
+- 0.x 行为调整、升级步骤与验证边界见[迁移说明](docs/migrations/20261006-user-flow-reliability.zh-CN.md)。
+
 ### 全仓可靠性复核（2026-10-05）
 
 - 本地告警在 sink 失败后保持可重试；持续满足条件时下次评估重投整条事件。单次 Prometheus 抓取对同名同标签序列按样本时间只输出最新值，同时间戳取后记录；注册表历史保留。

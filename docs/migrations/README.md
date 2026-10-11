@@ -7,6 +7,12 @@
 | 日期 / 主题 | 适用范围 |
 | --- | --- |
 | [2026-10-10 Runtime Adapter 恢复与组件入口](20261010-runtime-adapter-recovery.zh-CN.md) | 五类外部 Adapter 健康、拒绝与未知写结果，以及 Java/catalog 自定义组件入口 |
+| [2026-10-09 审计遗漏 F1/F2](20261009-audit-f1-f2.zh-CN.md) | 玩家清理拒绝后的重试、身份代际及 Java 类型/包/导入校验 |
+| [2026-10-08 审计 B6](20261008-audit-b6.zh-CN.md) | 生成校验、schema 2 恢复、首建事务、当前构件与真实测试覆盖 |
+| [2026-10-08 审计 B5](20261008-audit-b5.zh-CN.md) | 生命周期预算、Event 完成钩子、World 收据、Room 终态、NPC 异步 lane 与 Logic 会话 |
+| [2026-10-07 审计 N1–N9 事实复核](20261007-audit-n-series.zh-CN.md) | GM 目标/审批、四语言 presence 读取 API、内存路由 epoch 和告警 YAML |
+| [2026-10-07 全量代码审计收尾](20261007-full-code-audit-remediation.zh-CN.md) | UID、Room、错误帧、Mongo CAS、缓存、HTTP/KCP、安全签名、GM、Frame/World 及进程清理 |
+| [2026-10-06 用户流程可靠性](20261006-user-flow-reliability.zh-CN.md) | 本地异步/TCP、严格 GM JSON、安全结果、真实 JVM 启停和就绪探针 |
 | [2026-10-05 全仓可靠性复核](20261005-full-reliability-review.zh-CN.md) | 本地告警失败重试、Prometheus 单序列最新样本和 API 门禁解释 |
 | [2026-10-05 数据、同步与 Kafka 性能修复](20261005-performance-issues.zh-CN.md) | 显式 IO executor、批量/分页、连接池、flush 并发、共享摘要、KCP Cipher 和独占 reply topic |
 | [2026-10-04 反馈专项：RPC、网络、数据与边界适配](20261004-feedback-hardening.zh-CN.md) | S1-S3、H1-H10 的确认修复、可配置并发行为、协议限制和未覆盖风险 |
@@ -47,3 +53,5 @@
 | [迁移说明模板](template.zh-CN.md) | 新增破坏性变更时复制并填写 |
 
 迁移说明至少写明变更、影响、验证、回滚和未覆盖风险。具体实现仍以[能力矩阵](../capability-matrix.zh-CN.md)和[兼容门禁](../operations/api-compatibility-gate.zh-CN.md)为准。
+
+- [2026-10-08 复查后续：Frame 关闭、Player、生成器与依赖门禁](20261008-audit-followup.zh-CN.md)。

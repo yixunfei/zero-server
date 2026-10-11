@@ -20,7 +20,7 @@
 | 断线重连窗口 | 由 `create` 的 `reconnectWindowMillis` 指定（示例为 5000 ms） | 窗口内允许原成员重连；窗口外拒绝 |
 | 房间总数 | 当前服务实例按已创建房间管理 | 当前 API 不提供跨实例全局配额；不应据此推导集群容量 |
 | 事件/快照成员 | 快照为不可变成员列表 | 示例输出 room sequence 和成员快照；内存历史仅保留最近 1024 条，持久化由业务事件消费者承担 |
-| 命令积压 | 由 Actor scheduler 的本地调度能力约束 | 不宣称固定吞吐或无界排队；过载行为属于运行时调度边界 |
+| 命令积压 | 创建/内联转交窗口最多暂存 4096 条，转交后由 Actor scheduler 预算约束 | 暂存超限以 SYSTEM_ERROR 异步拒绝；不宣称固定吞吐或生产容量 |
 
 ### 拒绝策略
 
@@ -29,6 +29,8 @@
 - 非 `WAITING` 状态加入、未满足全员 ready 的 start、非 `RUNNING` 状态 settle：拒绝状态变更。
 - 断线重连必须使用原成员且位于时间窗口内；过期请求拒绝。
 - settlement 使用幂等 key：同 key 重放返回相同结果；不同 key 的重复结算拒绝。
+- CLOSED 冻结成员与统计，leave/disconnect/reconnect/ready 拒绝；close 幂等、destroy 删除和相同 settlement 的只读重放保留。
+- CREATED 观察及 scheduler 转交不跨目录锁；创建通知结束后按 FIFO 准入，同 generation 事件保持 CREATED 先行。回调可以异步提交命令，但不得等待自身 lane；通知失败不回滚已提交视图。详见 [B5 迁移](../migrations/20261008-audit-b5.zh-CN.md)。
 - 示例中的快照和事件序列只输出本地内存状态；不声称事件已持久化或已广播。
 
 ### 负载口径
