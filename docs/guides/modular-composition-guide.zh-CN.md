@@ -12,7 +12,7 @@
     <dependency>
       <groupId>group.zn.zero</groupId>
       <artifactId>zero-bom</artifactId>
-      <version>0.1.1</version>
+      <version>0.1.2-SNAPSHOT</version>
       <type>pom</type>
       <scope>import</scope>
     </dependency>
@@ -189,7 +189,7 @@ ScaffoldComponents components = new ScaffoldComponents(
         List.of(ScaffoldComponentDefinition.runtime("bootstrap", ""), customDefinition));
 ```
 
-定义同时携带安装表达式、额外 Maven 坐标和配置样例。目录必须包含 `bootstrap`；重复组件 ID、重复 Provider 或未知 Provider 会在生成前拒绝。标准 CLI 仍只使用内置目录，不会从 classpath 自动发现第三方组件。
+定义同时携带安装表达式、额外 Maven 坐标和配置样例。目录必须包含 `bootstrap`；重复组件 ID、重复 Provider 或未知 Provider 会在生成前拒绝。标准 CLI 可通过 `--catalog` 显式加载扩展目录；不会从 classpath 自动发现第三方组件。
 
 `DataRuntime.REPOSITORY_SOURCES` 提供命名源，`DataRuntime.repositories(Map.of("game", "local"))` 生成显式角色目录，业务从 `DataRuntime.REPOSITORIES` 创建中立 Repository。支持本地、MongoDB、PostgreSQL、Redis 数据实现，详见 [Repository 接入指南](repository-composition-guide.zh-CN.md)。
 
@@ -204,3 +204,9 @@ java scripts/VerifyGeneratedCompositions.java
 生成器同步输出 POM、`RuntimeAssembly.java`、配置样例和所选 provider 清单。七类业务模板的 codegen 只作为构建插件依赖；纯 runtime 模板不引入 codegen。生成验收覆盖 25 个消费者，包括每个公开组件、混合组合、中心 RPC 和分布式基础设施组合。参数与消费路径见[脚手架目录](../scaffold-templates.zh-CN.md)。
 
 生成的 `RuntimeAssembly.diagnose(...)`、`plan(...)` 与 `create(...)` 共享组装定义。runtime 模板可执行 `mvn -q exec:java '-Dexec.args=--diagnose'`，只规划与诊断配置，不创建执行器或客户端；外部组件需要检查报告中的 `missingConfigKeys`，再通过 `--start` 显式启动。默认外部 smoke 也只诊断，缺配置输出 incomplete，齐全输出 ok。迁移方式见[0.x 说明](../migrations/20260914-scenario-composition.md)。
+
+### Redis 同步驱动的受管 IO
+
+`ProductionAssembly.builder(config)` 默认延迟创建受管远程 IO，只有 build 时才登记资源，诊断不创建执行器。需要自定义执行域时可显式传入 `ZeroRuntimeExecutors.remoteIo("redis-consumer")`；调用方在外围 try-with-resources 保障规划失败前的所有权，build 接管后由 runtime 关闭。显式 direct IO 在可判定时由规划阶段拒绝，并返回可操作错误码。独立消费者验证不依赖可用 Redis，也不证明真实 Redis 操作成功。
+
+单值组件带依赖工厂、catalog `bindings` 简写、运行期 READINESS 与独立 Adapter 预算，见[统一配置与目录指南](configuration-and-catalog.zh-CN.md)。构件使用当前 `0.1.2-SNAPSHOT`；首次接入或更新源码后优先用 Runner 准备所选依赖，避免同版本旧 SNAPSHOT 与新生成器混用。

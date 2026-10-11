@@ -26,6 +26,9 @@ import group.zn.zero.runtime.production.ProductionConfigSources;
 import group.zn.zero.runtime.production.ProductionStartupBudget;
 import group.zn.zero.runtime.production.ProductionStartupHealthProbe;
 import group.zn.zero.runtime.production.ResolvedProductionSetting;
+import group.zn.zero.runtime.production.RuntimeAdapterIo;
+import group.zn.zero.runtime.production.RuntimeAdapterSettings;
+import group.zn.zero.runtime.production.RuntimeAdapterMonitoredLifecycle;
 import group.zn.zero.runtime.production.ZeroProductionAdapterState;
 import group.zn.zero.runtime.production.ZeroProductionRuntimeConfigKeys;
 import group.zn.zero.runtime.spi.ComponentContribution;
@@ -63,18 +66,23 @@ final class ProductionMongoDataProvider implements RuntimeComponentProvider {
             .require(RuntimeBasics.EXECUTORS)
             .configSchema(CONFIG_SCHEMA)
             .kind(ComponentKind.EXTERNAL)
-            .health(HealthPhase.STARTUP)
+            .health(HealthPhase.STARTUP).health(HealthPhase.READINESS)
             .build();
     private final ProductionAdapterDiagnostic diagnostic;
     private final ProductionStartupBudget startupBudget;
+    /** 独立于启动窗口的运行预算。 */
+    private final RuntimeAdapterSettings runtimeSettings;
     private final List<ConfigSource> configSources;
 
     private ProductionMongoDataProvider(
             final ProductionAdapterDiagnostic diagnostic,
             final ProductionStartupBudget startupBudget,
+            final RuntimeAdapterSettings runtimeSettings,
             final List<ConfigSource> configSources) {
         this.diagnostic = Objects.requireNonNull(diagnostic, "diagnostic");
         this.startupBudget = Objects.requireNonNull(startupBudget, "startupBudget");
+        this.runtimeSettings = Objects.requireNonNull(runtimeSettings, "runtimeSettings");
+        diagnostic.runtimeSettings(runtimeSettings);
         this.configSources = List.copyOf(Objects.requireNonNull(configSources, "configSources"));
     }
 
@@ -106,6 +114,7 @@ final class ProductionMongoDataProvider implements RuntimeComponentProvider {
                 new ProductionMongoDataProvider(
                         diagnostic,
                         checkedBudget,
+                        RuntimeAdapterSettings.resolve(resolver, "mongo", 10000),
                         ProductionConfigSources.from(ID, settings)));
     }
 
@@ -119,24 +128,26 @@ final class ProductionMongoDataProvider implements RuntimeComponentProvider {
         ComponentCreationContext checked = Objects.requireNonNull(context, "context");
         try {
             var executors = checked.require(RuntimeBasics.EXECUTORS);
-            if (executors.remoteIoMayInline()) {
-                throw new IllegalStateException("mongo repositories require non-inline remote IO execution");
-            }
+            group.zn.zero.runtime.production.RuntimeAdapterIo.requireRemoteIo(diagnostic.adapterName(), executors);
             MongoDriverSettings settings = settings(checked.config());
             MongoDataAdapter createdAdapter = new MongoDataAdapter();
             MongoClient createdClient = checked.resources().register(createdAdapter.createClient(
                     settings,
-                    startupBudget.adapterBudget()));
+                    runtimeSettings.operationTimeout()));
+            RuntimeAdapterIo monitor = RuntimeAdapterIo.create(List.of(diagnostic),
+                    timeout -> MongoStartupProbe.check(settings, timeout),
+                    executors, runtimeSettings);
             diagnostic.mark(ZeroProductionAdapterState.CREATED);
             var repositories = checked.resources().register(createdAdapter.repositoryFactory(
-                    createdClient, settings.databaseName(), executors.remoteIoExecutor()));
+                    createdClient, settings.databaseName(), executors.remoteIoExecutor(), monitor::call));
             return ComponentContribution.builder()
+                    .healthSnapshot(HealthPhase.READINESS, monitor::readiness)
                     .contribute(DataRuntime.DATA_SERVICES, createdAdapter)
                     .contribute(DataRuntime.REPOSITORY_SOURCES, new RepositorySource("mongo", repositories))
                     .lifecycle(new ProductionAdapterLifecycle(
                             diagnostic,
                             startupBudget,
-                            createdAdapter))
+                            new RuntimeAdapterMonitoredLifecycle(createdAdapter, monitor)))
                     .healthProbe(HealthPhase.STARTUP, new ProductionStartupHealthProbe(
                             diagnostic,
                             timeout -> MongoStartupProbe.check(settings, timeout),

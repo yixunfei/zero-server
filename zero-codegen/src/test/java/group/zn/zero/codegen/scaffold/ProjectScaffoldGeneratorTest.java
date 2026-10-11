@@ -56,7 +56,7 @@ class ProjectScaffoldGeneratorTest {
         ProjectScaffoldGenerator.ProjectScaffoldResult result =
                 new ProjectScaffoldGenerator(catalog.capabilityModel()).generate(request);
 
-        assertEquals(12, result.fileCount());
+        assertEquals(15, result.fileCount());
         String pom = Files.readString(output.resolve("pom.xml"), StandardCharsets.UTF_8);
         String manifest = Files.readString(output.resolve("zero-scaffold.json"), StandardCharsets.UTF_8);
         assertFalse(pom.contains("<artifactId>zero-server-starter</artifactId>"));
@@ -68,8 +68,7 @@ class ProjectScaffoldGeneratorTest {
         assertFalse(pom.contains("__"));
         assertFalse(manifest.contains("__"));
         JsonArray files = JsonParser.parseString(manifest).getAsJsonObject().getAsJsonArray("files");
-        assertEquals(12, files.size());
-        assertEquals(files.size(), files.size());
+        assertEquals(result.fileCount(), files.size());
         Set<String> paths = new java.util.HashSet<>();
         files.forEach(value -> paths.add(value.getAsJsonObject().get("path").getAsString()));
         assertEquals(files.size(), paths.size());

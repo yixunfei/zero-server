@@ -223,7 +223,24 @@ final class DefaultGameRuntime implements GameRuntime {
 
     @Override
     public RuntimeHealthSnapshot healthSnapshot() {
-        return tracker.healthSnapshot();
+        RuntimeHealthSnapshot recorded = tracker.healthSnapshot();
+        var health = new java.util.ArrayList<>(recorded.components());
+        for (BuiltComponent component : components) {
+            component.contribution().healthSnapshots().forEach((phase, source) -> {
+                health.removeIf(item -> item.componentId().equals(component.componentId()) && item.phase() == phase);
+                HealthResult result;
+                try {
+                    result = Objects.requireNonNull(source.get(), "health snapshot");
+                } catch (RuntimeException failure) {
+                    result = new HealthResult(HealthStatus.UNHEALTHY, "health-snapshot-failed");
+                }
+                if (recorded.runtimeState() != RuntimeState.RUNNING) {
+                    result = new HealthResult(HealthStatus.UNKNOWN, "runtime-not-running");
+                }
+                health.add(new RuntimeHealthSnapshot.ComponentHealth(component.componentId(), phase, result));
+            });
+        }
+        return new RuntimeHealthSnapshot(recorded.runtimeState(), Instant.now(), health);
     }
 
     private void startComponent(

@@ -81,23 +81,17 @@ public final class RuntimeAdapterResilience {
         lastAttempt.accumulateAndGet(failure.attempt(), Math::max);
         lastDecision = decision;
         if (decision == RuntimeAdapterRecovery.RecoveryDecision.RETRY
-                && failure.attempt() > budget.maxRetry()) {
-            stateMachine.transition(RuntimeAdapterStateMachine.State.FAILED);
-            lastDecision = RuntimeAdapterRecovery.RecoveryDecision.FAIL;
-            return lastDecision;
-        }
-        if (decision == RuntimeAdapterRecovery.RecoveryDecision.RETRY
                 || decision == RuntimeAdapterRecovery.RecoveryDecision.REBUILD) {
             RuntimeAdapterStateMachine.Snapshot current = stateMachine.snapshot();
             if (current.state() == RuntimeAdapterStateMachine.State.READY) {
-                current = stateMachine.transitionIf(
+                stateMachine.transitionIf(
                         RuntimeAdapterStateMachine.State.READY,
                         RuntimeAdapterStateMachine.State.DEGRADED);
             }
-            if (current.state() == RuntimeAdapterStateMachine.State.DEGRADED) {
+            if (current.state() == RuntimeAdapterStateMachine.State.RECOVERING) {
                 stateMachine.transitionIf(
-                        RuntimeAdapterStateMachine.State.DEGRADED,
-                        RuntimeAdapterStateMachine.State.RECOVERING);
+                        RuntimeAdapterStateMachine.State.RECOVERING,
+                        RuntimeAdapterStateMachine.State.DEGRADED);
             }
         } else if (decision == RuntimeAdapterRecovery.RecoveryDecision.DRAIN) {
             stateMachine.transition(RuntimeAdapterStateMachine.State.DRAIN);
@@ -111,6 +105,15 @@ public final class RuntimeAdapterResilience {
         stateMachine.transitionIf(
                 RuntimeAdapterStateMachine.State.RECOVERING,
                 RuntimeAdapterStateMachine.State.READY);
+        lastAttempt.set(0);
+        lastDecision = RuntimeAdapterRecovery.RecoveryDecision.IGNORE;
+    }
+
+    /** Marks a scheduled probe as active without replaying a failed operation. */
+    public synchronized void recovering() {
+        stateMachine.transitionIf(
+                RuntimeAdapterStateMachine.State.DEGRADED,
+                RuntimeAdapterStateMachine.State.RECOVERING);
     }
 
     public synchronized void drain() {

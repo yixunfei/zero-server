@@ -69,7 +69,7 @@ final class ProductionRedisCacheProvider implements RuntimeComponentProvider {
             .startAfter(ProductionRedisDataProvider.ID)
             .configSchema(CONFIG_SCHEMA)
             .kind(ComponentKind.EXTERNAL)
-            .health(HealthPhase.STARTUP)
+            .health(HealthPhase.STARTUP).health(HealthPhase.READINESS)
             .build();
     private final ProductionAdapterDiagnostic diagnostic;
     private final ProductionStartupBudget startupBudget;
@@ -99,15 +99,14 @@ final class ProductionRedisCacheProvider implements RuntimeComponentProvider {
             ProductionRedisResource resource = checked.require(ProductionRedisRuntimeCapabilities.RESOURCE);
             group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors executors =
                     checked.require(group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS);
-            if (executors.remoteIoMayInline()) {
-                throw new IllegalStateException("redis cache requires non-inline remote IO execution");
-            }
+            group.zn.zero.runtime.production.RuntimeAdapterIo.requireRemoteIo(diagnostic.adapterName(), executors);
             RedisDistributedCacheService<Object, Object> cacheService = cacheService(
                     resource.acquire(checked.resources()),
                     checked.config(),
-                    executors.remoteIoExecutor());
+                    executors.remoteIoExecutor(), resource.monitor());
             diagnostic.mark(ZeroProductionAdapterState.CREATED);
             return ComponentContribution.builder()
+                    .healthSnapshot(HealthPhase.READINESS, resource.monitor()::readiness)
                     .bind(CacheRuntime.CACHE_SERVICE, cacheService)
                     .lifecycle(new ProductionAdapterLifecycle(diagnostic, startupBudget,
                             new group.zn.zero.runtime.bootstrap.PeriodicAsyncTask(
@@ -138,11 +137,12 @@ final class ProductionRedisCacheProvider implements RuntimeComponentProvider {
     private RedisDistributedCacheService<Object, Object> cacheService(
             final redis.clients.jedis.RedisClient client,
             final ComponentConfig config,
-            final java.util.concurrent.Executor ioExecutor) {
+            final java.util.concurrent.Executor ioExecutor,
+            final group.zn.zero.runtime.production.RuntimeAdapterIo monitor) {
         return new RedisDistributedCacheService<>(
                 "redis",
                 CachePolicy.defaults(),
-                new RedisCacheStore<>(
+                new group.zn.zero.data.redis.ObservedRedisCacheStore<>(new RedisCacheStore<>(
                         client,
                         config.require(NAMESPACE),
                         config.require(CACHE_NAME),
@@ -151,7 +151,7 @@ final class ProductionRedisCacheProvider implements RuntimeComponentProvider {
                         CacheKeyCodecs.defaults(),
                         valueCodec,
                         new RedisCacheEnvelopeCodec(),
-                        ioExecutor), false, config.require(FAILURE_COOLDOWN));
+                        ioExecutor), monitor::observe), false, config.require(FAILURE_COOLDOWN));
     }
 
     private static ConfigKey<String> sensitiveString(final String logicalName) {

@@ -68,6 +68,27 @@ class RepositoryCatalogTest {
         }
     }
 
+    /** 作用域包装不能把运行时准入等跨模块框架错误降格成通用数据错误。 */
+    @Test
+    void preservesFrameworkFailureCodeThroughRepositoryScope() {
+        var expected = group.zn.zero.core.error.SystemErrorCode.SYSTEM_ERROR;
+        var store = new group.zn.zero.data.envelope.ObservedEnvelopeStore(new InMemoryEnvelopeStore(),
+                new group.zn.zero.data.envelope.ObservedEnvelopeStore.Observer() {
+                    @Override public <T> T call(final boolean write, final java.util.function.Supplier<T> operation) {
+                        throw ZeroException.of(expected);
+                    }
+                });
+        try (var factory = new EnvelopeRepositoryFactory(metadata -> store, Runnable::run)) {
+            var repository = factory.create(BALANCES);
+            var readFailure = assertThrows(CompletionException.class,
+                    () -> repository.findById("player").toCompletableFuture().join());
+            var writeFailure = assertThrows(CompletionException.class,
+                    () -> repository.save(new Balance("player", 0, 10)).toCompletableFuture().join());
+            assertSame(expected, ((ZeroException) readFailure.getCause()).errorCode());
+            assertSame(expected, ((ZeroException) writeFailure.getCause()).errorCode());
+        }
+    }
+
     @Test
     void closedFactoriesInvalidateRetainedRepositoriesAndDoNotLeakStorageFailures() {
         var factory = EnvelopeRepositoryFactory.inMemory(Runnable::run);

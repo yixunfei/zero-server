@@ -148,7 +148,7 @@ public final class ZeroProductionRuntimeConfigKeys {
     public static final String RPC_KAFKA_CLOSE_TIMEOUT_MILLIS = "zero.rpc.kafka.close-timeout-millis";
 
     /** Kafka 运行期客户端 IO 超时，独立于启动健康检查预算。 */
-    public static final String RPC_KAFKA_IO_TIMEOUT_MILLIS = "zero.rpc.kafka.io-timeout-millis";
+    public static final String RPC_KAFKA_IO_TIMEOUT_MILLIS = "zero.adapter.kafka.operation-timeout-millis";
 
     /**
      * MongoDB data 显式启用开关。

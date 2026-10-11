@@ -67,10 +67,12 @@ final class ProductionNacosProviders {
                 false,
                 NacosDiscoveryConfigKeys.SYSTEM_REQUEST_TIMEOUT_MILLIS,
                 NacosDiscoveryConfigKeys.ENV_REQUEST_TIMEOUT_MILLIS);
+        var runtimeSettings = group.zn.zero.runtime.production.RuntimeAdapterSettings.resolve(
+                checkedResolver, "nacos", baseSettings.requestTimeoutMillis());
         NacosDiscoverySettings settings = boundedSettings(
                 baseSettings,
                 requestTimeout,
-                checkedBudget);
+                runtimeSettings.operationTimeout());
         List<ResolvedProductionSetting> typedSettings = new ArrayList<>(required);
         typedSettings.addAll(credentialSettings(checkedResolver));
         typedSettings.add(requestTimeout);
@@ -90,6 +92,7 @@ final class ProductionNacosProviders {
         ProductionNacosDiscoveryProvider discoveryProvider = new ProductionNacosDiscoveryProvider(
                 diagnostic,
                 checkedBudget,
+                runtimeSettings,
                 ProductionConfigSources.from(ProductionNacosDiscoveryProvider.ID, typedSettings),
                 settings);
         return Resolution.enabled(
@@ -189,8 +192,8 @@ final class ProductionNacosProviders {
     private static NacosDiscoverySettings boundedSettings(
             final NacosDiscoverySettings base,
             final ResolvedProductionSetting configuredTimeout,
-            final ProductionStartupBudget startupBudget) {
-        int maximum = boundedMillis(startupBudget.adapterBudget());
+            final Duration operationTimeout) {
+        int maximum = boundedMillis(operationTimeout);
         if (configuredTimeout.present() && base.requestTimeoutMillis() > maximum) {
             throw ProductionAdapterFailures.invalidConfig(
                     ProductionAdapterNames.ADAPTER_NACOS_DISCOVERY,
@@ -206,7 +209,7 @@ final class ProductionNacosProviders {
                 base.secretKey(),
                 base.defaultGroupName(),
                 base.defaultClusterName(),
-                Math.min(base.requestTimeoutMillis(), maximum),
+                configuredTimeout.present() ? base.requestTimeoutMillis() : maximum,
                 base.namingLoadCacheAtStart(),
                 base.healthUpdateMode(),
                 base.extraProperties());

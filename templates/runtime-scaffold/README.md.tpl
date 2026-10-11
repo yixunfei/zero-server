@@ -1,17 +1,19 @@
 # __PROJECT_NAME__
 
+Build with the included Maven Wrapper and JDK 21; no global Maven is required. On PowerShell use `./mvnw.cmd` instead of `./mvnw` and quote `-D...` arguments. Framework artifacts are prepared by the repository Runner; rerun it without `--skipInstall` after changing the framework.
 Selected components: __SELECTED_COMPONENTS__.
 
 ```sh
-mvn -q clean test
-mvn -q exec:java -Dexec.args=--diagnose
-mvn -q exec:java
+./mvnw -q clean test
+./mvnw -q exec:java -Dexec.args=--diagnose
+./mvnw -q exec:java
 ```
 
 Local components start and close without external services. External components default to
 diagnosis only without creating clients; the summary reports `started=false`. To start adapters and run the
 adapter health check, set `ZERO_CONFIG_FILE` to a properties file based on
-`config/application.properties.example`, then run `mvn -q exec:java -Dexec.args=--start`.
+`config/application.properties.example`, then run `./mvnw -q exec:java -Dexec.args=--start`.
+On PowerShell use `./mvnw.cmd -q '-Dexec.args=--start' exec:java`.
 The smoke run does not prove external connectivity or database reads/writes.
 
 `--diagnose` resolves configuration and selection without creating executors or driver clients.
@@ -36,7 +38,7 @@ in `RuntimeAssembly`. [COMPONENTS.md](COMPONENTS.md), [NEXT_STEPS.md](NEXT_STEPS
 
 ## Assembly diagnosis and customization
 
-Run `mvn -q -Dexec.mainClass=__PACKAGE__.RuntimeAssembly exec:java` for a read-only diagnosis.
+Run `./mvnw -q -Dexec.mainClass=__PACKAGE__.RuntimeAssembly exec:java` for a read-only diagnosis.
 This entry point is available for every template and does not start business services or external clients.
 It reports the profile, missing keys, selected providers and schema-declared configuration sources/values.
 Sensitive values are masked; complex values are represented by their type. `productionReady=false`.

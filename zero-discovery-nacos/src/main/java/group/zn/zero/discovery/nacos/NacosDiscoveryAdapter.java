@@ -155,6 +155,16 @@ public final class NacosDiscoveryAdapter extends AbstractLifecycle implements Se
         return settings;
     }
 
+    /** Checks the live SDK connection state without reading the local lookup cache. */
+    public void probeConnection() {
+        withClient(current -> {
+            if (!"UP".equalsIgnoreCase(current.getServerStatus())) {
+                throw ZeroException.of(DiscoveryErrorCode.REGISTRY_UNAVAILABLE);
+            }
+            return null;
+        });
+    }
+
     /**
      * 返回监听器失败快照。
      *

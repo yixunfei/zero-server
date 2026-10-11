@@ -26,6 +26,10 @@ import group.zn.zero.runtime.production.ProductionConfigSources;
 import group.zn.zero.runtime.production.ProductionStartupBudget;
 import group.zn.zero.runtime.production.ProductionStartupHealthProbe;
 import group.zn.zero.runtime.production.ResolvedProductionSetting;
+import group.zn.zero.runtime.production.RuntimeAdapterIo;
+import group.zn.zero.runtime.production.RuntimeAdapterSettings;
+import group.zn.zero.runtime.production.RuntimeAdapterMonitoredLifecycle;
+import group.zn.zero.runtime.production.RuntimeAdapterRemoteFailures;
 import group.zn.zero.runtime.production.ZeroProductionAdapterState;
 import group.zn.zero.runtime.production.ZeroProductionRuntimeConfigKeys;
 import group.zn.zero.runtime.rpc.RpcRuntime;
@@ -80,9 +84,6 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
             ZeroProductionRuntimeConfigKeys.RPC_KAFKA_POLL_TIMEOUT_MILLIS, 100);
     private static final ConfigKey<Integer> CLOSE_TIMEOUT_MILLIS = positiveInteger(
             ZeroProductionRuntimeConfigKeys.RPC_KAFKA_CLOSE_TIMEOUT_MILLIS, 3000);
-    /** 运行期发送/阻塞/API 预算，默认三秒，与启动无关。 */
-    private static final ConfigKey<Integer> IO_TIMEOUT_MILLIS = positiveInteger(
-            ZeroProductionRuntimeConfigKeys.RPC_KAFKA_IO_TIMEOUT_MILLIS, 3000);
     private static final ConfigSchema CONFIG_SCHEMA = ConfigSchema.builder(ID)
             .add(BOOTSTRAP_SERVERS)
             .add(CLIENT_ID)
@@ -92,7 +93,6 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
             .add(PENDING_CAPACITY)
             .add(POLL_TIMEOUT_MILLIS)
             .add(CLOSE_TIMEOUT_MILLIS)
-            .add(IO_TIMEOUT_MILLIS)
             .build();
 
     private final ComponentDescriptor descriptor = ComponentDescriptor.builder(ID)
@@ -102,10 +102,12 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
             .require(group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS)
             .configSchema(CONFIG_SCHEMA)
             .kind(ComponentKind.EXTERNAL)
-            .health(HealthPhase.STARTUP)
+            .health(HealthPhase.STARTUP).health(HealthPhase.READINESS)
             .build();
     private final ProductionAdapterDiagnostic diagnostic;
     private final ProductionStartupBudget startupBudget;
+    /** 独立于启动窗口的运行预算。 */
+    private final RuntimeAdapterSettings runtimeSettings;
     private final Map<String, Object> clientProperties;
     private final List<ConfigSource> configSources;
     /** 请求订阅前安装的应用验证器。 */
@@ -114,11 +116,14 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
     private ProductionKafkaRpcProvider(
             final ProductionAdapterDiagnostic diagnostic,
             final ProductionStartupBudget startupBudget,
+            final RuntimeAdapterSettings runtimeSettings,
             final Map<String, Object> clientProperties,
             final List<ConfigSource> configSources,
             final SecurityMetadataVerifier verifier) {
         this.diagnostic = Objects.requireNonNull(diagnostic, "diagnostic");
         this.startupBudget = Objects.requireNonNull(startupBudget, "startupBudget");
+        this.runtimeSettings = Objects.requireNonNull(runtimeSettings, "runtimeSettings");
+        diagnostic.runtimeSettings(runtimeSettings);
         this.clientProperties = Map.copyOf(Objects.requireNonNull(clientProperties, "clientProperties"));
         this.configSources = List.copyOf(Objects.requireNonNull(configSources, "configSources"));
         this.verifier = Objects.requireNonNull(verifier, "verifier");
@@ -156,6 +161,7 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
         ProductionKafkaRpcProvider provider = new ProductionKafkaRpcProvider(
                 diagnostic,
                 checkedBudget,
+                RuntimeAdapterSettings.resolve(resolver, "kafka", 3000),
                 checkedProperties,
                 ProductionConfigSources.from(ID, typedSettings), verifier);
         return Resolution.enabled(diagnostic, provider);
@@ -191,25 +197,31 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
             RpcTransportObserver observer = new KafkaProductionTelemetryObserver(logAppender);
             group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors executors = checked.require(
                     group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS);
-            if (executors.remoteIoMayInline()) {
-                throw new IllegalStateException("production kafka rpc requires a non-inline remote IO executor");
-            }
+            group.zn.zero.runtime.production.RuntimeAdapterIo.requireRemoteIo(diagnostic.adapterName(), executors);
             KafkaRpcLifecycleAdapter adapter = new KafkaRpcLifecycleAdapter(
                     settings, observer, KafkaRpcAdapterResourceFactory.production(verifier,
                             KafkaRpcConsumerExecution.concurrent(executors.remoteIoExecutor()),
                             executors.scheduledExecutor("kafka-rpc")));
+            KafkaClusterHealthCheck clusterHealth = new KafkaClusterHealthCheck(settings);
+            RuntimeAdapterIo monitor = RuntimeAdapterIo.create(List.of(diagnostic), clusterHealth,
+                    failure -> RuntimeAdapterRemoteFailures.isRemoteIo(failure)
+                            || failure instanceof group.zn.zero.core.error.ZeroException zero
+                            && zero.errorCode() == group.zn.zero.rpc.error.RpcErrorCode.TRANSPORT_UNAVAILABLE,
+                    executors, runtimeSettings);
+            adapter.runtimeMonitor(monitor);
             ProductionStartupHealthProbe healthProbe = new ProductionStartupHealthProbe(
                     diagnostic,
-                    new KafkaClusterHealthCheck(settings),
+                    clusterHealth,
                     startupBudget);
             diagnostic.mark(ZeroProductionAdapterState.CREATED);
             return ComponentContribution.builder()
+                    .healthSnapshot(HealthPhase.READINESS, monitor::readiness)
                     .bind(RpcRuntime.RPC_TRANSPORT, adapter)
                     .bind(RpcRuntime.RPC_HANDLER_REGISTRY, adapter)
                     .lifecycle(new ProductionAdapterLifecycle(
                             diagnostic,
                             startupBudget,
-                            adapter,
+                            new RuntimeAdapterMonitoredLifecycle(adapter, monitor),
                             startupBudget.adapterBudget()))
                     .healthProbe(HealthPhase.STARTUP, healthProbe)
                     .build();
@@ -230,7 +242,7 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
     }
 
     private KafkaRpcSettings settings(final ComponentConfig config) {
-        int ioTimeoutMillis = config.require(IO_TIMEOUT_MILLIS);
+        int ioTimeoutMillis = Math.toIntExact(runtimeSettings.operationTimeout().toMillis());
         Map<String, Object> producerProperties = new LinkedHashMap<>(clientProperties);
         producerProperties.put("request.timeout.ms", ioTimeoutMillis);
         producerProperties.put("max.block.ms", ioTimeoutMillis);
@@ -275,8 +287,6 @@ final class ProductionKafkaRpcProvider implements RuntimeComponentProvider {
                 resolver, ZeroProductionRuntimeConfigKeys.RPC_KAFKA_POLL_TIMEOUT_MILLIS, 100));
         settings.add(optionalPositiveSetting(
                 resolver, ZeroProductionRuntimeConfigKeys.RPC_KAFKA_CLOSE_TIMEOUT_MILLIS, 3000));
-        settings.add(optionalPositiveSetting(
-                resolver, ZeroProductionRuntimeConfigKeys.RPC_KAFKA_IO_TIMEOUT_MILLIS, 3000));
         return List.copyOf(settings);
     }
 

@@ -37,6 +37,20 @@
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/..</directory>
+                <targetPath>scaffold-wrapper</targetPath>
+                <includes>
+                    <include>mvnw</include>
+                    <include>mvnw.cmd</include>
+                    <include>.mvn/wrapper/maven-wrapper.properties</include>
+                </includes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

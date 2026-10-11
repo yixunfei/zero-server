@@ -43,10 +43,10 @@ public interface RuntimeAdapterRecovery {
     static RuntimeAdapterRecovery conservative() {
         return context -> {
             Objects.requireNonNull(context, "context");
-            if (!context.retryable() || !context.writeOutcomeKnown()) {
+            if (!context.retryable()) {
                 return RecoveryDecision.FAIL;
             }
-            return RecoveryDecision.RETRY;
+            return context.writeOutcomeKnown() ? RecoveryDecision.RETRY : RecoveryDecision.REBUILD;
         };
     }
 }

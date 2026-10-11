@@ -1,5 +1,11 @@
 # 数据与缓存设计
 
+2026-10-11：Redis/MongoDB/PostgreSQL 原生运行 IO 使用各自 operation-timeout-millis，不再复用启动超时。Redis data/cache 共享运行预算及 READINESS；恢复快照与未知写结果处理见[统一配置指南](guides/configuration-and-catalog.zh-CN.md)。
+
+## 2026-10-10 运行时远程 IO 恢复
+
+Production Redis 数据与缓存共用 client owner 和健康/准入状态；MongoDB、PostgreSQL 也通过运行时监测驱动 IO。已知连接或超时故障触发降级，周期探测成功后恢复准入；容量拒绝不触发写入。可能已发送的写入返回 `WRITE_OUTCOME_UNKNOWN`，不自动重试，业务需通过版本/请求 ID 或对账确认结果。SQL 完整性约束等确定性错误保留原业务失败，不触发远程故障降级。驱动原生超时仍是实际阻塞上限；Actor/Netty 路径应使用现有受管异步 Repository/Cache 入口，不能直接调用同步驱动接口。
+
 ## 2026-10-05 Repository 与持久化性能
 
 Envelope CRUD 不再持有仓库级同步锁，所有同步 Store IO 交给必填的受管 Executor；保存前在实体所属调用域编码不可变 envelope，查询解码及完成回调可能在 IO 域执行。production 数据 provider 拒绝内联执行器，便利工厂默认提供 Java 21 虚拟线程 remote IO。自定义 Store/codec 必须支持并发，业务仍需按驱动容量限制在途请求。

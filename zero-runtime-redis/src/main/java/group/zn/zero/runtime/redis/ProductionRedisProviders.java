@@ -60,7 +60,7 @@ final class ProductionRedisProviders {
         ProductionRedisResourceProvider resourceProvider = enabledDiagnostics.isEmpty()
                 ? null
                 : new ProductionRedisResourceProvider(
-                        checkedBudget,
+                        group.zn.zero.runtime.production.RuntimeAdapterSettings.resolve(checkedResolver, "redis", 10000),
                         dataProvider != null
                                 ? ProductionAdapterNames.ADAPTER_REDIS_DATA
                                 : ProductionAdapterNames.ADAPTER_REDIS_CACHE,

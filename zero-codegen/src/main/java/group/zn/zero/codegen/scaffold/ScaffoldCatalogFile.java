@@ -41,7 +41,7 @@ public final class ScaffoldCatalogFile {
         }
         try {
             JsonObject root = JsonParser.parseString(Files.readString(path, StandardCharsets.UTF_8)).getAsJsonObject();
-            fields(root, Set.of("schemaVersion", "id", "capabilities", "providers", "components"));
+            fields(root, Set.of("schemaVersion", "id", "capabilities", "providers", "components", "bindings"));
             if (!Integer.toString(SCHEMA_VERSION).equals(root.get("schemaVersion").getAsString())) {
                 throw new IllegalArgumentException("unsupported scaffold catalog schemaVersion");
             }
@@ -53,10 +53,52 @@ public final class ScaffoldCatalogFile {
             array(root, "providers").forEach(value -> model.provider(provider(value.getAsJsonObject())));
             List<ScaffoldComponentDefinition> definitions = new ArrayList<>(ScaffoldComponents.standardDefinitions());
             array(root, "components").forEach(value -> definitions.add(component(value.getAsJsonObject())));
+            array(root, "bindings").forEach(value -> definitions.add(binding(value.getAsJsonObject(), model)));
             return new ScaffoldComponents(id, model.build(), definitions);
         } catch (RuntimeException failure) {
             throw new IllegalArgumentException("invalid scaffold catalog: check schema version, fields, IDs and references");
         }
+    }
+
+    /** 单份绑定声明同时派生能力图与 Java 工厂表达式，不加载应用类。 */
+    private static ScaffoldComponentDefinition binding(final JsonObject value, final RuntimeCapabilityModel.Builder model) {
+        fields(value, Set.of("id", "provider", "key", "type", "factory", "requires", "profiles", "artifacts"));
+        String id = text(value, "id");
+        ComponentId provider = ComponentId.of(text(value, "provider"));
+        String key = text(value, "key");
+        if (!key.matches("[A-Za-z][A-Za-z0-9_.-]*")) {
+            throw new IllegalArgumentException("invalid binding key");
+        }
+        List<String> profiles = value.has("profiles") ? strings(value, "profiles")
+                : List.of("local", "standalone", "external-test", "production");
+        List<String> requires = new ArrayList<>();
+        List<String> requiredKeys = new ArrayList<>();
+        for (JsonElement entry : array(value, "requires")) {
+            JsonObject dependency = entry.getAsJsonObject();
+            fields(dependency, Set.of("key", "type"));
+            requires.add(text(dependency, "key"));
+            requiredKeys.add(bindingKey(dependency));
+        }
+        List<MavenCoordinate> coordinates = value.has("artifacts") ? artifacts(value)
+                : List.of(MavenCoordinate.zero("zero-runtime"));
+        model.capability(new RuntimeCapability(key, BindingCardinality.SINGLE, List.of(), profiles, coordinates));
+        model.provider(new RuntimeProviderCapability(provider, List.of(key), requires, profiles, coordinates));
+        String expression = "group.zn.zero.runtime.assembly.RuntimeModule.component("
+                + "group.zn.zero.runtime.api.ComponentId.of(" + javaString(provider.value()) + "), " + bindingKey(value) + ")"
+                + (requiredKeys.isEmpty() ? "" : ".require(" + String.join(", ", requiredKeys) + ")")
+                + ".create(context -> " + text(value, "factory") + ")";
+        return ScaffoldComponentDefinition.runtime(id, expression, provider);
+    }
+
+    /** 只允许合法 Java 类型名称，能力标识按字符串字面量转义。 */
+    private static String bindingKey(final JsonObject value) {
+        String type = text(value, "type");
+        if (!javax.lang.model.SourceVersion.isName(type)) throw new IllegalArgumentException("invalid binding type");
+        return "group.zn.zero.runtime.api.ComponentKey.single(" + javaString(text(value, "key")) + ", " + type + ".class)";
+    }
+
+    private static String javaString(final String text) {
+        return new com.google.gson.Gson().toJson(text);
     }
 
     private static RuntimeCapability capability(final JsonObject value) {

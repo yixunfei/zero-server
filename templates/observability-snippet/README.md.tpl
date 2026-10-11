@@ -1,5 +1,6 @@
 # 可观测性接入片段
 
+Build with the included Maven Wrapper and JDK 21; no global Maven is required. On PowerShell use `./mvnw.cmd` instead of `./mvnw` and quote `-D...` arguments. Framework artifacts are prepared by the repository Runner; rerun it without `--skipInstall` after changing the framework.
 把 `ObservabilityModule.java` 中的 `{{packageName}}` 替换为业务包名。示例指标名固定使用合法的
 `zero_game_operations_total`；复制到业务项目时，可以按 Prometheus 命名规则替换为项目级低基数名称。
 

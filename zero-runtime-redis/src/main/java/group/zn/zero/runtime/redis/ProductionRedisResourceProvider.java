@@ -9,7 +9,9 @@ import group.zn.zero.runtime.config.ConfigSchema;
 import group.zn.zero.runtime.config.ConfigSource;
 import group.zn.zero.runtime.config.ConfigSourceKind;
 import group.zn.zero.runtime.production.ProductionAdapterDiagnostic;
-import group.zn.zero.runtime.production.ProductionStartupBudget;
+import group.zn.zero.runtime.production.RuntimeAdapterIo;
+import group.zn.zero.runtime.production.RuntimeAdapterSettings;
+import group.zn.zero.runtime.bootstrap.RuntimeBasics;
 import group.zn.zero.runtime.spi.ComponentContribution;
 import group.zn.zero.runtime.spi.ComponentCreationContext;
 import group.zn.zero.runtime.spi.ComponentDescriptor;
@@ -37,20 +39,22 @@ final class ProductionRedisResourceProvider implements RuntimeComponentProvider 
 
     private final ComponentDescriptor descriptor = ComponentDescriptor.builder(ID)
             .provide(ProductionRedisRuntimeCapabilities.RESOURCE)
+            .require(RuntimeBasics.EXECUTORS)
             .configSchema(CONFIG_SCHEMA)
             .kind(ComponentKind.FOUNDATION)
             .build();
-    private final ProductionStartupBudget startupBudget;
+    private final RuntimeAdapterSettings runtimeSettings;
     private final String failureOwner;
     private final List<ProductionAdapterDiagnostic> diagnostics;
     private final List<ConfigSource> configSources;
 
     ProductionRedisResourceProvider(
-            final ProductionStartupBudget startupBudget,
+            final RuntimeAdapterSettings runtimeSettings,
             final String failureOwner,
             final List<ProductionAdapterDiagnostic> diagnostics,
             final List<ConfigSource> configSources) {
-        this.startupBudget = Objects.requireNonNull(startupBudget, "startupBudget");
+        this.runtimeSettings = Objects.requireNonNull(runtimeSettings, "runtimeSettings");
+        diagnostics.forEach(diagnostic -> diagnostic.runtimeSettings(runtimeSettings));
         this.failureOwner = Objects.requireNonNull(failureOwner, "failureOwner");
         this.diagnostics = List.copyOf(Objects.requireNonNull(diagnostics, "diagnostics"));
         this.configSources = List.copyOf(Objects.requireNonNull(configSources, "configSources"));
@@ -66,11 +70,16 @@ final class ProductionRedisResourceProvider implements RuntimeComponentProvider 
         ComponentConfig config = Objects.requireNonNull(context, "context").config();
         ProductionRedisResource resource = new ProductionRedisResource(
                 new RedisDriverSettings(config.require(URI)),
-                startupBudget,
+                runtimeSettings.operationTimeout(),
                 failureOwner,
                 diagnostics);
+        RuntimeAdapterIo monitor = RuntimeAdapterIo.create(diagnostics,
+                timeout -> RedisStartupProbes.data(resource.settings(), timeout),
+                context.require(RuntimeBasics.EXECUTORS), runtimeSettings);
+        resource.monitor(monitor);
         return ComponentContribution.builder()
                 .bind(ProductionRedisRuntimeCapabilities.RESOURCE, resource)
+                .lifecycle(monitor)
                 .build();
     }
 

@@ -6,6 +6,7 @@
 
 | 日期 / 主题 | 适用范围 |
 | --- | --- |
+| [2026-10-10 Runtime Adapter 恢复与组件入口](20261010-runtime-adapter-recovery.zh-CN.md) | 五类外部 Adapter 健康、拒绝与未知写结果，以及 Java/catalog 自定义组件入口 |
 | [2026-10-05 全仓可靠性复核](20261005-full-reliability-review.zh-CN.md) | 本地告警失败重试、Prometheus 单序列最新样本和 API 门禁解释 |
 | [2026-10-05 数据、同步与 Kafka 性能修复](20261005-performance-issues.zh-CN.md) | 显式 IO executor、批量/分页、连接池、flush 并发、共享摘要、KCP Cipher 和独占 reply topic |
 | [2026-10-04 反馈专项：RPC、网络、数据与边界适配](20261004-feedback-hardening.zh-CN.md) | S1-S3、H1-H10 的确认修复、可配置并发行为、协议限制和未覆盖风险 |

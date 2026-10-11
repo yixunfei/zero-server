@@ -3,7 +3,7 @@ package group.zn.zero.starter.production;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import group.zn.zero.core.config.MapZeroConfig;
-import group.zn.zero.discovery.nacos.NacosDiscoveryAdapter;
+import group.zn.zero.discovery.ServiceDiscovery;
 import group.zn.zero.discovery.nacos.NacosDiscoveryConfigKeys;
 import group.zn.zero.rpc.discovery.ServiceDiscoveryRpcServiceResolver;
 import group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys;
@@ -33,7 +33,7 @@ class ProductionNacosProvidersTest {
                 .build();
         try {
             assertInstanceOf(
-                    NacosDiscoveryAdapter.class,
+                    ServiceDiscovery.class,
                     runtime.require(DiscoveryRuntime.SERVICE_DISCOVERY));
             assertInstanceOf(
                     ServiceDiscoveryRpcServiceResolver.class,

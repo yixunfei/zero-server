@@ -42,11 +42,9 @@ public final class NewLocalGame {
             System.exit(1);
             return;
         }
+        // Maven 增量构建同时刷新 runtime API 和 Wrapper，避免复用同版本旧 shaded jar。
+        buildTool(repositoryRoot);
         Path toolJar = locateToolJar(repositoryRoot);
-        if (toolJar == null) {
-            buildTool(repositoryRoot);
-            toolJar = locateToolJar(repositoryRoot);
-        }
         if (toolJar == null) {
             throw new IllegalStateException("zero-codegen shaded jar was not produced");
         }
@@ -101,7 +99,7 @@ public final class NewLocalGame {
     }
 
     private static void buildTool(final Path repositoryRoot) throws IOException, InterruptedException {
-        System.out.println("zero-codegen scaffold tool is not built; packaging it now...");
+        System.out.println("Preparing the scaffold tool from the current checkout...");
         int exitCode = run(List.of(
                 mavenCommand(repositoryRoot),
                 "-q",

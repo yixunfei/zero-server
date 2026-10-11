@@ -3,6 +3,7 @@ package group.zn.zero.data.redis;
 import group.zn.zero.data.adapter.AbstractRepositoryAdapter;
 import group.zn.zero.data.envelope.ZeroDataEntityCodec;
 import group.zn.zero.data.envelope.EnvelopeRepositoryFactory;
+import group.zn.zero.data.envelope.ObservedEnvelopeStore;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeCodec;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeCrudRepository;
 import group.zn.zero.data.mapping.ZeroDataObjectMetadata;
@@ -51,9 +52,18 @@ public final class RedisDataAdapter extends AbstractRepositoryAdapter {
 
     /** Uses the caller's shared Redis client; repository data and cache remain separate contracts. */
     public EnvelopeRepositoryFactory repositoryFactory(final RedisClient client, final Executor ioExecutor) {
+        return repositoryFactory(client, ioExecutor, null);
+    }
+
+    /** Creates a driver repository with optional per-operation observation. */
+    public EnvelopeRepositoryFactory repositoryFactory(final RedisClient client, final Executor ioExecutor,
+            final ObservedEnvelopeStore.Observer observer) {
         Objects.requireNonNull(client, "client");
-        return new EnvelopeRepositoryFactory(metadata -> new RedisDriverEnvelopeStore(
-                metadata.namespace(), metadata.collection(), client, keyStrategy, null), ioExecutor);
+        return new EnvelopeRepositoryFactory(metadata -> {
+            var store = new RedisDriverEnvelopeStore(
+                    metadata.namespace(), metadata.collection(), client, keyStrategy, null);
+            return observer == null ? store : new ObservedEnvelopeStore(store, observer);
+        }, ioExecutor);
     }
 
     /**

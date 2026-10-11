@@ -21,6 +21,19 @@ class RuntimeCompositionTest {
     private static final ComponentKey<String> CONSUMER = ComponentKey.single("test.consumer", String.class);
 
     @Test
+    void valueModuleSelectsAndRequiresItsBinding() {
+        RuntimeComposition composition = RuntimeComposition.builder(RuntimeProfile.local())
+                .install(RuntimeModule.value(ComponentId.of("application.value"), VALUE, "hello"));
+        assertEquals(List.of(ComponentId.of("application.value")),
+                composition.diagnose().components().stream().map(
+                        group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan.ComponentPlan::componentId).toList());
+        try (GameRuntime runtime = composition.build()) {
+            runtime.start();
+            assertEquals("hello", runtime.require(VALUE));
+        }
+    }
+
+    @Test
     void unselectedFactoriesStayDormantAndConsumersReceiveReplacement() {
         AtomicInteger creations = new AtomicInteger();
         var original = RuntimeProviders.create(ComponentDescriptor.builder(ComponentId.of("test.original"))

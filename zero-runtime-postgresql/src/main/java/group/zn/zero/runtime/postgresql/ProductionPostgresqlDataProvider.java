@@ -24,6 +24,9 @@ import group.zn.zero.runtime.production.ProductionConfigSources;
 import group.zn.zero.runtime.production.ProductionStartupBudget;
 import group.zn.zero.runtime.production.ProductionStartupHealthProbe;
 import group.zn.zero.runtime.production.ResolvedProductionSetting;
+import group.zn.zero.runtime.production.RuntimeAdapterIo;
+import group.zn.zero.runtime.production.RuntimeAdapterSettings;
+import group.zn.zero.runtime.production.RuntimeAdapterMonitoredLifecycle;
 import group.zn.zero.runtime.production.ZeroProductionAdapterState;
 import group.zn.zero.runtime.production.ZeroProductionRuntimeConfigKeys;
 import group.zn.zero.runtime.spi.ComponentContribution;
@@ -83,7 +86,7 @@ final class ProductionPostgresqlDataProvider implements RuntimeComponentProvider
             .require(RuntimeBasics.EXECUTORS)
             .configSchema(CONFIG_SCHEMA)
             .kind(ComponentKind.EXTERNAL)
-            .health(HealthPhase.STARTUP)
+            .health(HealthPhase.STARTUP).health(HealthPhase.READINESS)
             .build();
 
     /** 对外脱敏诊断状态。 */
@@ -91,6 +94,8 @@ final class ProductionPostgresqlDataProvider implements RuntimeComponentProvider
 
     /** Production Adapter 共享累计启动预算。 */
     private final ProductionStartupBudget startupBudget;
+    /** 独立于启动窗口的运行预算。 */
+    private final RuntimeAdapterSettings runtimeSettings;
 
     /** 已按 Production 优先级解析的 typed config 来源。 */
     private final List<ConfigSource> configSources;
@@ -104,11 +109,14 @@ final class ProductionPostgresqlDataProvider implements RuntimeComponentProvider
     private ProductionPostgresqlDataProvider(
             final ProductionAdapterDiagnostic diagnostic,
             final ProductionStartupBudget startupBudget,
+            final RuntimeAdapterSettings runtimeSettings,
             final List<ConfigSource> configSources,
             final PostgresqlDriverSettings settings,
             final int maximumConnections) {
         this.diagnostic = Objects.requireNonNull(diagnostic, "diagnostic");
         this.startupBudget = Objects.requireNonNull(startupBudget, "startupBudget");
+        this.runtimeSettings = Objects.requireNonNull(runtimeSettings, "runtimeSettings");
+        diagnostic.runtimeSettings(runtimeSettings);
         this.configSources = List.copyOf(Objects.requireNonNull(configSources, "configSources"));
         this.settings = Objects.requireNonNull(settings, "settings");
         this.maximumConnections = maximumConnections;
@@ -138,6 +146,11 @@ final class ProductionPostgresqlDataProvider implements RuntimeComponentProvider
             return Resolution.disabled(disabledDiagnostic());
         }
         requireNativeTimeoutBudget(checkedBudget);
+        RuntimeAdapterSettings runtimeSettings = RuntimeAdapterSettings.resolve(resolver, "postgresql", 10000);
+        if (runtimeSettings.operationTimeout().compareTo(Duration.ofSeconds(1)) < 0) {
+            throw ProductionAdapterFailures.invalidConfig(ProductionAdapterNames.ADAPTER_POSTGRESQL_DATA,
+                    ProductionAdapterFailurePhase.CONFIG_VALIDATION, "zero.adapter.postgresql.operation-timeout-millis");
+        }
         List<ResolvedProductionSetting> resolvedSettings = settings(resolver);
         ProductionAdapterDiagnostic diagnostic = diagnostic(resolvedSettings);
         if (resolvedSettings.stream().anyMatch(setting -> !setting.present())) {
@@ -149,6 +162,7 @@ final class ProductionPostgresqlDataProvider implements RuntimeComponentProvider
                 new ProductionPostgresqlDataProvider(
                         diagnostic,
                         checkedBudget,
+                        runtimeSettings,
                         ProductionConfigSources.from(ID, resolvedSettings),
                         driverSettings,
                         maximumConnections));
@@ -164,22 +178,24 @@ final class ProductionPostgresqlDataProvider implements RuntimeComponentProvider
         Objects.requireNonNull(context, "context");
         try {
             var executors = context.require(RuntimeBasics.EXECUTORS);
-            if (executors.remoteIoMayInline()) {
-                throw new IllegalStateException("postgresql repositories require non-inline remote IO execution");
-            }
+            group.zn.zero.runtime.production.RuntimeAdapterIo.requireRemoteIo(diagnostic.adapterName(), executors);
             PostgresqlDataAdapter createdAdapter = new PostgresqlDataAdapter();
             diagnostic.mark(ZeroProductionAdapterState.CREATED);
             var pool = context.resources().register(PostgresqlConnectionPool.create(
-                    settings, maximumConnections, startupBudget.adapterBudget()));
+                    settings, maximumConnections, runtimeSettings.operationTimeout()));
+            RuntimeAdapterIo monitor = RuntimeAdapterIo.create(List.of(diagnostic),
+                    timeout -> PostgresqlStartupProbe.check(settings, timeout),
+                    executors, runtimeSettings);
             var repositories = context.resources().register(createdAdapter.repositoryFactory(
-                    pool, settings.tableName(), executors.remoteIoExecutor()));
+                    pool, settings.tableName(), executors.remoteIoExecutor(), monitor::call));
             return ComponentContribution.builder()
+                    .healthSnapshot(HealthPhase.READINESS, monitor::readiness)
                     .contribute(DataRuntime.DATA_SERVICES, createdAdapter)
                     .contribute(DataRuntime.REPOSITORY_SOURCES, new RepositorySource("postgresql", repositories))
                     .lifecycle(new ProductionAdapterLifecycle(
                             diagnostic,
                             startupBudget,
-                            createdAdapter))
+                            new RuntimeAdapterMonitoredLifecycle(createdAdapter, monitor)))
                     .healthProbe(HealthPhase.STARTUP, new ProductionStartupHealthProbe(
                             diagnostic,
                             timeout -> PostgresqlStartupProbe.check(settings, timeout),

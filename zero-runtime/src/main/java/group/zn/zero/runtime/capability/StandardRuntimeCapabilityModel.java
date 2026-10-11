@@ -178,7 +178,7 @@ public final class StandardRuntimeCapabilityModel {
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_NACOS_DISCOVERY,
                 List.of(SERVICE_DISCOVERY),
-                List.of(),
+                List.of(EXECUTORS),
                 EXTERNAL_PROFILES,
                 List.of(MavenCoordinate.zero("zero-runtime-nacos"))));
         model.provider(new RuntimeProviderCapability(
@@ -202,7 +202,7 @@ public final class StandardRuntimeCapabilityModel {
         model.provider(new RuntimeProviderCapability(
                 PRODUCTION_REDIS_RESOURCE,
                 List.of(REDIS_RESOURCE),
-                List.of(),
+                List.of(EXECUTORS),
                 EXTERNAL_PROFILES,
                 List.of(MavenCoordinate.zero("zero-runtime-redis"))));
         model.provider(new RuntimeProviderCapability(

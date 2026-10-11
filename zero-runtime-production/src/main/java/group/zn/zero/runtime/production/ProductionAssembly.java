@@ -23,6 +23,7 @@ import java.util.Set;
 /** Lightweight production composition with explicit integration modules and no driver dependencies. */
 public final class ProductionAssembly {
     private final ZeroConfig config;
+    /** 显式执行器；为空时在 build 中延迟创建受管 IO。 */
     private final ZeroRuntimeExecutors executors;
     private final String profile;
     private final List<ProductionModuleFactory> factories = new ArrayList<>();
@@ -31,16 +32,21 @@ public final class ProductionAssembly {
     private Function<String, String> systemProperties = System::getProperty;
     private Function<String, String> environment = System::getenv;
     private boolean consumed;
+    /** 自定义 base 的执行器只能在创建时校验，不在规划阶段执行其工厂。 */
+    private boolean customBase;
 
     private ProductionAssembly(final String profile, final ZeroConfig config, final ZeroRuntimeExecutors executors) {
         this.profile = Objects.requireNonNull(profile, "profile");
         this.config = ProductionProfiles.merge(profile, config);
-        this.executors = Objects.requireNonNull(executors, "executors");
-        base = RuntimeBasics.module(this.config, executors);
+        this.executors = executors;
+        base = executors == null
+                ? RuntimeBasics.module(this.config, () -> ZeroRuntimeExecutors.remoteIo("zero-production"))
+                : RuntimeBasics.module(this.config, executors);
     }
 
+    /** 创建默认 production 组合器；诊断无资源副作用，build 延迟创建并拥有远程 IO 执行器。 */
     public static ProductionAssembly builder(final ZeroConfig config) {
-        return builder(ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION, config, ZeroRuntimeExecutors.direct());
+        return new ProductionAssembly(ZeroProductionRuntimeConfigKeys.MODE_PRODUCTION, config, null);
     }
 
     /**
@@ -52,17 +58,18 @@ public final class ProductionAssembly {
      * @throws NullPointerException 档位或配置为空时抛出。
      */
     public static ProductionAssembly builder(final String profile, final ZeroConfig config) {
-        return builder(profile, config, ZeroRuntimeExecutors.direct());
+        return new ProductionAssembly(profile, config, null);
     }
 
     public static ProductionAssembly builder(
             final String profile, final ZeroConfig config, final ZeroRuntimeExecutors executors) {
-        return new ProductionAssembly(profile, config, executors);
+        return new ProductionAssembly(profile, config, Objects.requireNonNull(executors, "executors"));
     }
 
     public ProductionAssembly base(final RuntimeModule module) {
         mutable();
         base = Objects.requireNonNull(module, "module");
+        customBase = true;
         return this;
     }
 
@@ -164,9 +171,13 @@ public final class ProductionAssembly {
             ProductionConfigResolver resolver = new ProductionConfigResolver(config, systemProperties, environment);
             ProductionStartupBudget budget = budget(resolver);
             ProductionContext context = new ProductionContext(
-                    config, resolver, budget, executors, systemProperties, environment);
+                    config, resolver, budget, systemProperties, environment);
             List<ProductionModule> modules = factories.stream().map(factory -> factory.resolve(context)).toList();
             validateSingleSelections(modules);
+            if (!customBase && executors != null && modules.stream().flatMap(module -> module.providers().stream())
+                    .anyMatch(provider -> provider.descriptor().requires().contains(RuntimeBasics.EXECUTORS))) {
+                RuntimeAdapterIo.requireRemoteIo("production-runtime", executors);
+            }
             List<ProductionAdapterDiagnostic> diagnostics = modules.stream()
                     .flatMap(module -> module.diagnostics().stream()).toList();
             return new Resolved(modules, diagnostics, budget);

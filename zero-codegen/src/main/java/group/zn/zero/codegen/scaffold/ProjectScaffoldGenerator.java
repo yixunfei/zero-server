@@ -234,6 +234,7 @@ public final class ProjectScaffoldGenerator {
             result.add(new FileMapping(template.protocolTemplate(), template.protocolOutput()));
             result.add(new FileMapping("protoId.txt.tpl", "src/main/protocol/protoId.txt"));
         }
+        ScaffoldWrapper.FILES.forEach(path -> result.add(new FileMapping("<wrapper>/" + path, path)));
         return List.copyOf(result);
     }
 
@@ -249,6 +250,11 @@ public final class ProjectScaffoldGenerator {
             final Path targetRoot,
             final FileMapping mapping,
             final Map<String, String> values) throws IOException {
+        if (mapping.template().startsWith("<wrapper>/")) {
+            write(targetRoot, mapping.output(), ScaffoldWrapper.read(mapping.output()));
+            if (mapping.output().equals("mvnw")) ScaffoldWrapper.executable(targetRoot.resolve(mapping.output()));
+            return;
+        }
         Path template = sourceRoot.resolve(mapping.template()).normalize();
         Path output = targetRoot.resolve(mapping.output()).normalize();
         if (!template.startsWith(sourceRoot) || !output.startsWith(targetRoot)) {
