@@ -6,6 +6,12 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 项目验收与异步 Adapter 准入修复（2026-10-11）
+
+- Adapter 异步操作在通知完成回调前释放 in-flight 配额；回调立即发起下一次调用不再被误判为容量耗尽。修复分类异常时结果可能悬挂的问题。
+- 独立 Redis 消费者示例的 direct IO 负例改为显式注入 direct 执行器，匹配默认 builder 按需创建受管 IO 的当前契约。
+- 行为与验证边界见 [迁移说明](docs/migrations/20261011-project-review.zh-CN.md)。
+
 ### GitHub Actions 验收修复（2026-10-11）
 
 - 同步已合并的 Netty/Jedis 升级依赖清单；统一入口验证 Maven Wrapper 的版本与下载文件一致性，避免重复固定历史版本。
