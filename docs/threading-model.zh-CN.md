@@ -2,6 +2,10 @@
 
 2026-10-11：ProductionAssembly 默认在 build 时延迟创建受管 remote IO，诊断不创建执行资源；显式 direct IO 对真实 Adapter 返回 REMOTE_IO_EXECUTOR_REQUIRED。自定义 base 的执行器工厂保留延迟校验。各 Adapter 原生运行超时与启动预算分离，见[统一配置指南](guides/configuration-and-catalog.zh-CN.md)。
 
+## 2026-10-09 超时隔离与停止预算
+
+Actor handler 的异步执行由受管定时器观测。超时会隔离 lane 并拒绝后续消息，底层任务真实完成前保持原有串行许可，禁止通过强行释放许可恢复吞吐。运行时 start/probe/stop/close 共享单调截止预算；超时资源保持隔离，迟到完成不改变失败结论。Nacos SDK 和 Kafka 生命周期的外部调用不持有状态锁，仍按各自预算与串行关闭顺序处理。详见 [迁移说明](migrations/20261009-audit-round2.zh-CN.md)。
+
 ## 2026-10-05 同步驱动 IO 与 flush 并发
 
 Envelope Repository 不持有全方法同步锁，实际 Store IO 提交到必填的受管 executor。保存实体和复合 ID 在所属调用域编码快照；解码和 completion 可能在 IO 域运行，写 Actor 状态必须回投。自定义 Store/codec 需要可并发使用，不能依赖 Repository 锁保护共享状态。
@@ -18,7 +22,13 @@ TCP replay 判定在连接内按到达顺序推进，避免异步完成顺序改
 
 ## 2026-10-04 帧同步容量边界
 
-帧对局仍由单 match lane 串行修改权威状态。`MissingInputPolicy.MARK` 消费玩家最后一条待处理输入后立即释放其参与者槽位；`EMPTY` 同样释放，`REPEAT_LAST` 则为后续缺失帧保留历史输入和参与者槽位。非 `REPEAT_LAST` 策略不维护上一输入的逐帧副本。容量按仍需保留的玩家及输入计算，迁移和复核证据见[说明](migrations/20261004-frame-sync-capacity.zh-CN.md)。
+帧对局仍由单 match lane 串行修改权威状态。`MissingInputPolicy.MARK` 与 `EMPTY` 消费最后一条待处理输入后移除该玩家的帧遍历条目；`REPEAT_LAST` 为后续缺失帧保留历史输入。非 `REPEAT_LAST` 策略不维护上一输入的逐帧副本。B3 增加会话序号水位后，三种策略都按尚未 leave 的水位条目计入 `maxParticipants`，只有 leave 才释放会话容量；不能以消费输入释放幂等保护。此前容量调整见[历史说明](migrations/20261004-frame-sync-capacity.zh-CN.md)。
+
+## 2026-10-08 玩家会话与帧断线边界
+
+`LocalPlayerService` 在一个短临界区同时维护 accountId 和 UID 的会话绑定，避免同一 UID 被并发登录到不同账号。登录返回的不透明 `sessionId` 必须在断线时回传给 `logout`；session lane 只删除仍匹配该身份的绑定，随后以消息进入 player lane 清理无会话的在线档案。不得在 session 临界区内直接修改 player map。
+
+帧输入的最高 `inputSeq` 在活跃参与者生命周期内仅由 match lane 维护，重复或旧序号不重新入队。传输/房间层在玩家离开或连接关闭时必须调用 `FrameMatchRuntime.leave(uid)`，由 match lane 释放 pending、last input 和序号水位；框架不以猜测性超时擅自改变参与者生命周期。`tick(traceId)` 的 trace 属于帧推进命令，不能从玩家输入借用。
 
 ## 2026-10-03 异步与关闭边界
 
@@ -220,6 +230,29 @@ LocalRankingService 的状态写入仍由服务锁保护，事件和指标回调
 
 World 所有实体修改/迁移入口使用 CompletionStage，同实体在 lane 串行。状态锁只保护内存提交，事件及 metrics 锁外调用；回调仍不得等待同 lane 的后续消息。Room 发布不可变查询视图。Player 的自定义后端和 UID 解析通过显式受管远程 IO Executor 发起，异步后续 IO 也派发回该域。
 
-`ZeroRuntimeExecutors.scheduledExecutor(role)` 只供组合根按稳定职责获取计时器，统一关闭。Kafka 时间轮注入该资源，Adapter 只取消自己的 tick。`PeriodicAsyncTask` 仅计时、单次在途，实际工作派发到非内联 remote IO 域；stop 先取消后等待最多 30 秒。生产 Redis 写回和耐久重放使用该生命周期。
+`ZeroRuntimeExecutors.scheduledExecutor(role)` 只供组合根按稳定职责获取计时器，统一关闭。Kafka 时间轮注入该资源，Adapter 只取消自己的 tick。`PeriodicAsyncTask` 仅计时、单次在途，实际工作派发到非内联 remote IO 域；stop 先取消后按执行器 closeTimeout 等待，默认 3 秒。生产 Redis 写回和耐久重放使用该生命周期。
 
 耐久提交在绑定域捕获后进入串行 IO 链；Actor/Netty 不得同步等待刷盘 future。关闭在管理线程进行，必须先关闭维护任务及服务、后关闭 Store/Executor。详细边界见 [迁移说明](migrations/20261001-audit-reliability.zh-CN.md)。
+
+## 启动与共享调度器契约（2026-10-07）
+
+`GameRuntime.start()` 在控制线程同步执行，健康探针最多等待配置预算，不应从 Netty EventLoop 或 Actor lane 调用。Actor lifecycle 与资源账本共享一次物理关闭责任，成功关闭后不重复调用。
+
+Room 共享 scheduler 时只安装一次无实例状态的处理器，消息显式绑定服务实例。HTTP metadata verifier 必须及时返回 CompletionStage，服务器使用独立截止时间（默认 3 秒）处理永不完成及晚到结果。细节与迁移见 [审计收尾](migrations/20261007-full-code-audit-remediation.zh-CN.md)。
+
+## B4 异步物理屏障（2026-10-08）
+
+TCP 顺序入站预算包含活动 handler 与未完成响应，队列与回收由所属 EventLoop 管理。KCP 响应以 trampoline 逐帧等待本地 send 阶段，busy 保留至批次结束；执行器、handler、listener 和 respond 均在调度锁外调用。接收元数据与 KCP 算法同属一个 EventLoop，不新增线程或跨机器状态。
+
+CacheKeyOperations 使用 JDK CompletableFuture 延迟设施完成独立观察超时，不创建线程池；已准入写入的物理完成屏障和预算保持至真实完成。完成链采用 trampoline，用户回调仍不应阻塞完成线程。Nacos 缓存短锁仅保护代际/内存，不包围 SDK IO。详见 [B4 迁移](migrations/20261008-audit-b4.zh-CN.md)。
+
+## B5 生命周期与业务 lane（2026-10-08）
+
+AbstractLifecycle 用短锁申请状态，doStart/doStop 锁外执行；相反过渡快速拒绝，同向请求幂等，beforeStartRequest 仍在状态锁内。runtime 控制编排保持串行，健康探针不得依赖启动控制线程推进。自有执行器先停止并等待 timer，预算耗尽后请求中断，再停止 worker；所有等待共享单调累计预算。忽略中断的回调/驱动不能安全强杀。
+
+Room 创建回调及 scheduler 转交锁外执行，创建屏障暂存最多 4096 条命令；CREATED 完成后按 FIFO 转交，旧代命令仍受 generation 拒绝。NPC 的 spawnAsync/despawnAsync/tickAsync 在 ZoneActor.laneKey 串行，与同 zone 其他消息排序；短状态锁不跨 adapter 或通知，回调提交修改在当前命令后执行，不得等待自身 lane。Logic 请求统计在同会话属性锁内组合提交；updater 不能阻塞、递归修改或跨容器/manager 构造锁环。详见 [B5 迁移](migrations/20261008-audit-b5.zh-CN.md)。
+
+
+## 2026-10-08 Frame 异步关闭
+
+FrameMatchRuntime 的清理始终在 match lane；使用 `closeAsync()` 观察完成/失败，失败可重试，不能在当前 lane 阻塞等待。共享 ActorScheduler 在全部对局清理完成后再关闭；同步 `close()` 仅在清理已完成时正常返回。见[迁移说明](migrations/20261008-audit-followup.zh-CN.md)。

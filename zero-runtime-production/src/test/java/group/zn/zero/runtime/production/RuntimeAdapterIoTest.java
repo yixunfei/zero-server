@@ -65,6 +65,20 @@ class RuntimeAdapterIoTest {
         }
     }
 
+    @Test void asyncCompletionReleasesAdmissionBeforeNotifyingCallers() {
+        try (ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.remoteIo("adapter-test")) {
+            RuntimeAdapterIo monitor = monitor(executors);
+            CompletableFuture<String> pending = new CompletableFuture<>();
+            var chained = monitor.observe(false, () -> pending)
+                    .thenApply(value -> monitor.call(false, () -> value + "-next"));
+
+            pending.complete("first");
+
+            assertEquals("first-next", chained.toCompletableFuture().join());
+            assertEquals(0, monitor.snapshot().inFlight());
+        }
+    }
+
     @Test void asyncRemoteFailurePreservesReadFailureCode() {
         try (ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.remoteIo("adapter-test")) {
             RuntimeAdapterIo monitor = monitor(executors);
@@ -76,6 +90,25 @@ class RuntimeAdapterIoTest {
             assertEquals(ProductionAdapterErrorCode.REMOTE_IO_FAILED,
                     ((ProductionAdapterException) failure.getCause()).errorCode());
             assertEquals(RuntimeAdapterStateMachine.State.DEGRADED, monitor.snapshot().state());
+        }
+    }
+
+    @Test void asyncClassificationFailureCompletesResultAndReleasesAdmission() {
+        try (ZeroRuntimeExecutors executors = ZeroRuntimeExecutors.remoteIo("adapter-test")) {
+            ProductionAdapterDiagnostic diagnostic = new ProductionAdapterDiagnostic("test.adapter",
+                    ZeroProductionAdapterState.CREATED, List.of(), List.of(), List.of(), List.of(), List.of());
+            RuntimeAdapterIo monitor = new RuntimeAdapterIo(diagnostic, timeout -> { },
+                    failure -> { throw new IllegalStateException("classification failed"); },
+                    executors, BUDGET, Duration.ofHours(1));
+            CompletableFuture<String> pending = new CompletableFuture<>();
+            var result = monitor.observe(false, () -> pending);
+
+            pending.completeExceptionally(new IOException("connection lost"));
+
+            CompletionException failure = assertThrows(CompletionException.class,
+                    () -> result.toCompletableFuture().join());
+            assertEquals("classification failed", failure.getCause().getMessage());
+            assertEquals(0, monitor.snapshot().inFlight());
         }
     }
 

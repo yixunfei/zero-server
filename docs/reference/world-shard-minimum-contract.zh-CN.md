@@ -14,9 +14,11 @@
 
 - 单 JVM、内存状态。
 - 两个 shard、单实体迁移流程。
-- 每个实体只有一个 owner shard；迁移记录以 `migrationId` 有界保存。
-- `routeEpoch` 和 `stateVersion` 使用单调值进行旧路由 fencing。
+- 每个实体只有一个 owner shard；迁移记录以 `migrationId` 有界保存，默认全部状态共用 4096 条，可配置正容量；不自动淘汰终态收据。新 ID 满时在冻结前拒绝，已准入推进/回滚/精确重放继续；容量耗尽需集成方轮换生命周期或另选持久实现。
+- `createWorld(World, shards)` 接受非零初始 `routeEpoch`，迁移验证当前静态 epoch 和 `stateVersion`；没有在线换代、拓扑重建或跨进程 fencing。
 - 迁移阶段为 source lock → target prepare → target commit → source release；prepare 失败恢复 source owner。
+
+多个服务可共享 scheduler，无状态 handler 由命令显式路由到所属服务，不捕获实例。删除未使用的 REQUESTED/HANDOFF_SENT 枚举；外部消费者必须更新并重编译。通知与 metrics 锁外执行，不回滚已提交状态。详见 [B5 迁移](../migrations/20261008-audit-b5.zh-CN.md)。
 
 超出范围的实体、迁移队列、持久化、跨进程 handoff、RPC 超时恢复、跨服广播、AOI stitching、再平衡、吞吐、延迟、SLA、长稳和生产容量均未证明。模块不创建线程池或远程 IO；事件和 metrics 仅为通知 SPI，不能替代可靠迁移日志或灾备流程。
 

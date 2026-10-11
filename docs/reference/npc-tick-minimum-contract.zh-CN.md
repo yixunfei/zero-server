@@ -12,13 +12,15 @@
 
 ### 范围
 
-`examples/npc-tick` 是独立 Maven 示例，使用正式 `zero-npc` 模块的本地 `LocalNpcZone` API。该示例不连接外部服务，不声明生产模块能力。
+`examples/npc-tick` 是独立 Maven 示例，实际使用示例私有 `LocalNpcTickApi`；生成模板使用 NpcStore。它们不是正式 `LocalNpcZone` 消费者，其 smoke 证据不证明正式 zone lane。该示例不连接外部服务，不声明生产模块能力。
+
+正式 `LocalNpcZone` 使用 `spawnAsync/despawnAsync/tickAsync` 返回 CompletionStage，全部修改与 `ZoneActor.laneKey()` 的其他 Actor 消息串行。查询是线程安全的不可变快照；adapter/event/audit/metrics 在短状态锁外执行，仍需短时非阻塞。回调中的修改排队在当前命令后，不能等待同 lane；通知失败不回滚，普通决策异常与 sink 异常分别归因，Error 终止本 tick 并保留指标。零预算不调用 adapter；时间预算不能强杀一次阻塞决策。正式 API 边界由模块测试验证，0.x 同步入口已删除，迁移见 [B5 说明](../migrations/20261008-audit-b5.zh-CN.md)。
 
 示例固定使用：
 
 | 项目 | 值 | 含义 |
 | --- | ---: | --- |
-| maxNpcsPerZone=4|maxNpcStepsPerTick=2 |
+| `maxNpcsPerZone` | 4 | 示例私有 API 的数量上限，不是正式 LocalNpcZone 默认配额 |
 | `maxNpcStepsPerTick` | 2 | 每次示例 tick 最多处理的 NPC step 数 |
 | tick 次数 | 2 | smoke run 的固定推进次数 |
 | 输出模式 | `local` | 单 JVM、本地内存 |

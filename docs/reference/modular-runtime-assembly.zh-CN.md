@@ -4,6 +4,8 @@
 
 已有共享值可用 `RuntimeModule.value(ComponentId.of("application.greeting"), ComponentKey.single("sample.greeting", String.class), "hello")` 安装；它不接管该值的关闭责任。新建单值对象优先使用上面的延迟工厂；catalog 的 `bindings` 从一份声明派生同一工厂、能力和 Provider 元数据，见 `examples/scaffold-catalog/greeting.catalog.json`。多值或复杂外部组件仍可使用 `RuntimeModule.of(...)` 和显式 Provider；规划阶段按能力模型检查缺失依赖，外部 Adapter 需要受管 `zero.executors`。
 
+2026-10-08 B5：runtime 为 single-use，缺配置 diagnosis 的 Optional.empty 表示未规划；Lifecycle.state 是 runtimeState 的有损投影。成功 stop 后 close 直接到 CLOSED，失败清理按账本重试。组件钩子锁外执行，相反状态请求快速拒绝，但上层控制编排仍串行。RuntimeDeadline 注入时钟须单调；健康探针及时返回 stage 且不得依赖启动线程推进。生产生命周期保留启动根诊断，显式 diagnostic.fail 可替换，mark 非 FAILED 清空旧错误；配置 blank 优先级、来源 origin 与键 reloadability 契约保留。具体行为、预算和验证边界见 [B5 迁移](../migrations/20261008-audit-b5.zh-CN.md)。
+
 > 状态：阶段 1 切片 1B、1C、1D 已完成代码收敛，最终全仓验收记录见任务档案
 
 > 按需装配第一批已完成：独立集成层、延迟创建和四种精简消费者已通过 full 15/15；新接入方式及能力键迁移见[按需装配指南](../guides/modular-composition-guide.zh-CN.md)。

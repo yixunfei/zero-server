@@ -56,7 +56,7 @@ Runner 检查环境、刷新生成器、生成 `target/generated/my-game`、安�
 | --- | --- |
 | `BUSINESS_GUIDE.md` | 第一个业务修改示例和运行步骤 |
 | `src/main/protocol/*.si` | 请求、响应、事件方法；不要复用已有协议 ID |
-| 手写 BO（local 模板为 `LocalGameBO.java`） | 业务实现；玩家/场景状态修改投递到所属 Actor；先按业务指南区分 demo fixture 和独立异步适配器 |
+| 手写 BO（local 模板为 `LocalGameBO.java`） | 业务实现；玩家/场景状态修改投递到所属 Actor；demo 与 TCP 共用 LocalGameBO / LocalGameFlow，入口等待真实业务完成阶段 |
 | `COMPONENTS.md`、`zero-scaffold.json` | 已选组件和生成清单 |
 
 选择空白内核和组件时，使用同一个入口：
@@ -77,7 +77,7 @@ Windows PowerShell 将 `./mvnw` 替换为 `./mvnw.cmd`；`NewLocalGame`、Runner
 
 TCP 示例监听本机临时端口，执行 Socket → Netty → 生成 BO → 响应后退出。
 
-`local + net` 会生成 Server/客户端辅助类。生成的 `RuntimeAssembly` 使用拒绝握手的占位策略及框架内置有界限流，启用所选网络生命周期 provider；应用必须显式接入握手、鉴权和安全链。独立 Server 示例用于本地 loopback 回显，不能视为生产安全接线。真实 TCP 收发也可以使用上面的 `rpg-tcp-generated` 示例。
+`local + net` 会生成 Server/客户端辅助类。生成的 `RuntimeAssembly` 使用拒绝握手的占位策略及框架内置有界限流，启用所选网络生命周期 provider；应用必须显式接入握手、鉴权和安全链。独立 Server 显式使用 tcpUnmanaged，仅接受字面量 127.0.0.1 / ::1；它在业务完成后回显，失败返回稳定错误码。该本地入口不使用占位握手策略，不能视为生产安全接线。真实 TCP 收发也可以使用上面的 `rpg-tcp-generated` 示例。
 
 ```bash
 java scripts/NewLocalGame.java --template local --components net --projectName tcp-demo --packageName group.example.tcpdemo --outputDir target/tcp-demo
@@ -152,7 +152,10 @@ POSIX 使用 `scripts/zero.sh`，PowerShell 使用 `.\scripts\zero.ps1`：
 | `generate --template runtime --projectName my-runtime` | 生成工程 |
 | `diagnose --projectDir DIR` | 检查工程结构；runtime 模板的组件诊断直接用 Maven `--diagnose` |
 | `test --projectDir DIR` | 测试生成工程 |
-| `run --projectDir DIR` / `stop` | 启动并记录受管进程、停止该进程；不会让一次性示例自动变成长驻服务 |
+| run / demo --projectDir DIR | 前台执行一次示例，完成后退出，失败返回非零 |
+| serve --projectDir DIR | 构建后直接启动 local + net 的 Server JVM，等待真实就绪 |
+| status | 核对 PID、启动时间和就绪令牌，报告 idle / exited / not-ready / ready |
+| stop | 请求优雅关闭并等待退出；超时才强制终止，结果含 forced 标记 |
 
 本地测试用 `./mvnw -B -ntp test`。需要验证框架改动时用 `java scripts/ZeroStage0Acceptance.java --level quick` 或 `--level full`，层级和范围见 [Stage 0 验收](operations/local-stage0-acceptance.zh-CN.md)。所有可运行示例集中在[示例索引](../examples/README.md)。
 
@@ -167,3 +170,11 @@ POSIX 使用 `scripts/zero.sh`，PowerShell 使用 `.\scripts\zero.ps1`：
 | 想部署正式服务 | 按[能力矩阵](capability-matrix.zh-CN.md)核对安全、恢复、持久化和容量缺口，再参考[部署基线](operations/deployment-baseline.zh-CN.md) |
 
 后续查阅从[文档总览](README.md)进入；已有项目升级参见[迁移说明](migrations/README.md)。
+
+## 本地进程入口的状态和迁移
+
+run 不再后台启动 Maven。长驻 local + net 使用 serve，默认主类为 POM 的 exec.mainClass 加 Server，也可用 --mainClass 指定实现同一控制文件契约的入口。serve 默认等 30 秒就绪、stop 默认等 15 秒关闭；--timeoutSeconds 可设为 1..60。首次构建另有 180 秒预算。Server 默认端口 6200；ZERO_NET_PORT=0 可分配临时端口，明确的 --host/--port 优先于外部配置。
+
+ZERO_STATE_DIR 默认是仓库 target/zero-entry；每次运行保存独立目录中的日志，实际 JVM 的 PID、启动时间和令牌用于关联就绪状态。不同项目使用不同绝对状态目录。进程子命令的相对路径按仓库根目录解释，自动化建议传绝对路径。status 的退出码 0 表示检查成功，自动化应解析 zero-status 值，不能把 idle/exited 当作 ready。终止后日志保留，重复 stop 安全返回 idle。
+
+旧 server.pid/server.meta 不再读取。升级前先使用旧脚本停止旧实例，确认端口释放，再使用新入口。详见[迁移说明](migrations/20261006-user-flow-reliability.zh-CN.md)。

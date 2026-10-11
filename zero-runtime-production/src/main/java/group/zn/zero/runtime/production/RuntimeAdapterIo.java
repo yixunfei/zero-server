@@ -122,12 +122,16 @@ public final class RuntimeAdapterIo extends AbstractLifecycle {
             CompletionStage<T> stage = Objects.requireNonNull(operation.get(), "operation stage");
             CompletableFuture<T> result = new CompletableFuture<>();
             stage.whenComplete((value, failure) -> {
+                Throwable outcomeFailure = null;
                 try {
-                    if (failure == null) result.complete(value);
-                    else result.completeExceptionally(classify(unwrap(failure), write));
+                    if (failure != null) outcomeFailure = classify(unwrap(failure), write);
+                } catch (Throwable classificationFailure) {
+                    outcomeFailure = classificationFailure;
                 } finally {
                     releaseOnce(released);
                 }
+                if (outcomeFailure == null) result.complete(value);
+                else result.completeExceptionally(outcomeFailure);
             });
             return result;
         } catch (RuntimeException failure) {

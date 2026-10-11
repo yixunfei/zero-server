@@ -140,3 +140,11 @@ kcp.fallbackToTcp(tcpConnection, conv).thenCompose(ignored ->
 ## 多场景接入与新验证
 
 受管 Java 客户端、五场景独立 main 示例、固定种子弱网矩阵、FEC/保护/路径/恢复竞态及引用计数测试见[场景指南](../guides/kcp-scenarios.zh-CN.md)与[高级传输迁移](../migrations/20260928-kcp-advanced-transport.md)。
+
+## B4 响应与静默接收屏障（2026-10-08）
+
+响应批次逐帧等待本地算法接收，首失败停止后续提交，busy 和活动入站预算保留到批次结束；不把本地 send 成功当作远端 ACK。
+
+冻结/静默后任何包都不能触发业务 drain，包括 ACK-only。只有已投递水位之前可证明已处理的旧 PUSH 重传允许回 ACK；新/未投递 PUSH（含延迟 FEC 恢复）立即以 INVALID_MESSAGE 关闭源会话，固定原因 receive.quiescent_push。没有 unfreeze 契约。
+
+接收账本仅保留 sequence/frg/length，最多 2*receiveWindow 段；真实 mergeRecv 前核验连续分片与长度，完成后才推进水位。未完整或乱序段使 drained=false，不允许迁移提交，可能保守超时失败；不快照业务 payload。格式与算法版本不变。详见 [B4 迁移](../migrations/20261008-audit-b4.zh-CN.md)。

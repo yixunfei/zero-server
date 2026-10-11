@@ -9,6 +9,7 @@ import group.zn.zero.core.config.MapZeroConfig;
 import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
 import group.zn.zero.runtime.data.DataRuntime;
 import group.zn.zero.runtime.production.ProductionAdapterException;
+import group.zn.zero.runtime.production.ProductionAdapterErrorCode;
 import group.zn.zero.runtime.production.ProductionAssembly;
 import group.zn.zero.runtime.redis.RedisRuntime;
 import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
@@ -45,10 +46,13 @@ class RedisConsumerTest {
 
     /** 同步驱动不得在默认 direct IO 执行域运行。 */
     @Test void directIoIsRejected() {
-        var assembly = ProductionAssembly.builder(new MapZeroConfig(Map.of(
-                "zero.adapter.data.redis.enabled", "true", "zero.redis.uri", "redis://127.0.0.1:1")))
-                .configSourceLookups(key -> null, key -> null).install(RedisRuntime.module());
-        assertThrows(ProductionAdapterException.class, assembly::build);
+        try (var direct = ZeroRuntimeExecutors.direct()) {
+            var assembly = ProductionAssembly.builder("production", new MapZeroConfig(Map.of(
+                    "zero.adapter.data.redis.enabled", "true", "zero.redis.uri", "redis://127.0.0.1:1")), direct)
+                    .configSourceLookups(key -> null, key -> null).install(RedisRuntime.module());
+            assertEquals(ProductionAdapterErrorCode.REMOTE_IO_EXECUTOR_REQUIRED,
+                    assertThrows(ProductionAdapterException.class, assembly::build).errorCode());
+        }
     }
 
     /** 装配尚未接管执行器时的失败由调用方作用域回收。 */

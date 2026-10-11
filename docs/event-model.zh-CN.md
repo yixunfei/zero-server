@@ -88,6 +88,10 @@ PlayerQueryPlayerEventBOImp
 - 处理器异常会绑定 `ErrorCode` 后写入 `DeadLetterSink`。
 - 本地实现不创建线程池，默认在调用线程中串行推进。
 
+B5（2026-10-08）新增 `afterPublish(event, failure)` 默认完成钩子：仅对本次进入 before 的拦截器（含拒绝/抛错者）逆序调用，实际 handler 完成后执行，全部清理完成才结束 publish。清理异常与死信接收器异常聚合，原外部异常不被修改；执行域续调拒绝保留原业务失败、记录死信并终结发布。钩子可能在完成线程执行，必须短时非阻塞，不得等待当前 publish，也不保证与 before 同线程的 MDC 恢复。
+
+上述能力清单是设计目标。当前总线没有通用自动重试或持久幂等实现，不能重放整条已有副作用的 handler 链。当前顺序保证只覆盖一次 publish 的处理器链，跨 publish 全局/玩家顺序应由 Actor 或调用方编排。迁移见 [B5 说明](migrations/20261008-audit-b5.zh-CN.md)。
+
 ## 6. 顺序保证
 
 顺序保证至少支持：
