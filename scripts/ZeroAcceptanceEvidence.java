@@ -401,11 +401,14 @@ public final class ZeroAcceptanceEvidence {
         runSetup(root, options.maven(), blocked);
         Path application = blocked.resolve("src/main/java/group/zn/blocked/BlockedApplication.java");
         Files.writeString(application, Files.readString(application, StandardCharsets.UTF_8) + "\n// user modification\n", StandardCharsets.UTF_8);
+        // 与正式入口使用同一个完整工具包，覆盖 Gson/模板引擎等运行时依赖。
+        String toolClasspath = root.resolve("zero-codegen/target/zero-codegen-" + reactorVersion() + "-all.jar").toString();
+        if (!Files.isRegularFile(Path.of(toolClasspath))) throw new IOException("standalone codegen jar missing: " + toolClasspath);
         List<CliCase> cases = List.of(
                 new CliCase("exit-0-success", List.of("java", "scripts/NewLocalGame.java", "--listTemplates"), 0, ""),
-                new CliCase("exit-1-generation-failure", List.of("java", "-cp", String.join(java.io.File.pathSeparator, "zero-codegen/target/classes", "zero-runtime/target/classes"), "group.zn.zero.codegen.scaffold.ProjectScaffoldCli", "--template", "does-not-exist", "--templateRoot", root.resolve("templates").toAbsolutePath().toString()), 1, "SCAFFOLD-GENERATION-FAILED"),
-                new CliCase("exit-2-invalid-arguments", List.of("java", "-cp", "zero-codegen/target/classes", "group.zn.zero.codegen.scaffold.ProjectScaffoldCli", "--unknown-option"), 2, "SCAFFOLD-INVALID-ARGUMENT"),
-                new CliCase("exit-3-plan-blocked", List.of("java", "-cp", String.join(java.io.File.pathSeparator, "zero-codegen/target/classes", "zero-runtime/target/classes"), "group.zn.zero.codegen.scaffold.ProjectScaffoldCli", "--plan", "--template", "local", "--templateRoot", root.resolve("templates").toAbsolutePath().toString(), "--projectName", "blocked", "--packageName", "group.zn.blocked", "--outputDir", directory.resolve("blocked-project").toAbsolutePath().toString()), 3, "SCAFFOLD-PLAN-BLOCKED"));
+                new CliCase("exit-1-generation-failure", List.of("java", "-cp", toolClasspath, "group.zn.zero.codegen.scaffold.ProjectScaffoldCli", "--template", "does-not-exist", "--templateRoot", root.resolve("templates").toAbsolutePath().toString()), 1, "SCAFFOLD-GENERATION-FAILED"),
+                new CliCase("exit-2-invalid-arguments", List.of("java", "-cp", toolClasspath, "group.zn.zero.codegen.scaffold.ProjectScaffoldCli", "--unknown-option"), 2, "SCAFFOLD-INVALID-ARGUMENT"),
+                new CliCase("exit-3-plan-blocked", List.of("java", "-cp", toolClasspath, "group.zn.zero.codegen.scaffold.ProjectScaffoldCli", "--plan", "--template", "local", "--templateRoot", root.resolve("templates").toAbsolutePath().toString(), "--projectName", "blocked", "--packageName", "group.zn.blocked", "--outputDir", directory.resolve("blocked-project").toAbsolutePath().toString()), 3, "SCAFFOLD-PLAN-BLOCKED"));
         boolean all = true;
         for (CliCase current : cases) {
             CliCaseResult result = runCliCase(root, directory, current);

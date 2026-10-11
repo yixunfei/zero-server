@@ -15,12 +15,13 @@ import group.zn.zero.runtime.event.EventRuntime;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
+/** 验证独立事件/Actor 组合的执行器依赖与事件分发。 @author zn */
 class EventActorConsumerTest {
     @Test
     void publishesAnEventToAnActorWithoutTheStarterOrNetworking() {
         var planned = RuntimeBasics.builder().install(EventRuntime.module())
                 .install(ActorRuntime.module()).diagnose();
-        // 本组合的 REQUIRED 闭包恰为两条边：dead-letter -> event-bus，executors -> actor。
+        // 事件总线和 Actor 均依赖受管执行器，事件总线还依赖死信存储。
         var required = planned.edges().stream()
                 .filter(edge -> edge.kind()
                         == group.zn.zero.runtime.diagnostics.RuntimeAssemblyPlan.DependencyEdgeKind.REQUIRED)
@@ -29,7 +30,8 @@ class EventActorConsumerTest {
                 .toList();
         assertEquals(java.util.List.of(
                 "zero.local.dead-letter->zero.local.event-bus",
-                "zero.local.executors->zero.local.actor"), required);
+                "zero.local.executors->zero.local.actor",
+                "zero.local.executors->zero.local.event-bus"), required);
         AtomicInteger handled = new AtomicInteger();
         try (GameRuntime runtime = RuntimeBasics.builder().install(EventRuntime.module())
                 .install(ActorRuntime.module()).build()) {

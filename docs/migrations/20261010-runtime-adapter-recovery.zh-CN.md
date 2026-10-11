@@ -22,3 +22,5 @@
 验证证据（Windows、JDK 21）：`mvnw.cmd -q -pl zero-server-starter-production,zero-codegen -am -Pquality,integration-tests -Dit.test=RedisRuntimeRecoveryExternalIT -Dfailsafe.failIfNoSpecifiedTests=false -Dzero.external.tests=true -Dzero.redis.uri=redis://127.0.0.1:16389/0 verify` 退出码 0，Redis 真实故障集成测试 1 项通过。最小 runtime、greeting catalog、Redis runtime 生成工程的统一 `RunLocalScaffold` 测试与运行通过；带 config 依赖的 catalog 工厂及 local 模板跳过测试后的编译运行也通过。`ZeroUnifiedEntryVerifier` 的 Windows 静态验证通过。`ZeroArchitectureGuard` 因既有 Jedis 8.0.0→8.0.1、Netty 4.2.17→4.2.18 依赖清单漂移退出 1，模块边界检查通过；未调整该基线。
 
 本地详细日志和过程记录在 `tasks/active/20261010-runtime-adapter-recovery/VERIFY.md`（任务目录按仓库规则不纳入版本控制）。真实故障演练仍仅覆盖 Redis；其他四类服务、Nacos 同步调用线程隔离、集群切换及高并发容量不能据此视为已完成验收。
+
+合并主分支验证（2026-10-11）：在主分支 CI 修复提交 `d780529` 与本变更 `8a71169` 的合并结果上，重新执行上述 Maven quality/integration-tests 命令，退出码 0；真实 Redis 故障用例 1 项，失败、错误和跳过均为 0。`java scripts/ZeroArchitectureGuard.java` 退出码 0（61 个模块、22 条规则、0 违规）；`java scripts/ZeroUnifiedEntryVerifier.java` 的 Windows 静态检查退出码 0。前述依赖清单漂移由主分支 CI 修复纠正，此次合并未再出现。

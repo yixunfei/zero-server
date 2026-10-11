@@ -30,7 +30,12 @@ public final class ZeroUnifiedEntryVerifier {
         require(Files.isRegularFile(root.resolve("scripts/zero.sh")), "scripts/zero.sh exists");
         require(Files.isRegularFile(root.resolve("scripts/zero.ps1")), "scripts/zero.ps1 exists");
         String wrapperProperties = Files.readString(root.resolve(".mvn/wrapper/maven-wrapper.properties"), StandardCharsets.UTF_8);
-        require(wrapperProperties.contains("apache-maven/3.9.16"), "wrapper pins Maven 3.9.16");
+        var wrapper = new java.util.Properties();
+        wrapper.load(new java.io.StringReader(wrapperProperties));
+        require(wrapper.getProperty("distributionUrl", "").matches(
+                "https://repo\\.maven\\.apache\\.org/maven2/org/apache/maven/apache-maven/"
+                        + "(3\\.9\\.\\d+)/apache-maven-\\1-bin\\.zip"),
+                "wrapper pins a consistent Maven 3.9.x distribution from Maven Central");
         String shell = Files.readString(root.resolve("scripts/zero.sh"), StandardCharsets.UTF_8);
         String powershell = Files.readString(root.resolve("scripts/zero.ps1"), StandardCharsets.UTF_8);
         for (String command : List.of("doctor", "init", "generate", "test", "diagnose", "run", "demo", "serve", "status", "stop")) {

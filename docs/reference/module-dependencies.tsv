@@ -34,7 +34,7 @@ edge	zero-data-postgresql/pom.xml	org.postgresql:postgresql:42.7.13	compile	fals
 edge	zero-data-redis/pom.xml	group.zn.zero:zero-cache:0.1.2-SNAPSHOT	compile	false	jar		zero-data-redis/pom.xml#default
 edge	zero-data-redis/pom.xml	group.zn.zero:zero-data:0.1.2-SNAPSHOT	compile	false	jar		zero-data-redis/pom.xml#default
 edge	zero-data-redis/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
-edge	zero-data-redis/pom.xml	redis.clients:jedis:8.0.0	compile	false	jar		zero-data-redis/pom.xml#default
+edge	zero-data-redis/pom.xml	redis.clients:jedis:8.0.1	compile	false	jar		zero-data-redis/pom.xml#default
 edge	zero-data/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-data/pom.xml#default
 edge	zero-data/pom.xml	group.zn.zero:zero-protocol:0.1.2-SNAPSHOT	compile	false	jar		zero-data/pom.xml#default
 edge	zero-data/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
@@ -79,7 +79,7 @@ edge	zero-monitor/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	j
 edge	zero-monitor/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
 edge	zero-net-kcp-redis/pom.xml	group.zn.zero:zero-net-kcp:0.1.2-SNAPSHOT	compile	false	jar		zero-net-kcp-redis/pom.xml#default
 edge	zero-net-kcp-redis/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
-edge	zero-net-kcp-redis/pom.xml	redis.clients:jedis:8.0.0	compile	false	jar		zero-net-kcp-redis/pom.xml#default
+edge	zero-net-kcp-redis/pom.xml	redis.clients:jedis:8.0.1	compile	false	jar		zero-net-kcp-redis/pom.xml#default
 edge	zero-net-kcp/pom.xml	com.github.l42111996:kcp-base:1.6.2	compile	false	jar		zero-net-kcp/pom.xml#default
 edge	zero-net-kcp/pom.xml	group.zn.zero:zero-net:0.1.2-SNAPSHOT	compile	false	jar		zero-net-kcp/pom.xml#default
 edge	zero-net-kcp/pom.xml	org.bouncycastle:bcpkix-jdk18on:1.80	test	false	jar		zero-net-kcp/pom.xml#default
@@ -89,13 +89,13 @@ edge	zero-net/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		
 edge	zero-net/pom.xml	group.zn.zero:zero-event:0.1.2-SNAPSHOT	compile	false	jar		zero-net/pom.xml#default
 edge	zero-net/pom.xml	group.zn.zero:zero-protocol:0.1.2-SNAPSHOT	compile	false	jar		zero-net/pom.xml#default
 edge	zero-net/pom.xml	group.zn.zero:zero-security:0.1.2-SNAPSHOT	compile	false	jar		zero-net/pom.xml#default
-edge	zero-net/pom.xml	io.netty:netty-codec-http:4.2.17.Final	compile	false	jar		zero-net/pom.xml#default
-edge	zero-net/pom.xml	io.netty:netty-codec:4.2.17.Final	compile	false	jar		zero-net/pom.xml#default
-edge	zero-net/pom.xml	io.netty:netty-handler:4.2.17.Final	compile	false	jar		zero-net/pom.xml#default
-edge	zero-net/pom.xml	io.netty:netty-transport-classes-epoll:4.2.17.Final	compile	false	jar		zero-net/pom.xml#default
-edge	zero-net/pom.xml	io.netty:netty-transport-native-epoll:4.2.17.Final	runtime	false	jar	linux-aarch_64	zero-net/pom.xml#linux-native
-edge	zero-net/pom.xml	io.netty:netty-transport-native-epoll:4.2.17.Final	runtime	false	jar	linux-x86_64	zero-net/pom.xml#linux-native
-edge	zero-net/pom.xml	io.netty:netty-transport:4.2.17.Final	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	io.netty:netty-codec-http:4.2.18.Final	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	io.netty:netty-codec:4.2.18.Final	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	io.netty:netty-handler:4.2.18.Final	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	io.netty:netty-transport-classes-epoll:4.2.18.Final	compile	false	jar		zero-net/pom.xml#default
+edge	zero-net/pom.xml	io.netty:netty-transport-native-epoll:4.2.18.Final	runtime	false	jar	linux-aarch_64	zero-net/pom.xml#linux-native
+edge	zero-net/pom.xml	io.netty:netty-transport-native-epoll:4.2.18.Final	runtime	false	jar	linux-x86_64	zero-net/pom.xml#linux-native
+edge	zero-net/pom.xml	io.netty:netty-transport:4.2.18.Final	compile	false	jar		zero-net/pom.xml#default
 edge	zero-net/pom.xml	org.bouncycastle:bcpkix-jdk18on:1.80	test	false	jar		zero-net/pom.xml#default
 edge	zero-net/pom.xml	org.bouncycastle:bcprov-jdk18on:1.80	test	false	jar		zero-net/pom.xml#default
 edge	zero-net/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default

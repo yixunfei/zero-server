@@ -6,6 +6,7 @@
 
 | 日期 / 主题 | 适用范围 |
 | --- | --- |
+| [2026-10-11 GitHub Actions 验收修复](20261011-ci-actions-repair.zh-CN.md) | 依赖清单、Wrapper 版本检查、示例和 CLI 验收类路径、macOS 测试临时目录 |
 | [2026-10-10 Runtime Adapter 恢复与组件入口](20261010-runtime-adapter-recovery.zh-CN.md) | 五类外部 Adapter 健康、拒绝与未知写结果，以及 Java/catalog 自定义组件入口 |
 | [2026-10-09 审计遗漏 F1/F2](20261009-audit-f1-f2.zh-CN.md) | 玩家清理拒绝后的重试、身份代际及 Java 类型/包/导入校验 |
 | [2026-10-08 审计 B6](20261008-audit-b6.zh-CN.md) | 生成校验、schema 2 恢复、首建事务、当前构件与真实测试覆盖 |

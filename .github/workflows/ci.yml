@@ -215,6 +215,11 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+      - name: Use a real temporary directory on macOS
+        if: runner.os == 'macOS'
+        run: |
+          # macOS /var aliases /private/var; scaffold transactions intentionally reject symlink ancestors.
+          echo "JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=$(cd "$RUNNER_TEMP" && pwd -P)" >> "$GITHUB_ENV"
       - name: Run platform transaction gate
         shell: bash
         run: |
