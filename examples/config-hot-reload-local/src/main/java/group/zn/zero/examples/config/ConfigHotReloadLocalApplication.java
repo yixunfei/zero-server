@@ -109,6 +109,11 @@ public final class ConfigHotReloadLocalApplication {
         LocalConfigHotReloadService service = ZeroConfigHotReloadFactory
                 .configure(builder, config, builder.logAppender(), executors)
                 .orElseThrow();
+        // 仅授权本进程示例对 items 表的手动请求；真实应用应接入可信身份与权限端口。
+        service.authorizer((tableName, request, automatic) -> !automatic
+                && "items".equals(tableName)
+                && "config:items".equals(request.type())
+                && "example-local".equals(request.operator()));
         ConfigTable<Integer, ItemConfig> table = service.register(ConfigTableDefinition.of(
                 "items",
                 source,

@@ -9,6 +9,7 @@
 - `center-logic-kafka` 示例的 `zero.version` 改为当前 `0.1.2-SNAPSHOT`，使用本地安装的对应 BOM。事件/Actor 示例增加当前事件总线所需的受管执行器依赖断言。
 - CLI 退出码矩阵通过当前 reactor 的 `zero-codegen-*-all.jar` 启动正式 CLI，保留成功、生成失败、参数错误、计划冲突的 `0/1/2/3` 退出码与错误标记检查。
 - macOS 平台事务作业通过 `JAVA_TOOL_OPTIONS` 将 Java 临时目录设为 runner 临时目录的物理路径，避开 `/var -> /private/var` 系统别名。脚手架拒绝符号链接祖先的安全策略继续生效。
+- 完整 Stage 0 后续检查发现配置热重载示例遗漏现有授权接口装配。示例在启动前仅授权本进程 `example-local` 操作者对 `items` 表的手动请求，不授权 watcher；真实应用应接入可信身份与权限端口，不能把请求中的 operator 字段当作身份认证。框架默认拒绝策略和公共 API 不变。
 
 ## 验证证据
 
