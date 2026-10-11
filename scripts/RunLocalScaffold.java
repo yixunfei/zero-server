@@ -82,13 +82,17 @@ public final class RunLocalScaffold {
         boolean tested = false;
         boolean ran = false;
         if (!options.skipTests()) {
-            runCommand(List.of(mavenCommand(), "-q", "-f", projectDir.resolve("pom.xml").toString(), "clean", "test"));
+            runCommand(List.of(mavenCommand(projectDir), "-q", "-f",
+                    projectDir.resolve("pom.xml").toString(), "clean", "test"));
             tested = true;
+        } else if (!options.skipRun()) {
+            runCommand(List.of(mavenCommand(projectDir), "-q", "-f",
+                    projectDir.resolve("pom.xml").toString(), "compile"));
         }
 
         if (!options.skipRun()) {
             CommandResult runResult = runCommand(List.of(
-                    mavenCommand(),
+                    mavenCommand(projectDir),
                     "-q",
                     "-f",
                     projectDir.resolve("pom.xml").toString(),
@@ -140,13 +144,12 @@ public final class RunLocalScaffold {
         return Path.of(System.getProperty("java.home"), "bin", binary).toString();
     }
 
-    private static String mavenCommand() {
+    private static String mavenCommand(final Path projectDir) {
         String configured = System.getenv("ZERO_MAVEN_CMD");
         if (configured != null && !configured.isBlank()) {
             return configured;
         }
-        Path root = Path.of("").toAbsolutePath().normalize();
-        Path wrapper = root.resolve(isWindows() ? "mvnw.cmd" : "mvnw");
+        Path wrapper = projectDir.resolve(isWindows() ? "mvnw.cmd" : "mvnw");
         if (Files.isRegularFile(wrapper) && (isWindows() || Files.isExecutable(wrapper))) {
             return wrapper.toString();
         }
@@ -236,7 +239,7 @@ public final class RunLocalScaffold {
         System.out.println("  --help, -h            Print this help.");
         System.out.println();
         System.out.println("Before running:");
-        System.out.println("  ./mvnw -q -DskipTests install   (PowerShell: ./mvnw.cmd)");
+        System.out.println("  Use RunLocalPrototype to generate and install the selected framework dependencies first.");
         System.out.println("  Set ZERO_MAVEN_CMD to use another Maven command.");
         System.out.println();
         System.out.println("This tool is for local/prototype smoke only, not production readiness.");

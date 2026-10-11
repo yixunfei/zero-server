@@ -1,5 +1,6 @@
 # CSV 配置热重载片段
 
+Build with the included Maven Wrapper and JDK 21; no global Maven is required. On PowerShell use `./mvnw.cmd` instead of `./mvnw` and quote `-D...` arguments. Framework artifacts are prepared by the repository Runner; rerun it without `--skipInstall` after changing the framework.
 将 `items.csv` 放入项目部署配置目录，把两个 Java 文件的 `{{packageName}}` 替换为业务包名。
 
 在 runtime 构建阶段显式装配：

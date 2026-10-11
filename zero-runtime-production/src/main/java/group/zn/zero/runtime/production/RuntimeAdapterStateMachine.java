@@ -62,7 +62,8 @@ public final class RuntimeAdapterStateMachine {
             case READY -> to == State.DEGRADED || to == State.FAILED
                     || to == State.DRAIN || to == State.STOP;
             case DEGRADED -> to == State.RECOVERING || to == State.FAILED || to == State.DRAIN;
-            case RECOVERING -> to == State.READY || to == State.FAILED || to == State.DRAIN;
+            case RECOVERING -> to == State.READY || to == State.DEGRADED
+                    || to == State.FAILED || to == State.DRAIN;
             case FAILED -> to == State.DRAIN || to == State.STOP;
             case DRAIN -> to == State.STOP;
             case STOP -> to == State.CLOSE;

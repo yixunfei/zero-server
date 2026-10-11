@@ -17,6 +17,7 @@ import group.zn.zero.runtime.production.ProductionAdapterException;
 import group.zn.zero.runtime.production.ProductionAdapterFailurePhase;
 import group.zn.zero.runtime.production.ProductionAdapterFailures;
 import group.zn.zero.runtime.production.ProductionAdapterNames;
+import group.zn.zero.runtime.production.RuntimeAdapterIo;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.LinkedHashMap;
@@ -64,6 +65,13 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
      * 已发布 Kafka RPC 资源；为空表示尚未启动或已经停止。
      */
     private volatile KafkaRpcAdapterResource delegate;
+    /** Optional production runtime monitor; standalone adapters retain their existing behavior. */
+    private volatile RuntimeAdapterIo runtimeMonitor;
+
+    /** Installs the production monitor before lifecycle start. */
+    void runtimeMonitor(final RuntimeAdapterIo monitor) {
+        runtimeMonitor = Objects.requireNonNull(monitor, "monitor");
+    }
 
     /**
      * 创建生命周期托管 Kafka RPC Adapter。
@@ -120,6 +128,12 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
      */
     @Override
     public CompletionStage<RpcResponse> request(final RpcRequest request) {
+        RuntimeAdapterIo monitor = runtimeMonitor;
+        if (monitor != null) return monitor.observe(true, () -> requestDirect(request));
+        return requestDirect(request);
+    }
+
+    private CompletionStage<RpcResponse> requestDirect(final RpcRequest request) {
         KafkaRpcAdapterResource current = requireDelegate();
         RpcRequest original = Objects.requireNonNull(request, "request");
         if (settings.replyTopic().equals(original.replyTopic())) {
@@ -141,6 +155,8 @@ public final class KafkaRpcLifecycleAdapter extends AbstractLifecycle
      */
     @Override
     public CompletionStage<Void> oneway(final RpcRequest request) {
+        RuntimeAdapterIo monitor = runtimeMonitor;
+        if (monitor != null) return monitor.observe(true, () -> requireDelegate().oneway(request));
         return requireDelegate().oneway(request);
     }
 

@@ -101,7 +101,10 @@ final class RuntimeBuildTransaction {
                 throw invalidContribution(descriptor.id(), "binding-type=" + binding.getKey().id());
             }
         }
-        if (!descriptor.healthPhases().equals(contribution.healthProbes().keySet())) {
+        var phases = java.util.EnumSet.noneOf(group.zn.zero.runtime.health.HealthPhase.class);
+        phases.addAll(contribution.healthProbes().keySet());
+        phases.addAll(contribution.healthSnapshots().keySet());
+        if (!descriptor.healthPhases().equals(phases)) {
             throw invalidContribution(descriptor.id(), "health=mismatch");
         }
         contribution.lifecycle().ifPresent(lifecycle -> {

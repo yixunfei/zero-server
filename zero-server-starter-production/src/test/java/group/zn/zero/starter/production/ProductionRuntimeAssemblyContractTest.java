@@ -17,7 +17,7 @@ import group.zn.zero.data.postgresql.PostgresqlDriverSettings;
 import group.zn.zero.data.redis.RedisDataAdapter;
 import group.zn.zero.data.redis.RedisDistributedCacheService;
 import group.zn.zero.data.redis.RedisDriverSettings;
-import group.zn.zero.discovery.nacos.NacosDiscoveryAdapter;
+import group.zn.zero.discovery.ServiceDiscovery;
 import group.zn.zero.discovery.nacos.NacosDiscoveryConfigKeys;
 import group.zn.zero.runtime.cache.CacheRuntime;
 import group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel;
@@ -54,23 +54,25 @@ class ProductionRuntimeAssemblyContractTest {
     private static final String SECRET = "PAF1-RESOLVE-CONFIG-SECRET-SENTINEL";
 
     /**
-     * 验证 Nacos 未显式配置 request timeout 时被单 Adapter 预算钳制，显式超预算配置则安全 fail-fast。
+     * 验证 Nacos 原生请求超时独立于启动窗口，并拒绝超过显式运行期预算的配置。
      */
     @Test
-    void nacosRequestTimeoutShouldClampToAdapterBudgetAndRejectExplicitOverflow() {
+    void nacosRequestTimeoutShouldUseRuntimeBudgetAndRejectExplicitOverflow() {
         ZeroProductionRuntime runtime = isolatedBuilder(nacosConfig(null)).build();
         try {
-            NacosDiscoveryAdapter adapter = assertInstanceOf(
-                    NacosDiscoveryAdapter.class,
+            assertInstanceOf(
+                    ServiceDiscovery.class,
                     runtime.require(DiscoveryRuntime.SERVICE_DISCOVERY));
-            assertEquals(1_250, adapter.settings().requestTimeoutMillis());
         } finally {
             runtime.close();
         }
 
+        isolatedBuilder(nacosConfig("2000")).diagnose();
+        var invalid = new LinkedHashMap<>(nacosConfig("2000").asMap());
+        invalid.put("zero.adapter.nacos.operation-timeout-millis", "1250");
         ProductionAdapterException failure = assertThrows(
                 ProductionAdapterException.class,
-                () -> isolatedBuilder(nacosConfig("2000")).diagnose());
+                () -> isolatedBuilder(new MapZeroConfig(invalid)).diagnose());
         assertEquals(ProductionAdapterNames.ADAPTER_NACOS_DISCOVERY, failure.adapterName());
         assertEquals(ProductionAdapterFailurePhase.CONFIG_VALIDATION, failure.failurePhase());
         assertSame(ProductionAdapterErrorCode.CONFIG_INVALID, failure.errorCode());
@@ -106,8 +108,21 @@ class ProductionRuntimeAssemblyContractTest {
             var kafkaConfig = runtime.plan().config().stream()
                     .filter(metadata -> StandardRuntimeCapabilityModel.PRODUCTION_KAFKA_RPC.equals(metadata.owner()))
                     .toList();
-            assertEquals(9, kafkaConfig.size());
+            assertEquals(java.util.Set.of(
+                    ZeroProductionRuntimeConfigKeys.RPC_KAFKA_BOOTSTRAP_SERVERS,
+                    ZeroProductionRuntimeConfigKeys.RPC_KAFKA_CLIENT_ID,
+                    ZeroProductionRuntimeConfigKeys.RPC_KAFKA_CONSUMER_GROUP_ID,
+                    ZeroProductionRuntimeConfigKeys.RPC_KAFKA_TOPIC_PREFIX,
+                    ZeroProductionRuntimeConfigKeys.RPC_KAFKA_REPLY_TOPIC,
+                    ZeroProductionRuntimeConfigKeys.RPC_KAFKA_PENDING_CAPACITY,
+                    ZeroProductionRuntimeConfigKeys.RPC_KAFKA_POLL_TIMEOUT_MILLIS,
+                    ZeroProductionRuntimeConfigKeys.RPC_KAFKA_CLOSE_TIMEOUT_MILLIS),
+                    kafkaConfig.stream().map(metadata -> metadata.logicalKey())
+                            .collect(java.util.stream.Collectors.toSet()));
             assertEquals(5, kafkaConfig.stream().filter(metadata -> metadata.sensitive()).count());
+            assertEquals(java.time.Duration.ofSeconds(3), runtime.productionReport()
+                    .adapterStatus(ProductionAdapterNames.ADAPTER_KAFKA_RPC).orElseThrow()
+                    .settings().orElseThrow().operationTimeout());
 
             var kafkaStatus = runtime.report().components().stream()
                     .filter(component -> StandardRuntimeCapabilityModel.PRODUCTION_KAFKA_RPC.equals(
@@ -184,7 +199,7 @@ class ProductionRuntimeAssemblyContractTest {
         assertConfigMetadata(runtime, group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_NACOS_DISCOVERY, 11, 8);
         assertConfigMetadata(runtime, group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_NACOS_RPC_RESOLVER, 0, 0);
         assertInstanceOf(
-                NacosDiscoveryAdapter.class,
+                ServiceDiscovery.class,
                 runtime.require(DiscoveryRuntime.SERVICE_DISCOVERY));
         assertTrue(runtime.optional(RpcRuntime.RPC_SERVICE_RESOLVER).isPresent());
         assertStartupHealthNotRun(runtime, group.zn.zero.runtime.capability.StandardRuntimeCapabilityModel.PRODUCTION_NACOS_DISCOVERY);

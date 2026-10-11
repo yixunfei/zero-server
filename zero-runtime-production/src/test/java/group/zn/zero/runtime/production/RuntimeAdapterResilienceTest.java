@@ -40,13 +40,16 @@ class RuntimeAdapterResilienceTest {
     }
 
     @Test
-    void unknownWriteOutcomeFailsClosedAndRetryLimitFails() {
+    void unknownWriteOutcomeDegradesConnectionWithoutRetryingWrite() {
         RuntimeAdapterResilience resilience = new RuntimeAdapterResilience(
                 readyHealth(), RuntimeAdapterRecovery.conservative(), BUDGET);
-        assertEquals(RuntimeAdapterRecovery.RecoveryDecision.FAIL,
+        assertEquals(RuntimeAdapterRecovery.RecoveryDecision.REBUILD,
                 resilience.onFailure(new RuntimeAdapterRecovery.FailureContext(
                         "adapter", "operation", true, false, 1, "UNKNOWN")));
-        assertEquals(RuntimeAdapterStateMachine.State.FAILED, resilience.snapshot().state());
+        assertEquals(RuntimeAdapterStateMachine.State.DEGRADED, resilience.snapshot().state());
+        resilience.recovering();
+        resilience.recovered();
+        assertEquals(RuntimeAdapterStateMachine.State.READY, resilience.snapshot().state());
     }
 
     @Test
@@ -56,7 +59,8 @@ class RuntimeAdapterResilienceTest {
         assertEquals(RuntimeAdapterRecovery.RecoveryDecision.RETRY,
                 resilience.onFailure(new RuntimeAdapterRecovery.FailureContext(
                         "adapter", "probe", true, true, 1, "TIMEOUT")));
-        assertEquals(RuntimeAdapterStateMachine.State.RECOVERING, resilience.snapshot().state());
+        assertEquals(RuntimeAdapterStateMachine.State.DEGRADED, resilience.snapshot().state());
+        resilience.recovering();
         resilience.recovered();
         assertEquals(RuntimeAdapterStateMachine.State.READY, resilience.snapshot().state());
     }

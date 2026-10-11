@@ -173,7 +173,7 @@ public final class ZeroProductionRuntime implements GameRuntime {
     private boolean startupFailurePhase(final ProductionAdapterFailurePhase phase) {
         return switch (phase) {
             case CONNECT, AUTHENTICATION, STARTUP, REGISTRATION, STARTUP_HEALTH, STARTUP_BUDGET -> true;
-            case NONE, CONFIG_SELECTION, CONFIG_VALIDATION, CLIENT_CREATION, ROLLBACK, CLOSE -> false;
+            case NONE, CONFIG_SELECTION, CONFIG_VALIDATION, CLIENT_CREATION, REMOTE_IO, ROLLBACK, CLOSE -> false;
         };
     }
 

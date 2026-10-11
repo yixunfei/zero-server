@@ -476,3 +476,5 @@ mvn -B -ntp -q -f target/my-runtime/pom.xml exec:java
 脚手架在写入文件前拒绝未知参数、重复参数（包括别名重复）、非法组件、Java 关键字包名及不能形成合法类名的项目名。例如 `123-game` 被拒绝，`game-123` 可生成 `Game123Application`。`--components` 必须准确拼写；不会将拼错的参数静默变成默认选择。
 
 `VerifyGeneratedCompositions` 从代码生成器组件目录读取选择集合，不单独维护另一份组件目录。当前包含五条代表消费路径、十六个单组件选择、两条混合路径及中心—逻辑/分布式组合，共二十五个生成消费者。清单/POM 的结构检查使用 JSON/XML 解析，runtime 模板测试再对照实际 runtime plan 检查所选 provider 与 capability。
+
+生成工程携带 `mvnw`、`mvnw.cmd` 和 `.mvn/wrapper/maven-wrapper.properties`，纳入 ownership manifest 与升级事务。最小项目通过 Runner 的 `--template runtime --components ... --catalog ...` 一次生成、安装所选依赖并验证；自定义单值组件优先使用 `bindings` 简写。

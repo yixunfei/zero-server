@@ -74,6 +74,10 @@ final class ScopedEnvelopeStore implements ZeroDataEnvelopeStore {
             try {
                 return action.get();
             } catch (RuntimeException failure) {
+                if (failure instanceof ZeroException zero
+                        && !(zero.errorCode() instanceof DataErrorCode)) {
+                    throw zero;
+                }
                 DataErrorCode code = failure instanceof ZeroException zero && zero.errorCode() instanceof DataErrorCode data
                         ? data : fallback;
                 // 对外说明保持稳定；原始驱动诊断保留在 cause 链供内部排障。

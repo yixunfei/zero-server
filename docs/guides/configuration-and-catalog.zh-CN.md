@@ -4,17 +4,16 @@
 
 ## 先跑最小项目
 
-使用 JDK 21，在仓库根目录构建并安装本地开发坐标（当前子模块为 `0.1.1`，根聚合 POM 为 `0.1.2-SNAPSHOT`；以下不是发布操作）：
+使用 JDK 21，在仓库根目录用 Runner 准备所选开发坐标（`0.1.2-SNAPSHOT`，仅安装到本地 Maven 仓库）：
 
 ```shell
-./mvnw -pl zero-codegen,zero-runtime-bootstrap -am -DskipTests install
-java scripts/NewLocalGame.java --template runtime --projectName minimal-demo --packageName group.zn.demo --outputDir target/minimal-demo
-./mvnw -f target/minimal-demo/pom.xml test
-./mvnw -f target/minimal-demo/pom.xml exec:java
-./mvnw -f target/minimal-demo/pom.xml -Dexec.mainClass=group.zn.demo.RuntimeAssembly exec:java
+java scripts/RunLocalPrototype.java --template runtime --projectName minimal-demo --packageName group.zn.demo --outputDir target/minimal-demo
+cd target/minimal-demo
+./mvnw -q clean test exec:java
+./mvnw '-Dexec.mainClass=group.zn.demo.RuntimeAssembly' exec:java
 ```
 
-Windows 使用 `mvnw.cmd`。纯 runtime 默认仅装配配置和执行器；业务模板仍按业务需要安装 Actor、日志和监控。诊断入口 `RuntimeAssembly.main` 适用于所有模板，不启动业务、线程池或外部客户端。它输出当前 profile、缺失配置键和完整时的实际组件计划；本地 demo 运行后自行关闭。
+Windows 使用 `./mvnw.cmd`，`-D...` 参数整体加引号。生成项目自带 Wrapper；框架源码更新后重新运行 Runner（不加 `--skipInstall`）刷新所需构件。纯 runtime 默认仅装配配置和执行器；业务模板按需要安装 Actor、日志和监控。诊断入口 `RuntimeAssembly.main` 不启动业务、线程池或外部客户端。
 
 ## 一个值、一份来源
 
@@ -58,15 +57,61 @@ plan.configuration().entries();     // 来源、alias、类型、状态、reload
 
 ```shell
 java scripts/NewLocalGame.java --catalog examples/scaffold-catalog/greeting.catalog.json --listComponents
-java scripts/NewLocalGame.java --catalog examples/scaffold-catalog/greeting.catalog.json --template runtime --components greeting --projectName greeting-demo --packageName group.zn.greeting --outputDir target/greeting-demo
+java scripts/RunLocalPrototype.java --catalog examples/scaffold-catalog/greeting.catalog.json --template runtime --components greeting --projectName greeting-demo --packageName group.zn.greeting --outputDir target/greeting-demo
 ./mvnw -f target/greeting-demo/pom.xml test exec:java
 ./mvnw -f target/greeting-demo/pom.xml -Dexec.mainClass=group.zn.greeting.RuntimeAssembly exec:java
 ```
 
 示例会注册 `application.greeting` 并提供 `sample.greeting` 字符串能力，生成项目的测试将实际装配图与 manifest 对照。它没有第三方依赖，方便在最小环境中验证扩展路径。
 
-JSON 的 `schemaVersion` 固定为 `1`，`id` 是应用自己的版本化目录身份（例：`example.greeting.v1`）。`capabilities` 声明 API 坐标、基数和依赖，`providers` 声明实现坐标、提供/需要的能力和 profile，`components` 声明 Provider ID、安装表达式、默认配置和配置样例。完整格式见 [示例文件](../../examples/scaffold-catalog/greeting.catalog.json)。未知字段、未知 ID、重复组件/Provider、循环能力依赖、单值能力冲突和不支持的 profile 会在生成前失败。
+JSON 的 `schemaVersion` 为 `1`，`id` 是应用自己的目录身份。普通单值组件使用 `bindings`，只声明一次组件、能力、类型、依赖和工厂；生成器从同一声明派生能力图、Provider 元数据和 Java 安装代码。见 [greeting 示例](../../examples/scaffold-catalog/greeting.catalog.json)。复杂多值组件仍可使用 `capabilities` / `providers` / `components`。未知字段、未知 ID、重复组件/Provider、循环依赖和不支持的 profile 会在生成前失败。
 
 JSON 扩展是对标准目录的追加；不会自动替换内置项。第三方安装表达式必须来自可信应用代码：生成器只写入表达式，不加载类，但生成项目运行时会执行它。所有 Maven 坐标当前使用生成项目的 `${zero.version}`；第三方版本不同需在应用 POM 明确调整。需要整体替换目录时，可使用 `ScaffoldComponents(id, model, definitions)` Java API。
 
 生成的 `zero-scaffold.json` 记录 `catalogId` 和 `catalogSchemaVersion`。升级时传入相同 `--catalog` 及组件参数，例如将上述生成命令追加 `--plan`，审阅后使用 `--apply`。Java API 对应 `new ScaffoldUpgradeService(components)`。使用不同目录升级会明确报 `SCAFFOLD-CATALOG-MISMATCH`；有用户修改冲突时仍不覆盖。
+
+## 单值组件的最短接入
+
+```java
+var greeting = ComponentKey.single("sample.greeting", String.class);
+assembly.install(RuntimeModule.component(ComponentId.of("application.greeting"), greeting)
+        .require(RuntimeBasics.CONFIG)
+        .create(context -> "hello " + context.require(RuntimeBasics.CONFIG).getOrDefault("zero.name", "app")));
+```
+
+工厂在 build 时执行，规划先校验依赖。返回的 `AutoCloseable` 由 runtime 拥有并登记回滚；`Lifecycle` 自动参与 start/stop。工厂内部提前创建的中间资源仍需立即调用 `context.resources().register(...)`。已有共享对象使用 `RuntimeModule.value(id, key, value)`，该入口不接管 AutoCloseable 所有权。
+
+catalog 的等价工厂如下。`factory` 是可信 Java 表达式，参数固定为 `context`；类型采用完整 Java 类名。省略 `artifacts` 时依赖 `zero-runtime`；外部类型须声明其坐标。
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "example.config-greeting.v1",
+  "bindings": [{
+    "id": "greeting",
+    "provider": "application.greeting",
+    "key": "sample.greeting",
+    "type": "java.lang.String",
+    "requires": [{"key": "zero.config", "type": "group.zn.zero.core.config.ZeroConfig"}],
+    "factory": "context.require(group.zn.zero.runtime.bootstrap.RuntimeBasics.CONFIG).getOrDefault(\"zero.name\", \"app\")"
+  }]
+}
+```
+
+## 外部能力、运行期健康与预算
+
+`ProductionAssembly.builder(config)` 默认在 build 阶段创建并托管 remote IO；diagnose/plan 不创建执行器或客户端。显式 direct IO 返回 `REMOTE_IO_EXECUTOR_REQUIRED`；自定义 base 的执行器工厂在 build 时校验，不会为了提前校验而执行工厂。
+
+`GameRuntime.healthSnapshot()` 保留 STARTUP 历史并提供 READINESS 当前结果。只有 HEALTHY 表示允许新请求；远程 Adapter 降级/恢复中拒绝请求，对应 UNHEALTHY。非 RUNNING 的 runtime 不报告就绪。读取只取内存快照，不发起探测。自定义组件可用 `ComponentContribution.healthSnapshot(phase, supplier)` 接入；supplier 必须线程安全、非阻塞且无 IO。
+
+`ZeroProductionRuntime.productionReport().adapterStatus(name)` 中，`runtime()` 含运行状态、稳定原因码、在途数和恢复决策；`settings()` 含有效运行预算，在 `ProductionAssembly.diagnose()` 中也可查看。启动失败字段与运行期恢复快照分别表达不同阶段。
+
+| 配置键 | 默认值 | 作用 |
+| --- | --- | --- |
+| `zero.adapter.<adapter>.operation-timeout-millis` | Redis/MongoDB/PostgreSQL：10000；Kafka：3000；Nacos：SDK 配置默认值 | 原生 IO 与探测超时上限，独立于启动预算 |
+| `zero.adapter.<adapter>.max-in-flight` | 128 | 最大在途操作；超限直接拒绝 |
+| `zero.adapter.<adapter>.probe-interval-millis` | 2000 | 固定探测间隔，不重发业务操作 |
+
+`<adapter>` 为 `redis`、`mongo`、`postgresql`、`kafka`、`nacos`；配置支持文件、JVM 属性及标准环境变量别名。Redis 数据与缓存共享预算。PostgreSQL 原生超时最低 1000 ms；Nacos 显式原生 request timeout 不得超过运行预算，启动窗口仍须容纳 SDK 启动时间。设置启动预算不再隐式修改运行期超时。原生驱动可能有多个阶段或忽略中断，因此这不是任意 SDK 的硬截止保证。
+
+健康恢复只表示允许后续请求，不代表之前的未知写入已确认。`WRITE_OUTCOME_UNKNOWN` 仍需应用对账，框架不自动重发。

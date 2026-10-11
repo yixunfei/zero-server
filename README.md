@@ -21,7 +21,7 @@ zeroServer 是面向游戏服务端的 Java 21 模块化框架。通过事件、
 
 ## 快速运行
 
-准备 JDK 21 和 Git；仓库 Wrapper 会准备 Maven 3.9.8。在仓库根目录执行：
+准备 JDK 21 和 Git；仓库 Wrapper 会准备 Maven 3.9.16。在仓库根目录执行：
 
 ```bash
 git clone https://github.com/yixunfei/zero-server.git
@@ -30,15 +30,14 @@ java scripts/ZeroLocalDoctor.java
 java scripts/RunLocalPrototype.java --fromKeywords "rpg scene sync" --projectName my-game --packageName group.example.mygame
 ```
 
-Runner 会优先使用仓库 `mvnw` / `mvnw.cmd` 安装当前框架版本，生成 `target/generated/my-game`，执行测试和本地业务流程。结束后资源关闭，入口退出。打开生成工程的 `BUSINESS_GUIDE.md`，完成第一处小业务修改后再继续扩展；需要替换 Maven 时设置 `ZERO_MAVEN_CMD`。
+Runner 会生成 `target/generated/my-game`，使用仓库 Wrapper 安装所选框架模块及其上游依赖，再执行测试和本地业务流程。生成工程自带 Wrapper。结束后资源关闭，入口退出。打开生成工程的 `BUSINESS_GUIDE.md`，完成第一处小业务修改后再继续扩展；需要替换 Maven 时设置 `ZERO_MAVEN_CMD`。
 
 也可使用统一入口：PowerShell 执行 `./scripts/zero.ps1 init`，Bash 执行 `./scripts/zero.sh init`；参数与 Runner 相同，执行 `help` 查看其他命令。
 
-需要最小依赖时，在安装工件后生成（PowerShell 将 `./mvnw` 换为 `./mvnw.cmd`）：
+最小依赖也使用同一个 Runner，无需先手动安装工件：
 
 ```bash
-java scripts/NewLocalGame.java --template runtime --components event,actor --projectName my-runtime --outputDir target/my-runtime
-./mvnw -q -f target/my-runtime/pom.xml clean test exec:java
+java scripts/RunLocalPrototype.java --template runtime --components event,actor --projectName my-runtime --outputDir target/my-runtime
 ```
 
 环境切换、真实 TCP、中心—逻辑和外部 Adapter 的完整步骤见[快速上手](docs/quickstart.zh-CN.md)。默认示例执行一次验证流程；`local + net` 可生成 Server 与客户端辅助类，支持本地 TCP 回显验收，真实鉴权与生产安全策略仍需应用显式接入。

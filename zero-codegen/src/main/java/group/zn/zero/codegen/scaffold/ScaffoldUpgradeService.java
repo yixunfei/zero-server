@@ -430,6 +430,7 @@ public final class ScaffoldUpgradeService {
         } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
             Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING);
         }
+        if (destination.getFileName().toString().equals("mvnw")) ScaffoldWrapper.executable(destination);
     }
 
     static void atomicWriteString(final Path destination, final String value) throws IOException {

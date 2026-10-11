@@ -43,7 +43,7 @@ src/main/protocol/protoId.txt
 After changing protocol files, run:
 
 ~~~powershell
-mvn -q generate-sources
+./mvnw -q generate-sources
 ~~~
 
 Generated sources are written to:
@@ -59,8 +59,8 @@ Treat generated files as output. Put business behavior in handwritten code, not 
 From the generated project directory:
 
 ~~~powershell
-mvn -q clean test
-mvn -q exec:java
+./mvnw -q clean test
+./mvnw -q exec:java
 ~~~
 
 From the zeroServer repository root:
@@ -103,7 +103,7 @@ Suggested path:
 
 1. Extend `__PROTOCOL_FILE__`, for example add an `action` or `checksum` field to the submitted frame input.
 2. Keep the frame order and local Actor lane unchanged.
-3. Run `mvn -q generate-sources`.
+3. Run `./mvnw -q generate-sources`.
 4. Update the handwritten BO logic in `__APP_CLASS__` so the new field contributes to the local frame summary.
 5. Add one assertion to `__TEST_CLASS__` that verifies the new summary value is stable across runs.
 

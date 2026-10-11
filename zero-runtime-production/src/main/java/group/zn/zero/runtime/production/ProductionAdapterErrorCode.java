@@ -18,6 +18,11 @@ public enum ProductionAdapterErrorCode implements ErrorCode {
     CONFIG_MISSING(ErrorCategory.CLIENT_REQUEST,
             "ZERO-PRODUCTION-ADAPTER-CONFIG-MISSING", "production adapter config is missing"),
 
+    /** 显式执行器不能安全承载远程 IO。 */
+    REMOTE_IO_EXECUTOR_REQUIRED(ErrorCategory.CLIENT_REQUEST,
+            "ZERO-PRODUCTION-REMOTE-IO-EXECUTOR-REQUIRED",
+            "use ProductionAssembly defaults or ZeroRuntimeExecutors.remoteIo; direct remote IO is unsupported"),
+
     /** 驱动或客户端创建失败。 */
     CLIENT_CREATION_FAILED(ErrorCategory.SYSTEM,
             "ZERO-PRODUCTION-ADAPTER-CLIENT-CREATION-FAILED", "production adapter client creation failed"),
@@ -56,7 +61,19 @@ public enum ProductionAdapterErrorCode implements ErrorCode {
 
     /** 资源关闭失败。 */
     CLOSE_FAILED(ErrorCategory.SYSTEM,
-            "ZERO-PRODUCTION-ADAPTER-CLOSE-FAILED", "production adapter close failed");
+            "ZERO-PRODUCTION-ADAPTER-CLOSE-FAILED", "production adapter close failed"),
+
+    /** 恢复期间或达到并发预算时拒绝远程请求。 */
+    OPERATION_REJECTED(ErrorCategory.SYSTEM,
+            "ZERO-PRODUCTION-ADAPTER-OPERATION-REJECTED", "production adapter operation rejected"),
+
+    /** 运行期远程读取或确定未完成的操作失败。 */
+    REMOTE_IO_FAILED(ErrorCategory.SYSTEM,
+            "ZERO-PRODUCTION-ADAPTER-REMOTE-IO-FAILED", "production adapter remote IO failed"),
+
+    /** 远程写入已发出，但无法确认是否提交。 */
+    WRITE_OUTCOME_UNKNOWN(ErrorCategory.SYSTEM,
+            "ZERO-PRODUCTION-ADAPTER-WRITE-OUTCOME-UNKNOWN", "production adapter write outcome unknown");
 
     /** 错误分类。 */
     private final ErrorCategory category;

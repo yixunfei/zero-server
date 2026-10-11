@@ -1,5 +1,6 @@
 # 受管定时任务片段
 
+Build with the included Maven Wrapper and JDK 21; no global Maven is required. On PowerShell use `./mvnw.cmd` instead of `./mvnw` and quote `-D...` arguments. Framework artifacts are prepared by the repository Runner; rerun it without `--skipInstall` after changing the framework.
 把 `ManagedSchedulerModule.java` 的 `{{packageName}}` 替换为业务包名。在 Starter 装配阶段显式启用本地 scheduler：
 
 ```java

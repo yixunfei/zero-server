@@ -2,6 +2,7 @@ package group.zn.zero.runtime.nacos;
 
 import group.zn.zero.discovery.nacos.NacosDiscoveryConfigKeys;
 import group.zn.zero.discovery.nacos.NacosDiscoveryFactory;
+import group.zn.zero.discovery.nacos.NacosDiscoveryAdapter;
 import group.zn.zero.discovery.nacos.NacosDiscoverySettings;
 import group.zn.zero.discovery.nacos.NacosHealthUpdateMode;
 import group.zn.zero.discovery.ServiceDiscovery;
@@ -22,6 +23,10 @@ import group.zn.zero.runtime.production.ProductionAdapterLifecycle;
 import group.zn.zero.runtime.production.ProductionAdapterNames;
 import group.zn.zero.runtime.production.ProductionStartupBudget;
 import group.zn.zero.runtime.production.ProductionStartupHealthProbe;
+import group.zn.zero.runtime.production.RuntimeAdapterIo;
+import group.zn.zero.runtime.production.RuntimeAdapterSettings;
+import group.zn.zero.runtime.production.RuntimeAdapterRemoteFailures;
+import group.zn.zero.runtime.bootstrap.RuntimeBasics;
 import group.zn.zero.runtime.production.ZeroProductionAdapterState;
 import group.zn.zero.runtime.spi.ComponentContribution;
 import group.zn.zero.runtime.spi.ComponentCreationContext;
@@ -54,6 +59,8 @@ final class ProductionNacosDiscoveryProvider implements RuntimeComponentProvider
 
     /** Production Adapter 共享累计启动预算。 */
     private final ProductionStartupBudget startupBudget;
+    /** 独立于启动窗口的运行预算。 */
+    private final RuntimeAdapterSettings runtimeSettings;
 
     /** 已按 Production 优先级解析的 typed config 来源。 */
     private final List<ConfigSource> configSources;
@@ -64,17 +71,21 @@ final class ProductionNacosDiscoveryProvider implements RuntimeComponentProvider
     ProductionNacosDiscoveryProvider(
             final ProductionAdapterDiagnostic diagnostic,
             final ProductionStartupBudget startupBudget,
+            final RuntimeAdapterSettings runtimeSettings,
             final List<ConfigSource> configSources,
             final NacosDiscoverySettings settings) {
         this.diagnostic = Objects.requireNonNull(diagnostic, "diagnostic");
         this.startupBudget = Objects.requireNonNull(startupBudget, "startupBudget");
+        this.runtimeSettings = Objects.requireNonNull(runtimeSettings, "runtimeSettings");
+        diagnostic.runtimeSettings(runtimeSettings);
         this.configSources = List.copyOf(Objects.requireNonNull(configSources, "configSources"));
         this.settings = Objects.requireNonNull(settings, "settings");
         descriptor = ComponentDescriptor.builder(ID)
                 .provide(DiscoveryRuntime.SERVICE_DISCOVERY)
+                .require(RuntimeBasics.EXECUTORS)
                 .configSchema(configSchema(this.settings))
                 .kind(ComponentKind.EXTERNAL)
-                .health(HealthPhase.STARTUP)
+                .health(HealthPhase.STARTUP).health(HealthPhase.READINESS)
                 .build();
     }
 
@@ -87,9 +98,18 @@ final class ProductionNacosDiscoveryProvider implements RuntimeComponentProvider
     public ComponentContribution create(final ComponentCreationContext context) {
         Objects.requireNonNull(context, "context");
         try {
-            ServiceDiscovery created = NacosDiscoveryFactory.nacos(settings);
+            NacosDiscoveryAdapter adapter = NacosDiscoveryFactory.nacos(settings);
+            RuntimeAdapterIo monitor = RuntimeAdapterIo.create(List.of(diagnostic),
+                    timeout -> adapter.probeConnection(),
+                    failure -> RuntimeAdapterRemoteFailures.isRemoteIo(failure)
+                            || failure instanceof group.zn.zero.core.error.ZeroException zero
+                            && (zero.errorCode() == group.zn.zero.discovery.DiscoveryErrorCode.REGISTRY_UNAVAILABLE
+                            || zero.errorCode() == group.zn.zero.discovery.DiscoveryErrorCode.NACOS_CLIENT_ERROR),
+                    context.require(RuntimeBasics.EXECUTORS), runtimeSettings);
+            ServiceDiscovery created = new ObservedNacosDiscovery(adapter, monitor);
             diagnostic.mark(ZeroProductionAdapterState.CREATED);
             return ComponentContribution.builder()
+                    .healthSnapshot(HealthPhase.READINESS, monitor::readiness)
                     .bind(DiscoveryRuntime.SERVICE_DISCOVERY, created)
                     .lifecycle(new ProductionAdapterLifecycle(
                             diagnostic,

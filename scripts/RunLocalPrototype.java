@@ -15,8 +15,8 @@ import java.util.regex.Pattern;
 /**
  * zeroServer 本地原型一命令生成并 smoke 工具。
  *
- * <p>该工具显式串联当前仓库已有的本地能力：先可选安装当前 SNAPSHOT，再调用
- * {@code NewLocalGame} 生成 local/prototype 项目，最后调用 {@code RunLocalScaffold}
+ * <p>该工具显式串联当前仓库已有的本地能力：先调用 {@code NewLocalGame} 生成项目，
+ * 再可选安装所选组件的当前 SNAPSHOT 依赖闭包，最后调用 {@code RunLocalScaffold}
  * 执行结构检查、Maven test 和 Maven run。它不创建正式模块，不连接外部中间件，也不证明生产就绪。</p>
  *
  * @author zn
@@ -116,16 +116,15 @@ public final class RunLocalPrototype {
         System.out.println("  zeroVersion: " + options.zeroVersion());
         System.out.println();
 
+        runCommand(generateCommand(options, projectDir));
         boolean installed = false;
         if (!options.skipInstall()) {
-            runCommand(List.of(mavenCommand(), "-q", "-DskipTests", "install"));
+            runCommand(installCommand(projectDir));
             installed = true;
         }
 
-        runCommand(generateCommand(options, projectDir));
-        runCommand(smokeCommand(options, projectDir));
-
         Manifest manifest = Manifest.read(projectDir.resolve(MANIFEST_FILE));
+        runCommand(smokeCommand(options, projectDir));
         Path businessGuide = projectDir.resolve("BUSINESS_GUIDE.md");
         System.out.println();
         System.out.println("Next business step:");
@@ -139,7 +138,8 @@ public final class RunLocalPrototype {
                 + "|installed=" + installed
                 + "|tested=" + !options.skipTests()
                 + "|ran=" + !options.skipRun()
-                + "|externalMiddleware=false"
+                + "|externalMiddleware=" + manifest.externalMiddleware()
+                + "|requiresExternalServices=" + manifest.requiresExternalServices()
                 + "|productionReady=false"
                 + "|requiresConfirmation=true");
     }
@@ -221,10 +221,47 @@ public final class RunLocalPrototype {
         command.add(projectDir.toString());
         command.add("--zeroVersion");
         command.add(options.zeroVersion());
+        if (!options.components().isBlank()) {
+            command.add("--components");
+            command.add(options.components());
+        }
+        if (!options.catalog().isBlank()) {
+            command.add("--catalog");
+            command.add(options.catalog());
+        }
         if (options.force()) {
             command.add("--force");
         }
         return command;
+    }
+
+    /** 读取生成 POM 的框架依赖，只安装所选模块及 Maven 推导的上游闭包。 */
+    private static List<String> installCommand(final Path projectDir) throws IOException {
+        try {
+            var factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            var document = factory.newDocumentBuilder().parse(projectDir.resolve("pom.xml").toFile());
+            var xpath = javax.xml.xpath.XPathFactory.newInstance().newXPath();
+            var nodes = (org.w3c.dom.NodeList) xpath.evaluate(
+                    "//dependency[groupId='group.zn.zero']/artifactId", document,
+                    javax.xml.xpath.XPathConstants.NODESET);
+            var modules = new java.util.TreeSet<String>();
+            modules.add("zero-bom");
+            modules.add("zero-parent");
+            for (int index = 0; index < nodes.getLength(); index++) {
+                String artifact = nodes.item(index).getTextContent().trim();
+                if (!artifact.matches("zero-[a-z0-9-]+") || !Files.isRegularFile(Path.of(artifact, "pom.xml"))) {
+                    throw new IOException("framework dependency is not a module in this checkout");
+                }
+                modules.add(artifact);
+            }
+            return List.of(mavenCommand(), "-q", "-pl", String.join(",", modules), "-am", "-DskipTests", "install");
+        } catch (javax.xml.parsers.ParserConfigurationException | org.xml.sax.SAXException
+                | javax.xml.xpath.XPathExpressionException failure) {
+            throw new IOException("cannot resolve generated framework dependencies", failure);
+        }
     }
 
     private static List<String> smokeCommand(final Options options, final Path projectDir) {
@@ -382,8 +419,10 @@ public final class RunLocalPrototype {
         System.out.println("  --packageName <package>   Java package. Default: " + DEFAULT_PACKAGE_NAME);
         System.out.println("  --outputDir <path>        Output directory. Default: target/generated/<projectName>.");
         System.out.println("  --zeroVersion <version>   zeroServer dependency version. Default: " + DEFAULT_ZERO_VERSION);
-        System.out.println("  --force                   Overwrite known scaffold files in outputDir.");
-        System.out.println("  --skipInstall             Skip installing the framework into the local Maven repository.");
+        System.out.println("  --force                   Reuse outputDir with ownership and conflict checks.");
+        System.out.println("  --components <ids>        Select runtime components (comma-separated).");
+        System.out.println("  --catalog <file>          Use an explicit trusted component catalog.");
+        System.out.println("  --skipInstall             Reuse installed artifacts; run without this flag after framework changes.");
         System.out.println("  --skipTests               Skip generated project Maven clean test.");
         System.out.println("  --skipRun                 Skip generated project Maven exec:java.");
         System.out.println("  --help, -h                Print this help.");
@@ -409,8 +448,10 @@ public final class RunLocalPrototype {
      * @param zeroVersion zeroServer 版本。
      * @param template 模板名。
      * @param fromKeywords 业务关键词。
-     * @param force 是否覆盖已知脚手架文件。
-     * @param skipInstall 是否跳过根仓库 install。
+     * @param components 逗号分隔的组件选择。
+     * @param catalog 显式可信 catalog 路径。
+     * @param force 是否允许在已有目录执行归属和冲突检查。
+     * @param skipInstall 是否复用已安装的框架依赖闭包。
      * @param skipTests 是否跳过生成项目测试。
      * @param skipRun 是否跳过生成项目运行。
      */
@@ -421,6 +462,8 @@ public final class RunLocalPrototype {
             String zeroVersion,
             String template,
             String fromKeywords,
+            String components,
+            String catalog,
             boolean force,
             boolean skipInstall,
             boolean skipTests,
@@ -455,7 +498,7 @@ public final class RunLocalPrototype {
                 }
                 String normalizedKey = key.toLowerCase(Locale.ROOT);
                 if (!List.of("--fromkeywords", "--from-keywords", "--template", "--projectname",
-                        "--packagename", "--outputdir", "--zeroversion").contains(normalizedKey)) {
+                        "--packagename", "--outputdir", "--zeroversion", "--components", "--catalog").contains(normalizedKey)) {
                     throw new IllegalArgumentException("unsupported argument: " + key);
                 }
                 if (index + 1 >= args.length || args[index + 1].startsWith("--")) {
@@ -475,7 +518,8 @@ public final class RunLocalPrototype {
             }
             String template = fromKeywords.isBlank() ? values.getOrDefault("--template", DEFAULT_TEMPLATE) : "";
             validate(projectName, packageName, zeroVersion);
-            return new Options(projectName, packageName, Path.of(output), zeroVersion, template, fromKeywords, force,
+            return new Options(projectName, packageName, Path.of(output), zeroVersion, template, fromKeywords,
+                    values.getOrDefault("--components", ""), values.getOrDefault("--catalog", ""), force,
                     skipInstall, skipTests, skipRun);
         }
 
@@ -508,16 +552,27 @@ public final class RunLocalPrototype {
      * @param projectName 项目名。
      * @param template 模板名。
      */
-    private record Manifest(String projectName, String template) {
+    private record Manifest(String projectName, String template,
+            boolean externalMiddleware, boolean requiresExternalServices) {
 
         private static Manifest read(final Path manifest) throws IOException {
             if (!Files.isRegularFile(manifest)) {
                 throw new IllegalStateException("zero-scaffold.json not found: " + manifest);
             }
-            Map<String, String> fields = parseStringFields(Files.readString(manifest, StandardCharsets.UTF_8));
+            String content = Files.readString(manifest, StandardCharsets.UTF_8);
+            Map<String, String> fields = parseStringFields(content);
             String projectName = required(fields, "projectName", manifest);
             String template = required(fields, "template", manifest);
-            return new Manifest(projectName, template);
+            return new Manifest(projectName, template,
+                    flag(content, "connectsExternalMiddleware", manifest),
+                    flag(content, "requiresExternalServices", manifest));
+        }
+
+        /** 只接受 manifest 中明确的布尔字面量，不猜测选中组件是否已连接。 */
+        private static boolean flag(final String content, final String key, final Path manifest) throws IOException {
+            Matcher matcher = Pattern.compile("\\\"" + key + "\\\"\\s*:\\s*(true|false)").matcher(content);
+            if (!matcher.find()) throw new IOException(manifest + " missing " + key);
+            return Boolean.parseBoolean(matcher.group(1));
         }
 
         private static String required(final Map<String, String> fields, final String name, final Path manifest) {

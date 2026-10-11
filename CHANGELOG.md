@@ -12,6 +12,19 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 - 修正事件/Actor 示例的执行器依赖断言、Kafka 示例的 SNAPSHOT BOM 版本及脚手架 CLI 退出码矩阵的完整运行时类路径。
 - 配置热重载示例在启动前显式安装本地手动请求授权回调，恢复合法更新与非法数据保旧闭环，保留框架默认拒绝策略。
 - macOS 平台事务测试改用真实临时目录，保留脚手架事务拒绝符号链接路径的保护。迁移和验证范围见[说明](docs/migrations/20261011-ci-actions-repair.zh-CN.md)。
+### 开箱即用与轻量接入修复（2026-10-11）
+
+- 精简 Production 装配默认延迟创建受管 IO，最小 Redis 工程不再依赖业务模板执行器；显式不安全执行器有稳定提示。
+- 中立 healthSnapshot 提供运行期 READINESS，Production 状态增加 runtime/settings 快照；五类 Adapter 使用独立运行预算，Redis 数据/缓存共享。
+- 新增 RuntimeModule.component 延迟工厂、依赖声明和自有资源回滚；catalog bindings 从一份声明生成元数据与安装代码。
+- 生成工程自带 Maven Wrapper；Runner 统一 components/catalog 参数并按所选依赖安装，刷新当前生成器避免旧 SNAPSHOT 混用。文档示例、版本和迁移步骤同步修正。
+- 公共 API、配置迁移及验证边界见 [迁移说明](docs/migrations/20261010-runtime-adapter-recovery.zh-CN.md)。
+
+### Runtime Adapter 恢复与自定义组件入口（2026-10-10）
+
+- Redis 数据/缓存共享运行时健康与准入状态；MongoDB、PostgreSQL、Kafka RPC、Nacos 接入同一健康、降级、探测恢复契约。远程读取失败和未知写结果采用不同安全错误码，未知结果不自动重发。
+- 真实 Redis 断连/无响应演练修复 Repository 作用域覆盖准入与未知结果错误码的问题，保留跨模块框架 ErrorCode；无需增加数据模块对 runtime 的依赖。
+- `RuntimeModule.value(id, key, value)` 提供 Java 最短显式安装入口，scaffold catalog 示例使用同一模块安装方式。新增的执行器依赖在规划阶段显式校验。限制和验证见 [迁移说明](docs/migrations/20261010-runtime-adapter-recovery.zh-CN.md)。
 
 ### 全仓可靠性复核（2026-10-05）
 

@@ -39,6 +39,15 @@ public enum ZeroProductionAdapterState {
      */
     HEALTHY,
 
+    /** 运行期远程 IO 不可用，等待健康探测。 */
+    DEGRADED,
+
+    /** 正在执行运行期恢复探测。 */
+    RECOVERING,
+
+    /** Adapter 已停止，不再接受请求或探测。 */
+    STOPPED,
+
     /**
      * Adapter 创建、启动或健康检查失败。
      */

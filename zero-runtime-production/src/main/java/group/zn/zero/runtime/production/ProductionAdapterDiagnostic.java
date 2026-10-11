@@ -63,6 +63,11 @@ public final class ProductionAdapterDiagnostic {
      */
     private String message = "";
 
+    /** 运行期恢复协调器；仅已创建的真实 Adapter 会绑定。 */
+    private volatile RuntimeAdapterResilience runtimeResilience;
+    /** 规划时解析的非敏感有效运行预算。 */
+    private volatile RuntimeAdapterSettings runtimeSettings;
+
     /**
      * 创建 Adapter 运行期诊断状态。
      *
@@ -118,6 +123,23 @@ public final class ProductionAdapterDiagnostic {
         message = current.message();
     }
 
+    /** 绑定运行期快照源；只在组件创建阶段调用。 */
+    public void runtimeResilience(final RuntimeAdapterResilience resilience) {
+        runtimeResilience = Objects.requireNonNull(resilience, "resilience");
+    }
+
+    /** 登记不可变的有效设置；仅供规划阶段调用，无资源副作用。 */
+    public void runtimeSettings(final RuntimeAdapterSettings settings) {
+        runtimeSettings = Objects.requireNonNull(settings, "settings");
+    }
+
+    /** 返回可选运行期健康快照；线程安全，绝不包含连接凭据。 */
+    public java.util.Optional<RuntimeAdapterResilienceSnapshot> runtimeSnapshot() {
+        RuntimeAdapterResilience current = runtimeResilience;
+        return current == null ? java.util.Optional.empty()
+                : java.util.Optional.of(current.diagnosticSnapshot());
+    }
+
     /**
      * 返回 Adapter 稳定名称。
      *
@@ -143,7 +165,7 @@ public final class ProductionAdapterDiagnostic {
                 componentTypes,
                 failurePhase,
                 errorCode,
-                message);
+                message, runtimeSnapshot(), java.util.Optional.ofNullable(runtimeSettings));
     }
 
     private static String requireText(final String value, final String name) {

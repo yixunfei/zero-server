@@ -39,6 +39,9 @@ public enum ProductionAdapterFailurePhase {
     /** 累计启动预算检查。 */
     STARTUP_BUDGET,
 
+    /** 运行期远程请求或健康探测。 */
+    REMOTE_IO,
+
     /** 启动失败后的资源回滚。 */
     ROLLBACK,
 

@@ -1,5 +1,7 @@
 # 线程模型设计
 
+2026-10-11：ProductionAssembly 默认在 build 时延迟创建受管 remote IO，诊断不创建执行资源；显式 direct IO 对真实 Adapter 返回 REMOTE_IO_EXECUTOR_REQUIRED。自定义 base 的执行器工厂保留延迟校验。各 Adapter 原生运行超时与启动预算分离，见[统一配置指南](guides/configuration-and-catalog.zh-CN.md)。
+
 ## 2026-10-05 同步驱动 IO 与 flush 并发
 
 Envelope Repository 不持有全方法同步锁，实际 Store IO 提交到必填的受管 executor。保存实体和复合 ID 在所属调用域编码快照；解码和 completion 可能在 IO 域运行，写 Actor 状态必须回投。自定义 Store/codec 需要可并发使用，不能依赖 Repository 锁保护共享状态。

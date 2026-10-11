@@ -39,8 +39,8 @@ __FRAMEWORK_COMPONENTS_JSON__
     "NEXT_STEPS.md"
   ],
   "verification": {
-    "testCommand": "mvn -q clean test",
-    "runCommand": "mvn -q exec:java"
+    "testCommand": "./mvnw -q clean test",
+    "runCommand": "./mvnw -q exec:java"
   },
   "productionGap": __PRODUCTION_GAP_JSON__
 }

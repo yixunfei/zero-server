@@ -30,6 +30,13 @@ class ScaffoldCatalogFileTest {
         assertEquals("example.greeting.v1", manifest.get("catalogId").getAsString());
         assertEquals(1, manifest.get("catalogSchemaVersion").getAsInt());
         assertTrue(manifest.get("selectedProviders").toString().contains("application.greeting"));
+        for (String wrapper : ScaffoldWrapper.FILES) {
+            assertTrue(Files.isRegularFile(output.resolve(wrapper)));
+            assertTrue(manifest.getAsJsonArray("files").toString().contains(wrapper));
+        }
+        String assembly = Files.readString(output.resolve("src/main/java/group/zn/sample/RuntimeAssembly.java"));
+        assertTrue(assembly.contains("RuntimeModule.component("));
+        assertTrue(assembly.contains(".create(context -> \"hello\")"));
         assertTrue(Files.readString(output.resolve("pom.xml"))
                 .contains("<zero.version>0.1.2-SNAPSHOT</zero.version>"));
         var request = new ProjectScaffoldRequest("greeting", "group.zn.sample", output, "0.1.2-SNAPSHOT",
@@ -64,18 +71,17 @@ class ScaffoldCatalogFileTest {
     void conflictingProvidersAndUnsupportedProfilesAreRejected() throws Exception {
         String source = Files.readString(Path.of("../examples/scaffold-catalog/greeting.catalog.json"));
         var root = JsonParser.parseString(source).getAsJsonObject();
-        var second = root.getAsJsonArray("providers").get(0).deepCopy().getAsJsonObject();
-        second.addProperty("id", "application.second");
-        root.getAsJsonArray("providers").add(second);
-        var component = root.getAsJsonArray("components").get(0).deepCopy().getAsJsonObject();
-        component.addProperty("id", "second");
-        component.add("providers", JsonParser.parseString("[\"application.second\"]"));
-        root.getAsJsonArray("components").add(component);
+        var second = root.getAsJsonArray("bindings").get(0).deepCopy().getAsJsonObject();
+        second.addProperty("id", "second");
+        second.addProperty("provider", "application.second");
+        root.getAsJsonArray("bindings").add(second);
         Path catalog = directory.resolve("conflict.json");
         Files.writeString(catalog, root.toString());
-        var components = ScaffoldCatalogFile.read(catalog);
-        assertThrows(IllegalArgumentException.class, () -> components.resolve(List.of(), List.of("greeting", "second")));
-        Files.writeString(catalog, source.replace("[\"local\", \"external-test\"]", "[\"production\"]"));
+        assertThrows(IllegalArgumentException.class, () -> ScaffoldCatalogFile.read(catalog));
+        root.getAsJsonArray("bindings").remove(1);
+        root.getAsJsonArray("bindings").get(0).getAsJsonObject()
+                .add("profiles", JsonParser.parseString("[\"production\"]"));
+        Files.writeString(catalog, root.toString());
         var unsupported = ScaffoldCatalogFile.read(catalog);
         assertThrows(IllegalArgumentException.class, () -> unsupported.resolve(List.of(), List.of("greeting")));
     }
@@ -85,8 +91,10 @@ class ScaffoldCatalogFileTest {
     void extensionDependenciesAreResolvedBeforeGeneration() throws Exception {
         var root = JsonParser.parseString(Files.readString(Path.of("../examples/scaffold-catalog/greeting.catalog.json")))
                 .getAsJsonObject();
-        root.getAsJsonArray("providers").get(0).getAsJsonObject()
-                .add("requires", JsonParser.parseString("[\"zero.actor.scheduler\"]"));
+        root.getAsJsonArray("bindings").get(0).getAsJsonObject()
+                .add("requires", JsonParser.parseString("""
+                        [{"key":"zero.actor.scheduler","type":"group.zn.zero.actor.scheduler.ActorScheduler"}]
+                        """));
         Path catalog = directory.resolve("dependencies.json");
         Files.writeString(catalog, root.toString());
         var selection = ScaffoldCatalogFile.read(catalog).resolve(List.of(), List.of("greeting"));

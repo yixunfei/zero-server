@@ -139,7 +139,8 @@ public final class ProjectScaffoldCli {
             final ProjectScaffoldResult result, final ScaffoldComponents components) {
         Path target = result.outputDirectory();
         String wrapper = java.io.File.separatorChar == '\\' ? "mvnw.cmd" : "mvnw";
-        String maven = java.nio.file.Files.isRegularFile(Path.of(wrapper)) ? "./" + wrapper : "mvn";
+        String maven = (java.io.File.separatorChar == '\\' ? "& \"" : "\"")
+                + target.resolve(wrapper).toAbsolutePath() + "\"";
         System.out.println("Created zeroServer local game scaffold:");
         System.out.println("  path: " + target);
         System.out.println("  template: " + result.templateId());
@@ -157,8 +158,8 @@ public final class ProjectScaffoldCli {
         System.out.println("  2. " + maven + " -q -f \"" + target.resolve("pom.xml") + "\" exec:java");
         System.out.println("  3. read \"" + target.resolve("BUSINESS_GUIDE.md")
                 + "\" and follow `First Business Change`");
-        System.out.println("  diagnose: " + maven + " -q -f \"" + target.resolve("pom.xml") + "\" -Dexec.mainClass="
-                + request.packageName() + ".RuntimeAssembly exec:java  # diagnose without starting services");
+        System.out.println("  diagnose: " + maven + " -q -f \"" + target.resolve("pom.xml") + "\" '-Dexec.mainClass="
+                + request.packageName() + ".RuntimeAssembly' exec:java  # diagnose without starting services");
         System.out.println("  read \"" + target.resolve("COMPONENTS.md") + "\" for component boundaries");
         System.out.println("  read \"" + target.resolve("NEXT_STEPS.md") + "\" for production promotion gaps");
         System.out.println("  inspect \"" + target.resolve("zero-scaffold.json") + "\" for scaffold metadata");

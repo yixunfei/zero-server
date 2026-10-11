@@ -20,6 +20,8 @@ import java.util.Objects;
  * @param failurePhase 失败阶段；非失败状态为 {@link ProductionAdapterFailurePhase#NONE}。
  * @param errorCode 失败 ErrorCode；为空表示无失败。
  * @param message 脱敏说明；为空表示无补充说明。
+ * @param runtime 可选运行期恢复快照；仅包含状态、稳定原因码、计数和预算，不包含驱动异常文本。
+ * @param settings 可选有效运行预算；规划后即可读取，Redis data/cache 共享配置。
  * @author zn
  */
 public record ZeroProductionAdapterStatus(
@@ -32,7 +34,9 @@ public record ZeroProductionAdapterStatus(
         List<String> componentTypes,
         ProductionAdapterFailurePhase failurePhase,
         ErrorCode errorCode,
-        String message) {
+        String message,
+        java.util.Optional<RuntimeAdapterResilienceSnapshot> runtime,
+        java.util.Optional<RuntimeAdapterSettings> settings) {
 
     /**
      * 创建 Adapter 诊断状态。
@@ -43,6 +47,8 @@ public record ZeroProductionAdapterStatus(
     public ZeroProductionAdapterStatus {
         adapterName = requireText(adapterName, "adapterName");
         Objects.requireNonNull(state, "state");
+        runtime = Objects.requireNonNull(runtime, "runtime");
+        settings = Objects.requireNonNull(settings, "settings");
         requiredConfigKeys = List.copyOf(Objects.requireNonNull(requiredConfigKeys, "requiredConfigKeys"));
         configuredConfigKeys = List.copyOf(Objects.requireNonNull(configuredConfigKeys, "configuredConfigKeys"));
         missingConfigKeys = List.copyOf(Objects.requireNonNull(missingConfigKeys, "missingConfigKeys"));
@@ -87,7 +93,7 @@ public record ZeroProductionAdapterStatus(
                 List.of(),
                 ProductionAdapterFailurePhase.NONE,
                 null,
-                "adapter disabled");
+                "adapter disabled", java.util.Optional.empty(), java.util.Optional.empty());
     }
 
     private static String requireText(final String value, final String name) {

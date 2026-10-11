@@ -46,7 +46,7 @@ Pause and create a separate task before changing:
 Run from the zeroServer repository root and replace the project directory as needed:
 
 ~~~powershell
-mvn -q -DskipTests install
+./mvnw -q -DskipTests install
 java scripts/RunLocalScaffold.java --projectDir path\to\__PROJECT_NAME__
 ~~~
 

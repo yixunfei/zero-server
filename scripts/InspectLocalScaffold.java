@@ -33,6 +33,7 @@ public final class InspectLocalScaffold {
      * 支持的本地模板名称。
      */
     private static final List<String> SUPPORTED_TEMPLATES = List.of(
+            "runtime",
             "local",
             "room",
             "scene-sync",
@@ -95,6 +96,9 @@ public final class InspectLocalScaffold {
         requireFile(report, "components", components);
         requireFile(report, "next-steps", nextSteps);
         requireFile(report, "manifest", manifest);
+        requireFile(report, "wrapper-unix", projectDir.resolve("mvnw"));
+        requireFile(report, "wrapper-windows", projectDir.resolve("mvnw.cmd"));
+        requireFile(report, "wrapper-properties", projectDir.resolve(".mvn/wrapper/maven-wrapper.properties"));
         if (report.hasErrors()) {
             return report;
         }
@@ -112,7 +116,7 @@ public final class InspectLocalScaffold {
         rejectPlaceholder(report, components, componentsText);
         rejectPlaceholder(report, nextSteps, nextStepsText);
         rejectPlaceholder(report, manifest, manifestText);
-        checkPom(report, pom, pomText);
+        checkPom(report, pom, pomText, "runtime".equals(parseStringFields(manifestText).get("template")));
         checkDocs(report, readme, readmeText, businessGuide, businessGuideText, components, componentsText,
                 nextSteps, nextStepsText);
         checkManifest(report, projectDir, manifest, manifestText);
@@ -134,9 +138,13 @@ public final class InspectLocalScaffold {
         }
     }
 
-    private static void checkPom(final InspectionReport report, final Path pom, final String text) {
+    private static void checkPom(
+            final InspectionReport report, final Path pom, final String text, final boolean runtime) {
         requireContains(report, "pom-zero-dependency", text, "<groupId>group.zn.zero</groupId>", pom);
         requireContains(report, "pom-bootstrap", text, "<artifactId>zero-runtime-bootstrap</artifactId>", pom);
+        if (runtime) {
+            return;
+        }
         requireContains(report, "pom-codegen", text, "<artifactId>zero-codegen</artifactId>", pom);
         requireContains(report, "pom-generate-sources", text, "<phase>generate-sources</phase>", pom);
         requireContains(report, "pom-protocol-input", text, "src/main/protocol", pom);
@@ -193,7 +201,8 @@ public final class InspectLocalScaffold {
         String projectName = requiredString(report, strings, "projectName", manifest);
         String packageName = requiredString(report, strings, "packageName", manifest);
         String template = requiredString(report, strings, "template", manifest);
-        String protocolFile = requiredString(report, strings, "protocolFile", manifest);
+        String protocolFile = "runtime".equals(template) ? strings.getOrDefault("protocolFile", "")
+                : requiredString(report, strings, "protocolFile", manifest);
         String summaryPrefix = requiredString(report, strings, "summaryPrefix", manifest);
         String productionGap = requiredString(report, strings, "productionGap", manifest);
 
@@ -225,6 +234,20 @@ public final class InspectLocalScaffold {
             report.pass("manifest-gap", productionGap);
         }
 
+        if (!"runtime".equals(template) || !protocolFile.isBlank()) {
+            checkProtocol(report, projectDir, protocolFile);
+        }
+        checkBoundaryBoolean(report, booleans, "prototype", true);
+        checkBoundaryBoolean(report, booleans, "connectsExternalMiddleware", false);
+        checkBoundaryBoolean(report, booleans, "opensNetworkPorts", false);
+        requireContains(report, "manifest-components", text, "\"zero-runtime-bootstrap\"", manifest);
+        requireContains(report, "manifest-business-guide", text, "\"BUSINESS_GUIDE.md\"", manifest);
+        requireContains(report, "manifest-documents", text, "\"COMPONENTS.md\"", manifest);
+        requireContains(report, "manifest-next-steps", text, "\"NEXT_STEPS.md\"", manifest);
+    }
+
+    private static void checkProtocol(
+            final InspectionReport report, final Path projectDir, final String protocolFile) {
         Path protocolPath = projectDir.resolve(protocolFile).normalize();
         if (Files.isRegularFile(protocolPath)) {
             report.pass("protocol-file", protocolPath.toString());
@@ -242,13 +265,6 @@ public final class InspectLocalScaffold {
         } else {
             report.fail("proto-id", "protoId.txt not found: " + protoId);
         }
-        checkBoundaryBoolean(report, booleans, "prototype", true);
-        checkBoundaryBoolean(report, booleans, "connectsExternalMiddleware", false);
-        checkBoundaryBoolean(report, booleans, "opensNetworkPorts", false);
-        requireContains(report, "manifest-components", text, "\"zero-runtime-bootstrap\"", manifest);
-        requireContains(report, "manifest-business-guide", text, "\"BUSINESS_GUIDE.md\"", manifest);
-        requireContains(report, "manifest-documents", text, "\"COMPONENTS.md\"", manifest);
-        requireContains(report, "manifest-next-steps", text, "\"NEXT_STEPS.md\"", manifest);
     }
 
     private static void checkBoundaryBoolean(

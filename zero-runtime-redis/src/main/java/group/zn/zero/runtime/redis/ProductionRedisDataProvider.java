@@ -34,7 +34,7 @@ final class ProductionRedisDataProvider implements RuntimeComponentProvider {
             .require(ProductionRedisRuntimeCapabilities.RESOURCE)
             .require(RuntimeBasics.EXECUTORS)
             .kind(ComponentKind.EXTERNAL)
-            .health(HealthPhase.STARTUP)
+            .health(HealthPhase.STARTUP).health(HealthPhase.READINESS)
             .build();
     private final ProductionAdapterDiagnostic diagnostic;
     private final ProductionStartupBudget startupBudget;
@@ -56,16 +56,15 @@ final class ProductionRedisDataProvider implements RuntimeComponentProvider {
         ComponentCreationContext checked = Objects.requireNonNull(context, "context");
         try {
             var executors = checked.require(RuntimeBasics.EXECUTORS);
-            if (executors.remoteIoMayInline()) {
-                throw new IllegalStateException("redis repositories require non-inline remote IO execution");
-            }
+            group.zn.zero.runtime.production.RuntimeAdapterIo.requireRemoteIo(diagnostic.adapterName(), executors);
             ProductionRedisResource resource = checked.require(ProductionRedisRuntimeCapabilities.RESOURCE);
             resource.acquire(checked.resources());
             RedisDataAdapter created = new RedisDataAdapter();
             diagnostic.mark(ZeroProductionAdapterState.CREATED);
             var repositories = checked.resources().register(created.repositoryFactory(
-                    resource.client(), executors.remoteIoExecutor()));
+                    resource.client(), executors.remoteIoExecutor(), resource.monitor()::call));
             return ComponentContribution.builder()
+                    .healthSnapshot(HealthPhase.READINESS, resource.monitor()::readiness)
                     .contribute(DataRuntime.DATA_SERVICES, created)
                     .contribute(DataRuntime.REPOSITORY_SOURCES, new RepositorySource("redis", repositories))
                     .lifecycle(new ProductionAdapterLifecycle(diagnostic, startupBudget, created))

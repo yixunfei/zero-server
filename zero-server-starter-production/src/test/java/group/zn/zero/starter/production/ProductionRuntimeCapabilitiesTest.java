@@ -89,6 +89,7 @@ class ProductionRuntimeCapabilitiesTest {
                 List.of(
                         MavenCoordinate.zero("zero-discovery"),
                         MavenCoordinate.zero("zero-rpc"),
+                        MavenCoordinate.zero("zero-runtime-bootstrap"),
                         MavenCoordinate.zero("zero-runtime-nacos")),
                 StandardRuntimeCapabilityModel.instance().artifactsForProviders(List.of(
                         StandardRuntimeCapabilityModel.PRODUCTION_NACOS_DISCOVERY,

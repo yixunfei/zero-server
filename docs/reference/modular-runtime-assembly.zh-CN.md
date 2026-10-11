@@ -1,5 +1,9 @@
 # 模块化运行时装配设计
 
+带依赖的单值组件可使用 `RuntimeModule.component(id, key).require(dependency).create(context -> value)`；规划不执行工厂，创建出的 AutoCloseable 由 runtime 登记并在失败时回滚。catalog `bindings` 同时派生能力图与工厂入口，见[配置与目录指南](../guides/configuration-and-catalog.zh-CN.md)。
+
+已有共享值可用 `RuntimeModule.value(ComponentId.of("application.greeting"), ComponentKey.single("sample.greeting", String.class), "hello")` 安装；它不接管该值的关闭责任。新建单值对象优先使用上面的延迟工厂；catalog 的 `bindings` 从一份声明派生同一工厂、能力和 Provider 元数据，见 `examples/scaffold-catalog/greeting.catalog.json`。多值或复杂外部组件仍可使用 `RuntimeModule.of(...)` 和显式 Provider；规划阶段按能力模型检查缺失依赖，外部 Adapter 需要受管 `zero.executors`。
+
 > 状态：阶段 1 切片 1B、1C、1D 已完成代码收敛，最终全仓验收记录见任务档案
 
 > 按需装配第一批已完成：独立集成层、延迟创建和四种精简消费者已通过 full 15/15；新接入方式及能力键迁移见[按需装配指南](../guides/modular-composition-guide.zh-CN.md)。

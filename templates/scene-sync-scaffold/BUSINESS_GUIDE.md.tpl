@@ -43,7 +43,7 @@ src/main/protocol/protoId.txt
 After changing protocol files, run:
 
 ~~~powershell
-mvn -q generate-sources
+./mvnw -q generate-sources
 ~~~
 
 Generated sources are written to:
@@ -59,8 +59,8 @@ Treat generated files as output. Put business behavior in handwritten code, not 
 From the generated project directory:
 
 ~~~powershell
-mvn -q clean test
-mvn -q exec:java
+./mvnw -q clean test
+./mvnw -q exec:java
 ~~~
 
 From the zeroServer repository root:
@@ -103,7 +103,7 @@ Suggested path:
 
 1. Extend `__PROTOCOL_FILE__`, for example add `facing`, `speed` or a small `queryNearby(uid, sceneId, radius, traceId)` request.
 2. Reserve a protocol id in `src/main/protocol/protoId.txt` if you add a new request.
-3. Run `mvn -q generate-sources`.
+3. Run `./mvnw -q generate-sources`.
 4. Update the handwritten BO logic in `__APP_CLASS__` so the scene state changes through the existing Actor lane.
 5. Add one assertion to `__TEST_CLASS__` that verifies the visible entity count, position summary or new state field.
 

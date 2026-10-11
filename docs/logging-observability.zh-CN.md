@@ -1,5 +1,7 @@
 # 日志与可观测性设计
 
+2026-10-11：GameRuntime.healthSnapshot 提供缓存状态的 READINESS，STARTUP 保留为历史。Production Adapter 报告的 runtime/settings 字段提供安全原因码、在途数及有效预算；读取不触发 IO，降级/恢复中不报告就绪。
+
 ## 2026-10-05 Kafka 成功事件开销
 
 默认 production `KafkaProductionTelemetryObserver` 在创建日志记录前省略 STARTED/SUCCESS，成功调用与 pending 状态由既有 transport snapshot 计数观测。失败、超时、拒绝和降级仍同步进入 LogPipeline，绑定 ErrorCode，不记录业务异常原文或 payload。处理器前后两次安全校验保护不同信任边界，继续保留。

@@ -22,7 +22,7 @@ Read `COMPONENTS.md` and `NEXT_STEPS.md` when you need framework boundaries or a
 
 ## 2. Where To Write Business Logic
 
-For the first demo change, start with `__APP_CLASS__.java` and `__TEST_CLASS__.java` (see `First Business Change`). The demo currently registers its own nested `LocalGameBO` fixture.
+For the first demo change, start with `__APP_CLASS__.java` and `__TEST_CLASS__.java` (see `First Business Change`). Demo and TCP share LocalGameFlow and the standalone LocalGameBO; changing that BO changes both entry points.
 
 For reusable asynchronous business handlers, use the separate files:
 
@@ -33,7 +33,7 @@ src/main/java/__PACKAGE_PATH__/LocalGameFixture.java
 src/main/java/__PACKAGE_PATH__/LocalGameObservation.java
 ~~~
 
-The separate `LocalGameBO.java` adapts generated protocol events to injected asynchronous business ports. Services return `CompletionStage`; handlers must compose stages and must not call `join()` or `get()`. Changes to this separate adapter do not automatically change the demo's nested fixture.
+The separate `LocalGameBO.java` adapts generated protocol events to injected asynchronous business ports. Services return `CompletionStage`; handlers must compose stages and must not call `join()` or `get()`. The returned stage represents actual business completion and carries failures back to the caller. Only the sequential CLI demo waits on that stage.
 
 The local fixture explicitly selects `MissingPlayerPolicy.CREATE_DEFAULT` to create prototype players. The framework default is `REJECT`. When connecting an account system, register player profiles through your repository before login, use the default rejection policy, and implement authentication and account-to-UID authorization in the business boundary.
 
@@ -74,7 +74,7 @@ For a test-only feedback loop from the repository root:
 ./mvnw.cmd -q -f "path/to/__PROJECT_NAME__/pom.xml" test
 ~~~
 
-On Linux/macOS use `./mvnw`. With Maven 3.9+ on PATH, you may also run `mvn -q test` and `mvn -q exec:java` inside the generated project.
+On Linux/macOS use `./mvnw`. With Maven 3.9+ on PATH, you may also run `./mvnw -q test` and `./mvnw -q exec:java` inside the generated project.
 
 For a fast structure-only check, use:
 
@@ -87,7 +87,7 @@ java scripts/RunLocalScaffold.java --projectDir path/to/__PROJECT_NAME__ --skipT
 Good first changes:
 
 - Add a new request to `__PROTOCOL_FILE__`.
-- Extend a demo handler in `__APP_CLASS__`, or a reusable asynchronous handler in the separate `LocalGameBO.java`.
+- Extend a shared asynchronous handler in LocalGameBO.java; keep CLI orchestration in __APP_CLASS__.
 - Add assertions to `src/test/java/__PACKAGE_PATH__/__TEST_CLASS__.java`.
 - Add local log or metric samples through existing framework components.
 
@@ -109,7 +109,7 @@ Suggested path:
 2. Run the test-only command above and observe the position assertions fail.
 3. Update the expected position in `src/test/java/__PACKAGE_PATH__/__TEST_CLASS__.java` to `(4, 6)`, then test and run again. The summary should contain `position=4,6`.
 
-To add a new player action later, add a request to `__PROTOCOL_FILE__`, reserve its protocol id in `src/main/protocol/protoId.txt`, and regenerate sources. Implement its generated event interface in a handwritten handler and register that handler with the generated dispatcher. The demo uses `registerHandlers()` in `__APP_CLASS__.java`; reusable flows use `LocalGameFlow.java`.
+To add a new player action later, add a request to `__PROTOCOL_FILE__`, reserve its protocol id in `src/main/protocol/protoId.txt`, and regenerate sources. Implement its generated event interface in a handwritten handler and register that handler with the generated dispatcher. Both demo and TCP registrations live in LocalGameFlow.java; register the new handler and provide its completion stage there.
 
 Keep the first change local and deterministic. Do not add account authentication, durable online state or external persistence from inside this scaffold.
 

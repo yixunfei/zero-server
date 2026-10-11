@@ -3,6 +3,7 @@ package group.zn.zero.data.postgresql;
 import group.zn.zero.data.adapter.AbstractRepositoryAdapter;
 import group.zn.zero.data.envelope.ZeroDataEntityCodec;
 import group.zn.zero.data.envelope.EnvelopeRepositoryFactory;
+import group.zn.zero.data.envelope.ObservedEnvelopeStore;
 import group.zn.zero.data.envelope.ZeroDataEnvelopeCrudRepository;
 import group.zn.zero.data.mapping.ZeroDataObjectMetadata;
 import group.zn.zero.data.model.VersionedEntity;
@@ -53,10 +54,19 @@ public final class PostgresqlDataAdapter extends AbstractRepositoryAdapter {
      */
     public EnvelopeRepositoryFactory repositoryFactory(
             final DataSource source, final String tableName, final Executor ioExecutor) {
+        return repositoryFactory(source, tableName, ioExecutor, null);
+    }
+
+    /** Creates an externally owned pool repository with optional operation observation. */
+    public EnvelopeRepositoryFactory repositoryFactory(final DataSource source, final String tableName,
+            final Executor ioExecutor, final ObservedEnvelopeStore.Observer observer) {
         Objects.requireNonNull(source, "source");
         String table = PostgresqlDriverSettings.requireIdentifier(tableName);
-        return new EnvelopeRepositoryFactory(metadata -> new PostgresqlDriverEnvelopeStore(
-                metadata.namespace(), metadata.collection(), table, source), ioExecutor);
+        return new EnvelopeRepositoryFactory(metadata -> {
+            var store = new PostgresqlDriverEnvelopeStore(
+                    metadata.namespace(), metadata.collection(), table, source);
+            return observer == null ? store : new ObservedEnvelopeStore(store, observer);
+        }, ioExecutor);
     }
 
     /**
