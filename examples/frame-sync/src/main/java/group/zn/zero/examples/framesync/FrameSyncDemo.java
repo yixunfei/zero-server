@@ -1,89 +1,76 @@
 package group.zn.zero.examples.framesync;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.*;
+import group.zn.zero.framesync.FrameCommitted;
+import group.zn.zero.framesync.FrameInput;
+import group.zn.zero.framesync.FrameInputBatch;
+import group.zn.zero.framesync.FrameMatchConfig;
+import group.zn.zero.framesync.FrameMatchRuntime;
+import group.zn.zero.framesync.InputTimingPolicy;
+import group.zn.zero.framesync.MissingInputPolicy;
+import java.util.ArrayList;
+import java.util.List;
 
-/** Deterministic, single-owner local frame-sync demonstration. */
+/**
+ * 真实帧同步运行时：输入入队 → tick 消费 → 模拟 → 提交事件与广播。
+ * 默认本地调度器同步执行；join 仅用于普通命令行线程，不可照搬到 Actor/Netty 线程。
+ * @author zn
+ */
 public final class FrameSyncDemo {
     private FrameSyncDemo() { }
 
-    public static void main(String[] args) {
-        var match = new LocalFrameSync(new Config(4, 2, 64, MissingPolicy.EMPTY_INPUT, LatePolicy.REJECT));
-        match.join("match-1", "alice");
-        match.join("match-1", "bob");
-        var accepted = match.submit(new Input("alice", 1, 1, "move-right"));
-        var duplicate = match.submit(new Input("alice", 1, 1, "move-right"));
-        match.submit(new Input("bob", 1, 2, "move-left"));
-        var frame = match.tick(1);
-        var late = match.submit(new Input("bob", 2, 1, "late"));
-        var snapshot = match.snapshot();
-        match.close();
-        System.out.println("frame-sync=ok|mode=local|frameNo=" + snapshot.frameNo()
-                + "|accepted=" + accepted.status() + "|duplicate=" + duplicate.status()
-                + "|inputs=" + frame.inputs().size() + "|late=" + late.status()
-                + "|digest=" + snapshot.digest() + "|productionReady=false");
+    /** @param args 未使用参数。运行独立本地对局并输出摘要；失败向上抛出。 */
+    public static void main(final String[] args) {
+        System.out.println(runDemo());
     }
 
-    public enum MissingPolicy { EMPTY_INPUT }
-    public enum LatePolicy { REJECT, MARK }
-    public enum InputStatus { ACCEPTED, DUPLICATE, REJECTED_TOO_EARLY, REJECTED_TOO_LATE, REJECTED_CONFLICT }
-    public record Config(int maxPlayers, int futureWindow, int maxPayloadBytes,
-                         MissingPolicy missingPolicy, LatePolicy latePolicy) { }
-    public record Input(String uid, long inputSeq, long targetFrame, String payload) { }
-    public record InputResult(InputStatus status) { }
-    public record Frame(long frameNo, List<Input> inputs, List<String> missing) {
-        public Frame { inputs = List.copyOf(inputs); missing = List.copyOf(missing); }
+    /** @return 不可空摘要；调用之间状态独立、线程安全；关闭对局后返回。 */
+    public static String runDemo() {
+        DemoResult result = runFlow();
+        return "frame-sync=ok|mode=local|frameNo=" + result.frameNo()
+                + "|inputs=" + result.batches().getFirst().inputs().size()
+                + "|events=" + result.events().size() + "|broadcasts=" + result.broadcasts().size();
     }
-    public record Snapshot(long frameNo, String digest) { }
 
-    /** All state is mutated by this match owner; no internal executor is created. */
-    public static final class LocalFrameSync {
-        private final Config config;
-        private final Set<String> players = new TreeSet<>();
-        private final Map<String, Map<Long, Input>> received = new HashMap<>();
-        private final List<Frame> committed = new ArrayList<>();
-        private long frameNo;
-        private boolean closed;
-
-        public LocalFrameSync(Config config) { this.config = Objects.requireNonNull(config); }
-        public void join(String matchId, String uid) {
-            requireOpen();
-            if (players.size() >= config.maxPlayers() && !players.contains(uid)) throw new IllegalStateException("player capacity");
-            if (!"match-1".equals(matchId) || uid == null || uid.isBlank()) throw new IllegalArgumentException("invalid match or player");
-            players.add(uid); received.computeIfAbsent(uid, ignored -> new HashMap<>());
-        }
-        public InputResult submit(Input input) {
-            requireOpen(); Objects.requireNonNull(input);
-            if (!players.contains(input.uid())) throw new IllegalArgumentException("unknown player");
-            if (input.payload() == null || input.payload().getBytes(StandardCharsets.UTF_8).length > config.maxPayloadBytes()) throw new IllegalArgumentException("payload limit");
-            if (input.targetFrame() <= frameNo) return new InputResult(config.latePolicy() == LatePolicy.MARK ? InputStatus.REJECTED_TOO_LATE : InputStatus.REJECTED_TOO_LATE);
-            if (input.targetFrame() > frameNo + config.futureWindow()) return new InputResult(InputStatus.REJECTED_TOO_EARLY);
-            var bySeq = received.get(input.uid());
-            var prior = bySeq.get(input.inputSeq());
-            if (prior != null) return new InputResult(prior.payload().equals(input.payload()) && prior.targetFrame() == input.targetFrame() ? InputStatus.DUPLICATE : InputStatus.REJECTED_CONFLICT);
-            if (bySeq.keySet().stream().anyMatch(seq -> seq > input.inputSeq())) return new InputResult(InputStatus.REJECTED_CONFLICT);
-            bySeq.put(input.inputSeq(), input);
-            return new InputResult(InputStatus.ACCEPTED);
-        }
-        public Frame tick(long expectedFrame) {
-            requireOpen();
-            if (expectedFrame != frameNo + 1) throw new IllegalArgumentException("expected consecutive frame");
-            var inputs = new ArrayList<Input>(); var missing = new ArrayList<String>();
-            for (String uid : players) {
-                var candidate = received.get(uid).values().stream().filter(i -> i.targetFrame() == expectedFrame).findFirst();
-                if (candidate.isPresent()) inputs.add(candidate.get()); else if (config.missingPolicy() == MissingPolicy.EMPTY_INPUT) missing.add(uid);
+    /**
+     * 将同一输入提交两次，再推进一帧，确认只消费一次；所有回调都在本地对局 lane 执行。
+     * @return 不可空结果，各列表不可变、有序；不创建远端连接。
+     * @throws IllegalStateException 帧数、输入消费或通知不符合预期。
+     */
+    public static DemoResult runFlow() {
+        List<FrameInputBatch> batches = new ArrayList<>();
+        List<FrameCommitted> events = new ArrayList<>();
+        List<FrameCommitted> broadcasts = new ArrayList<>();
+        FrameMatchConfig config = new FrameMatchConfig(
+                InputTimingPolicy.REJECT, MissingInputPolicy.EMPTY, 64, 16, 4, 4);
+        try (var match = new FrameMatchRuntime("match-1", config,
+                (frame, batch) -> batches.add(batch), events::add, broadcasts::add)) {
+            FrameInput input = new FrameInput("player-1", 1, 1, 0, new byte[] {1}, "trace-input");
+            // submit 的完成仅表示入队；权威模拟要等 tick。
+            match.submit(input).toCompletableFuture().join();
+            match.submit(input).toCompletableFuture().join();
+            match.tick("trace-tick").toCompletableFuture().join();
+            if (match.frameNo() != 1 || batches.size() != 1 || batches.getFirst().inputs().size() != 1
+                    || events.size() != 1 || broadcasts.size() != 1) {
+                throw new IllegalStateException("frame input or notification was not committed exactly once");
             }
-            inputs.sort(Comparator.comparing(Input::uid).thenComparingLong(Input::inputSeq));
-            var result = new Frame(++frameNo, inputs, missing); committed.add(result); return result;
+            return new DemoResult(match.frameNo(), batches, events, broadcasts);
         }
-        public Snapshot snapshot() { requireOpen(); return new Snapshot(frameNo, digest()); }
-        public void close() { closed = true; }
-        private String digest() {
-            try { var md = MessageDigest.getInstance("SHA-256"); return HexFormat.of().formatHex(md.digest(committed.toString().getBytes(StandardCharsets.UTF_8))).substring(0, 12); }
-            catch (NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
+    }
+
+    /**
+     * 不可变、有序的本地对局结果；列表可能为空，元素为框架不可变快照。
+     * @param frameNo 最后提交的权威帧号。
+     * @param batches 交给模拟器的输入批次。
+     * @param events 已交给事件回调的提交信息。
+     * @param broadcasts 已交给广播回调的提交信息；不代表已通过网络送达。
+     */
+    public record DemoResult(long frameNo, List<FrameInputBatch> batches,
+            List<FrameCommitted> events, List<FrameCommitted> broadcasts) {
+        /** 复制结果，避免暴露回调的可变收集器；空引用抛 NullPointerException。 */
+        public DemoResult {
+            batches = List.copyOf(batches);
+            events = List.copyOf(events);
+            broadcasts = List.copyOf(broadcasts);
         }
-        private void requireOpen() { if (closed) throw new IllegalStateException("match closed"); }
     }
 }

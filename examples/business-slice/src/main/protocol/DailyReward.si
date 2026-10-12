@@ -1,0 +1,4 @@
+# 每日奖励协议；真实网络入口必须以认证会话校验 uid。
+
+client_to_server:
+  claimDailyReward(long uid, String idempotencyKey, String itemId, int quantity, String traceId); // 按玩家和服务端日期限领，itemId/quantity 必须为服务端配置 coin/100。

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>group.zn.zero</groupId><artifactId>zero-example-module-recipes</artifactId><version>0.1.2-SNAPSHOT</version>
+    </parent>
+    <artifactId>zero-example-recipe-npc</artifactId>
+    <properties><exec.mainClass>group.zn.zero.examples.recipes.npc.NpcExample</exec.mainClass></properties>
+    <dependencies>
+        <dependency><groupId>group.zn.zero</groupId><artifactId>zero-runtime-bootstrap</artifactId></dependency>
+        <dependency><groupId>group.zn.zero</groupId><artifactId>zero-runtime-actor</artifactId></dependency>
+        <dependency><groupId>group.zn.zero</groupId><artifactId>zero-npc</artifactId></dependency>
+    </dependencies>
+    <build><plugins>
+        <plugin><groupId>org.codehaus.mojo</groupId><artifactId>exec-maven-plugin</artifactId></plugin>
+    </plugins></build>
+</project>

@@ -1,36 +1,27 @@
 package group.zn.zero.examples.aoisync;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import group.zn.zero.aoi.VisibilityEvent;
+import group.zn.zero.statesync.InMemoryStateSync;
 import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.*;
 
+/** 核对可见实体内容、基线时序和真实全量恢复。 @author zn */
 class AoiStateSyncDemoTest {
-    @Test void visibilityAndSequencesAreDeterministic() {
-        var api = new AoiStateSyncDemo.LocalAoiApi(new AoiStateSyncDemo.Limits(10, 10, 10, 32));
-        api.addObserver("o", new AoiStateSyncDemo.Point(0, 0), 3);
-        api.addEntity("e", new AoiStateSyncDemo.Point(2, 0), "npc");
-        assertEquals(1, api.queryVisible("o").size());
-        api.moveEntity("e", new AoiStateSyncDemo.Point(10, 0));
-        assertEquals(2, api.sceneSeq());
-        assertEquals("disappeared", api.events("o").get(1).type());
-        assertTrue(api.events("o").get(0).syncSeq() < api.events("o").get(1).syncSeq());
-    }
-
-    @Test void snapshotAndBaselineMismatchAreExplicit() {
-        var api = new AoiStateSyncDemo.LocalAoiApi(new AoiStateSyncDemo.Limits(10, 10, 10, 32));
-        api.addObserver("o", new AoiStateSyncDemo.Point(0, 0), 3);
-        api.addEntity("e", new AoiStateSyncDemo.Point(1, 1), "npc");
-        var snapshot = api.snapshot("o");
-        assertEquals(1, snapshot.entities().size());
-        assertTrue(api.applyDelta(new AoiStateSyncDemo.Delta(snapshot.version(), 2, "e", "ok")).applied());
-        assertTrue(api.applyDelta(new AoiStateSyncDemo.Delta(99, 100, "e", "stale")).resyncRequired());
-    }
-
-    @Test void capacitiesRejectOversizedEntityAndQueueWithoutSilentDrop() {
-        var api = new AoiStateSyncDemo.LocalAoiApi(new AoiStateSyncDemo.Limits(1, 1, 1, 3));
-        api.addObserver("o", new AoiStateSyncDemo.Point(0, 0), 5);
-        api.addEntity("e", new AoiStateSyncDemo.Point(0, 0), "npc");
-        api.moveEntity("e", new AoiStateSyncDemo.Point(10, 0));
-        assertThrows(IllegalStateException.class, () -> api.addEntity("second", new AoiStateSyncDemo.Point(0, 0), "x"));
-        assertTrue(api.queueRejected() > 0);
+    /** 版本 2 快照的实体更新为版本 3 增量，恢复快照仍含真实实体状态。 */
+    @Test
+    void capturesBeforeAndAfterStateAndRecoversBaseline() {
+        var result = AoiStateSyncDemo.runFlow();
+        assertEquals(1, result.entered().size());
+        assertEquals(VisibilityEvent.Type.ENTER, result.entered().getFirst().type());
+        assertEquals(java.util.Map.of("hp", 100), result.entered().getFirst().entity().state());
+        assertEquals(VisibilityEvent.Type.UPDATE, result.changed().getFirst().type());
+        assertEquals(java.util.Map.of("hp", 95), result.changed().getFirst().entity().state());
+        assertEquals(2, result.snapshot().stateVersion());
+        assertEquals(2, result.delta().baselineVersion());
+        assertEquals(3, result.delta().stateVersion());
+        InMemoryStateSync freshReceiver = new InMemoryStateSync();
+        assertEquals(InMemoryStateSync.Status.RESYNC_REQUIRED, freshReceiver.accept(result.delta()).status());
+        assertEquals(InMemoryStateSync.Status.APPLIED, freshReceiver.accept(result.recovery()).status());
+        assertEquals(InMemoryStateSync.Status.IGNORED, freshReceiver.accept(result.recovery()).status());
     }
 }

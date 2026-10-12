@@ -1,6 +1,6 @@
 # npc-tick 本地示例
 
-这是一个独立 Maven 示例，使用仓库当前可用的 JDK 21 与本地内存 API 演示 NPC 生命周期片段、行为切换和有界 zone tick。当前仓库没有 `zero-npc` 或 `zero-tick` 公共模块，因此示例不会伪造或依赖尚未发布的 API；未来模块可用时再适配。
+这是早期独立教学模拟，使用自定义内存 API 演示 NPC 生命周期片段、行为切换和有界 zone tick。当前仓库已有 `zero-npc`，本目录没有依赖该模块，不能作为正式 API 的接入或验证依据。正式用法见 [LocalNpcZone 可运行应用](../module-recipes/npc/README.md) 与 [zero-npc 模块入口](../../zero-npc/examples/README.md)。
 
 在仓库根目录运行：
 

@@ -1,5 +1,23 @@
 # zeroServer 模块图
 
+## 2026-10-12 模块接入应用
+
+新增 [examples/module-recipes](../examples/module-recipes/README.md)，是独立消费者聚合工程，不进入框架发布 Reactor。Java 包为 `group.zn.zero.examples.recipes.<场景>`；各子工程只向下依赖框架，核心与 Adapter 不反向依赖示例。
+
+| 入口 / 常见修改位置 | 职责与主要依赖 | 边界 |
+| --- | --- | --- |
+| `runtime-basics/RuntimeBasicsExample` | 配置、诊断及受管任务；runtime-bootstrap | 不安装网络；执行器统一关闭 |
+| `event-actor/EventActorExample` | 内部事件到玩家 lane；runtime-event、runtime-actor、game | 固定玩家状态由一个 lane 独占，回调不阻塞 |
+| `discovery/DiscoveryExample` | 健康/集群筛选与业务标签选择；runtime-discovery | 内存目录不代表真实服务就绪 |
+| `npc/NpcExample` | 正式 NPC 生命周期与次数预算；npc、runtime-actor | 决策失败隔离，通知失败不回滚 |
+| `ownership/OwnershipExample` | 本地租约、CAS、幂等和主动交接；ownership | 不代表分布式原子提交或宕机恢复 |
+| `gm/GmExample`、`AnnouncementCommand` | REST 到授权/审批/幂等/审计；gm-rest | 本地身份 fixture，无网络监听或公告外发 |
+| `production/ProductionExample` | 实际 Starter 配置诊断及基础生命周期；server-starter-production | 隔离进程配置，无外部 Adapter 健康验收 |
+
+聚合 POM 只管理测试和构建，禁止将 GM/production 的具体驱动依赖扩散到纯基础示例；业务禁止自行创建线程池。现有 62 个模块的其他入口见[模块接入卡片](../examples/module-access/README.md)，验证记录见[迁移说明](migrations/20261012-module-recipes.zh-CN.md)。
+
+2026-10-12 示例审核：`examples/business-slice/DailyRewardService` 负责按服务端日期限领，`DailyRewardInventory` 将库存和领取标记聚合为一次版本条件写；已移除独立领取记录实体。`examples/multi-server-player` 的 `PlayerLifecycleService` 负责普通调用线程上的本地业务编排，`CenterRouter` 统一注册与粘性路由，`role/RoleResults` 保留业务 ErrorCode，`rpc/RpcInputs` 校验契约字段。RPC 接口当前是未装配 codec 的草图；外部组件探针独立于玩家流程。常见修改入口见 [模块接入卡片](../examples/module-access/README.md) 与 [示例迁移说明](migrations/20261012-examples-review.zh-CN.md)。框架模块、依赖方向及 core 禁止依赖中间件的约束保持不变。
+
 2026-10-11 上手修复：`zero-runtime/RuntimeComponentBuilder` 负责带依赖的延迟单值工厂与资源登记；`ComponentContribution.healthSnapshot` 和 `DefaultGameRuntime` 汇入内存 READINESS，不依赖 production 或驱动。`zero-runtime-production/RuntimeAdapterSettings` 解析五类独立运行预算，`ProductionAssembly` 默认延迟创建受管 IO；各 Adapter provider 接入共享健康及原生超时。`zero-codegen/ScaffoldCatalogFile` 的 bindings 从一份声明派生组件图与工厂，`ScaffoldWrapper` 从生成器资源导出 Wrapper；Runner 按生成 POM 安装依赖闭包。常改位置为以上类和入门指南，模块依赖方向保持不变。
 
 2026-10-11 Redis 实测补充：`zero-data/envelope/ScopedEnvelopeStore` 保留已分类的非数据类框架错误码，避免上层 Repository 丢失拒绝和未知写结果语义；仅依赖 `zero-core/ErrorCode`，不引用 production 类型。`zero-server-starter-production` 的 `RedisRuntimeRecoveryExternalIT` 与测试专用 `RedisRecoveryFaultProxy` 验证真实 Redis 数据/缓存共用状态的断连、超时、恢复和写结果；代理只影响本次测试连接，常改位置为上述测试与 `ObservedEnvelopeStore`。

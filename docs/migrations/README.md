@@ -6,6 +6,11 @@
 
 | 日期 / 主题 | 适用范围 |
 | --- | --- |
+| [2026-10-12 模块接入与常见场景应用](20261012-module-recipes.zh-CN.md) | 七个独立应用、16 个模块入口更新；无框架 API/存储/协议迁移 |
+| [2026-10-12 新增 examples 审核修复](20261012-examples-review.zh-CN.md) | 每日奖励聚合 schema 2、示例 API/线程约束、外部探针命令及模块接入文档修正 |
+| [2026-10-12 模块接入示例](20261012-module-access-examples.zh-CN.md) | 62 个 `zero-*` 模块和根 examples 的 63 张最小接入卡片；无运行时/API 迁移 |
+| [2026-10-12 多服务器玩家生命周期示例](20261012-multi-server-player.zh-CN.md) | 注册、登录、角色、断线重连，以及 Kafka/Nacos/MongoDB/Redis Compose 验收；无生产 API 迁移 |
+| [2026-10-12 模块示例与使用说明](20261012-module-examples.zh-CN.md) | 全部 Reactor 模块的 examples 入口、依赖选择和可运行场景导航；无运行时/API 迁移 |
 | [2026-10-11 项目验收与异步 Adapter 准入](20261011-project-review.zh-CN.md) | 异步完成通知与容量释放顺序、Redis 独立消费者负例及验证边界 |
 | [2026-10-11 GitHub Actions 验收修复](20261011-ci-actions-repair.zh-CN.md) | 依赖清单、Wrapper 版本检查、示例和 CLI 验收类路径、macOS 测试临时目录 |
 | [2026-10-10 Runtime Adapter 恢复与组件入口](20261010-runtime-adapter-recovery.zh-CN.md) | 五类外部 Adapter 健康、拒绝与未知写结果，以及 Java/catalog 自定义组件入口 |

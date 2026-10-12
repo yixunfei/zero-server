@@ -6,6 +6,47 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+### 模块接入与常见场景应用（2026-10-12）
+
+- 新增 `examples/module-recipes` 的七个独立可运行应用：基础运行时、事件/Actor、服务发现、正式 NPC、所有权、GM/REST、生产配置诊断。
+- 提供真实 API 调用、受管生命周期、中文注释、可检查结果，以及幂等、非法输入、旧租约、审批/权限和缺失配置等失败场景。
+- 更新 16 个模块的接入卡片和模块内示例导航；其他模块继续使用已有网络、存储、RPC、玩法与运维场景。
+- 8 项测试、七个 main 与质量检查通过；仅新增示例，无框架 API、协议或存储迁移。命令与验证边界见[迁移说明](docs/migrations/20261012-module-recipes.zh-CN.md)。
+
+### 新增 examples 审核修复（2026-10-12）
+
+- 每日奖励改为玩家库存与领取日期的一次版本条件写，按服务端日期限领并固定奖励，拒绝时钟回拨；消除跨玩家幂等键串用、换键增发和双写部分提交风险。
+- 玩家职责示例修复 UID 哈希碰撞、失效会话建角、认证前踢线、重复登录路由漂移、角色缓存版本及注册表不一致；补充 ErrorCode 和调用线程约束。
+- AOI 演示真实快照/增量版本和全量恢复，帧同步验证实际输入消费及通知；补齐中文注释、失败边界和运行提示。
+- 重写 62 张模块接入卡片与 62 份模块示例导航，链接真实 API 调用与测试，明确外部验证和跳过边界。
+- 四组件探针使用随机记录、写后读及清理；脚本隔离项目、恢复环境变量、保留数据卷并以独立 JVM 运行，修复 SDK 在 Maven 内退出的线程/classloader 问题。
+- 4 个场景共 18 项测试、Checkstyle、PMD、SpotBugs、JaCoCo 和真实四组件探针通过。示例 API/schema 与命令调整见[迁移说明](docs/migrations/20261012-examples-review.zh-CN.md)。
+
+### Module access examples
+
+- 新增 `examples/module-access`，为 62 个 `zero-*` 模块和根 examples 场景入口提供 63 张最小接入卡片。
+- 每张卡片包含依赖坐标、核心 API、可运行场景、验证命令和线程/资源边界；各模块 examples README 已补充卡片链接。
+- 仅新增文档和导航，不改变公共 API、运行时行为、协议格式或依赖方向。验证记录见 [模块接入示例迁移说明](docs/migrations/20261012-module-access-examples.zh-CN.md)。
+
+### Multi server player example
+
+- 新增 `examples/multi-server-player`，覆盖玩家注册、登录、创建角色、断线重连，以及登录服、中心服、逻辑服的职责切分。
+- 增加 Kafka metadata、Nacos 注册查询、MongoDB/Redis 读写的 Compose 连通探针；玩家业务流程目前在单 JVM 内使用内存 Repository/Cache，RPC 契约尚未装配远端通信。
+- 仅新增示例和文档，不改变公共 API、生产运行时或协议兼容策略。验证记录见 [多服务器玩家示例迁移说明](docs/migrations/20261012-multi-server-player.zh-CN.md)。
+
+### Business development vertical slice
+
+- 新增 `examples/business-slice`，以每日道具领取演示协议生成、玩家业务服务、Repository/缓存替换、幂等、内部事件、日志、指标和回归测试。
+- 根 examples 导航以及 `zero-data`、`zero-cache`、`zero-event`、`zero-server-starter` 模块入口指向该业务开发示例。
+- 仅新增示例和文档，不改变公共 API、协议格式、运行时行为或依赖方向；无生产代码迁移步骤。验证记录见 [业务开发纵向示例](docs/migrations/20261012-business-slice.zh-CN.md)。
+
+### Module examples and usage notes
+
+- 为全部 Reactor 模块新增模块级 `examples/README.md` 入口：能力模块提供代码入口与依赖选择说明，Parent/BOM、runtime provider 和 Adapter 说明装配边界并链接到可运行场景。
+- 根 `examples/README.md` 增加模块示例索引；补充线程归属、资源关闭、可选 Adapter 和外部中间件前置条件。
+- 仅增加文档与示例入口，不改变公共 API、运行时行为、协议格式或依赖方向；无需迁移代码。
+- 验证记录见 [2026-10-12 模块示例](docs/migrations/20261012-module-examples.zh-CN.md)。
+
 ### 项目验收与异步 Adapter 准入修复（2026-10-11）
 
 - Adapter 异步操作在通知完成回调前释放 in-flight 配额；回调立即发起下一次调用不再被误判为容量耗尽。修复分类异常时结果可能悬挂的问题。

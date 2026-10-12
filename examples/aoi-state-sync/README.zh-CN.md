@@ -1,18 +1,22 @@
-# AOI / 状态同步本地示例
+# AOI 与状态同步基线
 
-这是一个独立 Maven 示例，使用 fake local in-memory API 演示单 scene-owner 的 AOI 与状态同步语义。它不依赖网络、数据库、线程池或 `zero-aoi` / `zero-state-sync` 模块。
+本例直接使用 zero-aoi 和 zero-state-sync，在同一个场景 owner 上顺序执行：建立实体 → ENTER → 版本 2 快照 → 实体 UPDATE → 版本 3 增量 → 错基线请求 → 全量恢复 → 忽略重复信封。
+
+仓库根目录使用 JDK 21、Maven 3.9+，首次先安装框架依赖：
 
 ```powershell
-mvn -B -ntp -f examples/aoi-state-sync/pom.xml clean test
-mvn -B -ntp -f examples/aoi-state-sync/pom.xml exec:java
+mvn -B -ntp -DskipTests install
+mvn -B -ntp -f examples/aoi-state-sync/pom.xml clean test exec:java
 ```
 
-运行输出包含稳定 marker：
+成功摘要：
 
 ```text
-aoi-state-sync=ok|mode=local|sceneSeq=...|syncSeq=...|visible=...|snapshot=...|deltaApplied=true|resyncRequired=true|queueRejected=...|productionReady=false
+aoi-state-sync=ok|mode=local|sceneSeq=3|visible=1|delta=APPLIED|stale=RESYNC_REQUIRED|recovery=APPLIED|duplicate=IGNORED
 ```
 
-示例路径覆盖：创建 observer/entity、移动、Chebyshev 可见查询、出现/消失事件、snapshot、匹配 delta、baseline mismatch 的 resync-required，以及有界 observer queue。所有 mutation 由调用方按 owner lane 顺序调用；示例 API 自身不创建线程。
+从 [AoiStateSyncDemo.runFlow](src/main/java/group/zn/zero/examples/aoisync/AoiStateSyncDemo.java) 接入。AOI 的 visible 返回实体 ID；示例用场景实体表解析 ID，将实体投影为 Map/List 基础类型作为同步负载。实体从 hp=100 更新到 hp=95，增量引用更新前基线，恢复快照包含当前完整可见状态。
 
-固定默认容量为 `maxEntities=32`、`maxVisible=8`、`maxObserverQueue=2`、`maxPayloadBytes=256`。这些值只用于演示拒绝边界，不代表生产吞吐、SLA、广播能力或跨服能力。
+InMemoryStateSync 校验序号、基线版本和摘要，**不负责应用业务 payload**。APPLIED 只代表信封被接收；客户端实体表的增删改、网络传输和失败恢复由业务实现。示例在结束时释放 AOI 观察者与同步基线。
+
+所有本地索引和同步器都由同一调用线程访问，无外部资源。不要把它们跨线程共享；真实场景应由 scene Actor 串行管理。[测试](src/test/java/group/zn/zero/examples/aoisync/AoiStateSyncDemoTest.java) 核对实体内容、版本关系和恢复行为。

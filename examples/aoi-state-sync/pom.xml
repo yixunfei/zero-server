@@ -9,10 +9,22 @@
     </parent>
     <artifactId>zero-example-aoi-state-sync</artifactId>
     <name>zeroServer Example AOI State Sync</name>
-    <description>Fake local in-memory AOI and state synchronization example.</description>
+    <description>Local AOI visibility and state-sync baseline example using zero-aoi and zero-state-sync.</description>
     <properties>
         <exec.mainClass>group.zn.zero.examples.aoisync.AoiStateSyncDemo</exec.mainClass>
     </properties>
+    <dependencies>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-aoi</artifactId>
+            <version>0.1.2-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>group.zn.zero</groupId>
+            <artifactId>zero-state-sync</artifactId>
+            <version>0.1.2-SNAPSHOT</version>
+        </dependency>
+    </dependencies>
     <build>
         <plugins>
             <plugin>

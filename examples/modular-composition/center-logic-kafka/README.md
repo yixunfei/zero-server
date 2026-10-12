@@ -39,7 +39,7 @@ BROKER_READY -> CENTER_READY -> LOGIC_READY -> REGISTERED -> REQUESTED
 -> DRAINING -> UNREGISTERED -> STOPPED
 ```
 
-RPC envelope 由 `zero-rpc` 负责生成和传递 `correlationId`、`traceId`、`timeoutAt`；业务 DTO 只携带 `instanceId` 和业务状态。`logic.ready`、`logic.requested`、`logic.drain`、`logic.stopped` 以及 center markers 只用于验收控制，不是生产服务发现协议。
+RPC envelope 由 `zero-rpc` 负责生成和传递 `correlationId`、`traceId`、`timeoutAt`；业务 DTO 另外包含实例、服务名、观测时间和用于示例回显的 traceId。DTO 的回显字段不能代替框架 envelope 的超时与追踪语义。`logic.ready`、`logic.requested`、`logic.drain`、`logic.stopped` 以及 center markers 只用于验收控制，不是生产服务发现协议。
 
 正常停止顺序是 Logic drain/unregister/close，再 Center close。重复 correlation、迟到响应、超时请求必须由 Kafka RPC pending 表和业务幂等策略显式处理；本示例不宣称 exactly-once。
 
