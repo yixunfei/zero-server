@@ -16,13 +16,13 @@ class RankingNotificationContractTest {
         var service = new LocalRankingService(event -> {
             if (event.type().equals("SCORE_SUBMITTED")) throw failure;
         }, (operation, result) -> metrics.add(operation));
-        service.transitionSeason("r", "s", SeasonState.OPEN, "open");
+        service.transitionSeason("r", "s", SeasonState.OPEN, 1L, "open");
         var old = service.queryTop("r", "s", 10);
         assertSame(failure, assertThrows(IllegalStateException.class,
-                () -> service.submitScore("r", "s", "u", 10, 0, ScoreMergeMode.SET, "one")));
+                () -> service.submitScore("r", "s", "u", 10, 0, ScoreMergeMode.SET, 1L, "one")));
         assertEquals(1, service.queryTop("r", "s", 10).size());
         assertEquals(0, old.size());
-        assertEquals(1, service.submitScore("r", "s", "u", 10, 0, ScoreMergeMode.SET, "one").version());
+        assertEquals(1, service.submitScore("r", "s", "u", 10, 0, ScoreMergeMode.SET, 1L, "one").version());
         assertEquals(List.of(), metrics);
     }
     /** 同步回调可查询已提交状态并跨榜写入；通知和完成顺序不变。 */
@@ -34,14 +34,14 @@ class RankingNotificationContractTest {
             calls.add(event.rankingId());
             assertEquals(1, holder[0].queryTop(event.rankingId(), "s", 10).size());
             if (event.rankingId().equals("a")) {
-                holder[0].submitScore("b", "s", "v", 20, 0, ScoreMergeMode.SET, "nested");
+                holder[0].submitScore("b", "s", "v", 20, 0, ScoreMergeMode.SET, 2L, "nested");
                 calls.add("a-return");
             }
         }, (operation, result) -> calls.add("metric"));
         var service = holder[0];
-        service.transitionSeason("a", "s", SeasonState.OPEN, "open");
-        service.transitionSeason("b", "s", SeasonState.OPEN, "open");
-        service.submitScore("a", "s", "u", 10, 0, ScoreMergeMode.SET, "one");
+        service.transitionSeason("a", "s", SeasonState.OPEN, 1L, "open");
+        service.transitionSeason("b", "s", SeasonState.OPEN, 1L, "open");
+        service.submitScore("a", "s", "u", 10, 0, ScoreMergeMode.SET, 1L, "one");
         assertEquals(List.of("a", "b", "metric", "a-return", "metric"), calls);
         var top = service.queryTop("a", "s", 10);
         assertSame(top, service.queryTop("a", "s", 10));

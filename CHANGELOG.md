@@ -6,6 +6,21 @@ zeroServer 的重要用户可见变更记录在此。项目当前处于 `0.x` �
 
 ## Unreleased
 
+- 修正异步持久化调度 API 基线，使兼容性门禁与当前 `CompletionStage` 契约一致；同步修正能力台账中 AOI、状态同步和帧同步证据引用，避免旧测试名称与当前实现不一致。
+
+### 产品目标复查修复与玩家链路（2026-10-14）
+
+- Repository 公开示例采用默认受管远程 IO；Center/Logic Kafka 示例补齐短期服务身份签验、启动前校验与真实双 JVM 验收。
+- NPC tick 改为有预算的轮转扫描，取消预先全量候选复制；失败事件携带统一异常、原始原因与当前 trace。
+- 便利内存 Repository 对齐标准 local 的初始版本、删除后旧写和批量错误分类。
+- 持久化调度 SPI 接收异步任务；部分落库失败和异步失败可观测，受管实现复用 PeriodicAsyncTask。
+- World/Ranking 移除自动字符串序号入口与无界历史索引，统一显式序号；排行榜失败准入不发布目录，查询按赛季代际判断。
+- CachePolicy 拒绝尚未实现的 stale=true，避免接受无效配置。
+- 生成类型化异步 BO 和帧端点；local 模板返回真实结果 DTO，从 RepositoryCatalog 绑定正式玩家档案。
+- 可选 Actor 上下文桥传递可信身份、trace 与剩余期限；保存成功后回到绑定 lane 更新版本，保留新脏代际。
+- 每日奖励提供已认证 TCP、一次聚合 CAS 与有界待通知重放配方；真实 PostgreSQL runtime 重建验证恢复，不承诺跨资源 exactly-once。
+- 包含破坏性 API、模板协议与示例 schema 变更；步骤和验证边界见[迁移说明](docs/migrations/20261014-product-goal-remediation.zh-CN.md)。
+
 ### 模块接入与常见场景应用（2026-10-12）
 
 - 新增 `examples/module-recipes` 的七个独立可运行应用：基础运行时、事件/Actor、服务发现、正式 NPC、所有权、GM/REST、生产配置诊断。

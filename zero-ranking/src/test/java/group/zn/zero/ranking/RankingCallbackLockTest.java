@@ -23,19 +23,19 @@ class RankingCallbackLockTest {
                     release.join();
                 }
             }, RankingMetrics.NOOP);
-            service.transitionSeason("b", "s", SeasonState.OPEN, "open");
-            if (!eventType.equals("SEASON_OPEN")) service.transitionSeason("a", "s", SeasonState.OPEN, "open");
+            service.transitionSeason("b", "s", SeasonState.OPEN, 1L, "open");
+            if (!eventType.equals("SEASON_OPEN")) service.transitionSeason("a", "s", SeasonState.OPEN, 1L, "open");
             if (eventType.equals("SETTLED")) {
-                service.transitionSeason("a", "s", SeasonState.FROZEN, "freeze");
-                service.transitionSeason("a", "s", SeasonState.SETTLING, "settling");
+                service.transitionSeason("a", "s", SeasonState.FROZEN, 1L, "freeze");
+                service.transitionSeason("a", "s", SeasonState.SETTLING, 1L, "settling");
             }
             blockedType.set(eventType);
             var submitted = new CompletableFuture<Void>();
             Thread.ofVirtual().start(() -> {
                 try {
                     switch (eventType) {
-                        case "SCORE_SUBMITTED" -> service.submitScore("a", "s", "u", 1, 0, ScoreMergeMode.SET, "one");
-                        case "SEASON_OPEN" -> service.transitionSeason("a", "s", SeasonState.OPEN, "open");
+                        case "SCORE_SUBMITTED" -> service.submitScore("a", "s", "u", 1, 0, ScoreMergeMode.SET, 1L, "one");
+                        case "SEASON_OPEN" -> service.transitionSeason("a", "s", SeasonState.OPEN, 1L, "open");
                         default -> service.settle("a", "s", "settled");
                     }
                     submitted.complete(null);
@@ -46,8 +46,8 @@ class RankingCallbackLockTest {
                 var query = new CompletableFuture<Integer>();
                 Thread.ofVirtual().start(() -> {
                     try {
-                        service.seasonState("a", "s");
-                        service.submitScore("b", "s", "u", 2, 0, ScoreMergeMode.SET, "other");
+                        service.seasonState("a", "s", 1L);
+                        service.submitScore("b", "s", "u", 2, 0, ScoreMergeMode.SET, 2L, "other");
                         query.complete(service.queryTop("b", "s", 10).size());
                     } catch (Throwable failure) { query.completeExceptionally(failure); }
                 });

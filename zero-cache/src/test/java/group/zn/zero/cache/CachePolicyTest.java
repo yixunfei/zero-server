@@ -13,6 +13,17 @@ import org.junit.jupiter.api.Test;
  */
 class CachePolicyTest {
 
+    /** 两个构造入口都拒绝未实现的 stale 回退，不能静默接受无效配置。 */
+    @Test
+    void unsupportedStaleFallbackIsRejected() {
+        var ttl = Duration.ofSeconds(1);
+        var shortForm = assertThrows(IllegalArgumentException.class,
+                () -> new CachePolicy(ttl, ttl, Duration.ZERO, 1, 1, true));
+        assertTrue(shortForm.getMessage().contains("allowStaleOnBackendFailure=true"));
+        assertThrows(IllegalArgumentException.class,
+                () -> new CachePolicy(ttl, ttl, Duration.ZERO, 1, 1, true, ttl, ttl));
+    }
+
     /**
      * 验证默认策略可用。
      */

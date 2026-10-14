@@ -77,14 +77,14 @@ Windows PowerShell 将 `./mvnw` 替换为 `./mvnw.cmd`；`NewLocalGame`、Runner
 
 TCP 示例监听本机临时端口，执行 Socket → Netty → 生成 BO → 响应后退出。
 
-`local + net` 会生成 Server/客户端辅助类。生成的 `RuntimeAssembly` 使用拒绝握手的占位策略及框架内置有界限流，启用所选网络生命周期 provider；应用必须显式接入握手、鉴权和安全链。独立 Server 显式使用 tcpUnmanaged，仅接受字面量 127.0.0.1 / ::1；它在业务完成后回显，失败返回稳定错误码。该本地入口不使用占位握手策略，不能视为生产安全接线。真实 TCP 收发也可以使用上面的 `rpg-tcp-generated` 示例。
+`local + net` 会生成 Server/客户端辅助类。生成的 `RuntimeAssembly` 使用拒绝握手的占位策略及框架内置有界限流，启用所选网络生命周期 provider；应用必须显式接入握手、鉴权和安全链。独立 Server 显式使用 tcpUnmanaged，仅接受字面量 127.0.0.1 / ::1；它在异步业务完成后编码 loginResult/sceneResult DTO，失败返回稳定错误码。该本地入口不使用占位握手策略，不能视为生产安全接线。已认证玩家 lane、条件保存与响应配方见[每日奖励示例](../examples/business-slice/README.zh-CN.md)。
 
 ```bash
 java scripts/NewLocalGame.java --template local --components net --projectName tcp-demo --packageName group.example.tcpdemo --outputDir target/tcp-demo
 ./mvnw -q -f target/tcp-demo/pom.xml clean test
 ```
 
-Server 源码定义了 `--port`、`--once` 和关闭流程，客户端类是没有独立 main 的 smoke 辅助类。启动 Server 时请单独执行 `exec:java` 并传入启动参数，避免把 `-Dexec.args` 与 `clean test` 合并后误传给构建期协议生成器。响应设计仍是请求 DTO 的最小回显。认证、TLS、心跳、限流和断线重连需应用接入，见[网络完整链路](guides/net-full-flow.zh-CN.md)及[当前本地验收](reports/quality-baseline-20260926.zh-CN.md)。
+Server 源码定义了 `--port`、`--once` 和关闭流程，客户端类是没有独立 main 的 smoke 辅助类。启动 Server 时请单独执行 `exec:java` 并传入启动参数，避免把 `-Dexec.args` 与 `clean test` 合并后误传给构建期协议生成器。响应使用生成的 Async BO/帧端点，客户端需按响应协议号解码。认证、TLS、心跳、限流和断线重连需应用接入，见[网络完整链路](guides/net-full-flow.zh-CN.md)及[本轮验收](reports/20261014-product-goal-remediation.zh-CN.md)。
 
 ## 4. 中心—逻辑服务器
 
@@ -137,6 +137,7 @@ $env:ZERO_CONFIG_FILE='D:\my-game-config\services.properties'
 - `kafka` 替换本地 `rpc`，`nacos` 替换本地 `discovery`；无需手工排除被替换的 provider。
 - `redis` 选择 Redis 数据来源；同时选择 `cache` 仍是本地缓存。Redis L2 需显式 codec 和 cache 配置。
 - 单数据来源默认提供 `main`；多来源按 `local`、`redis`、`mongo`、`postgresql` 命名。业务角色绑定见 [Repository 指南](guides/repository-composition-guide.zh-CN.md)。
+- local 模板的玩家档案通过 `players` 角色绑定：唯一外部数据源默认用于该角色，否则默认 local；可用 `zero.player.repositorySource` 显式选择。安装多个数据源不会自动替换每个业务对象的存储。
 - 业务对象通过构造器接收 Repository、RPC 接口、Actor 或 EventBus，装配入口负责选择实现。
 
 手工 Maven/Java 接入、typed 配置与 provider 替换见[按需装配](guides/modular-composition-guide.zh-CN.md)。`runtime + net` 只生成网络运行时策略依赖与配置，不创建 listener；`local + net` 另生成上面的 Server 与 TcpClient 类。手工接入长驻 TCP 时显式装配 `ServerFactory.tcp`、业务 executor 与 `ZeroServerTcpApplication`，按 `start → probe → stop` 管理生命周期；`127.0.0.1:0` 仅用于本地测试，`runDemo`/smoke 输出不等于长驻网络服务或生产就绪。安全接线见[生产网络契约](reference/production-network-lifecycle-contract.zh-CN.md)。

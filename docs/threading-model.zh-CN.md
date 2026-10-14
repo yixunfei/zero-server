@@ -1,5 +1,12 @@
 # 线程模型设计
 
+## 2026-10-14 请求范围与保存确认
+
+zero-game 的 RequestExecution/ContextualActorScheduler 在可选组合层恢复可信身份、trace、deadline 与 RPC 配置，不改变 Actor/core 依赖。每次投递独立保存上下文，完成/拒绝即释放；取消交付不提前释放物理阶段的 lane。任意业务异步链不自动继承 scope。
+
+zero-runtime-data 的 ActorPersistenceBindingExecutor 在所属 lane 捕获不可变快照并确认保存版本；BoundPersistentEntity 保留新业务状态。管理器和绑定器须在 Actor/IO 关闭前完成 drain。详细语义见[迁移说明](migrations/20261014-product-goal-remediation.zh-CN.md)。
+
+
 2026-10-11：ProductionAssembly 默认在 build 时延迟创建受管 remote IO，诊断不创建执行资源；显式 direct IO 对真实 Adapter 返回 REMOTE_IO_EXECUTOR_REQUIRED。自定义 base 的执行器工厂保留延迟校验。各 Adapter 原生运行超时与启动预算分离，见[统一配置指南](guides/configuration-and-catalog.zh-CN.md)。
 
 ## 2026-10-09 超时隔离与停止预算

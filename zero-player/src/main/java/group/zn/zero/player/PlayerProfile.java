@@ -15,7 +15,12 @@ import java.util.Objects;
  * @param online 是否在线。
  * @author zn
  */
-public record PlayerProfile(long uid, long version, String name, boolean online) implements VersionedEntity<Long> {
+@group.zn.zero.data.mapping.ZeroDataObject(namespace = "zero_player", collection = "profiles", schemaVersion = 1)
+public record PlayerProfile(
+        @group.zn.zero.data.mapping.ZeroDataId long uid,
+        @group.zn.zero.data.mapping.ZeroDataVersion long version,
+        @group.zn.zero.data.mapping.ZeroDataField(order = 1) String name,
+        @group.zn.zero.data.mapping.ZeroDataField(order = 2) boolean online) implements VersionedEntity<Long> {
 
     /**
      * 创建版本号为 0 的玩家在线档案。

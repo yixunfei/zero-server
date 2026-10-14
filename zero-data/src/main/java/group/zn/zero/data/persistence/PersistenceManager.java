@@ -44,6 +44,15 @@ public interface PersistenceManager extends DataService {
             DataThreadBinding binding,
             Supplier<T> snapshotSupplier);
 
+    /** 登记带保存确认的脏对象；snapshotSupplier 与 confirmed 均在 binding 执行域调用。
+     * confirmed 接收版本已加一的已提交快照，业务只更新确认版本，不得覆盖期间的新状态。
+     * @param targetName 目标。 @param id 主键。 @param binding 绑定域。 @param snapshotSupplier 不可变快照。
+     * @param confirmed 提交后确认回调，应短时且可幂等重试；失败保留待确认记录，不重复物理写。
+     * @param <ID> 主键类型。 @param <T> 实体类型。线程安全；登记仅代表内存接受。
+     * @throws group.zn.zero.core.error.ZeroException 准入失败。 */
+    <ID, T extends VersionedEntity<ID>> void markDirty(String targetName, ID id, DataThreadBinding binding,
+            Supplier<T> snapshotSupplier, java.util.function.Consumer<T> confirmed);
+
     /**
      * 立即 flush 默认批量数量的脏对象。
      *

@@ -16,13 +16,13 @@ class WorldConcurrencyBoundaryTest {
         service.createWorld(new World("w", 0), List.of(new Shard("a", "w", 0), new Shard("b", "w", 0)));
         service.createWorld("other", "c");
         service.enterWorldAsync("d", "w").toCompletableFuture().join();
-        assertThrows(RuntimeException.class, () -> service.requestMigrationAsync("cross", "d", "c").toCompletableFuture().join());
-        service.requestMigrationAsync("m1", "d", "b").toCompletableFuture().join();
-        assertThrows(RuntimeException.class, () -> service.requestMigrationAsync("m2", "d", "a").toCompletableFuture().join());
+        assertThrows(RuntimeException.class, () -> service.requestMigrationAsync(1L, "cross", "d", "c").toCompletableFuture().join());
+        service.requestMigrationAsync(2L, "m1", "d", "b").toCompletableFuture().join();
+        assertThrows(RuntimeException.class, () -> service.requestMigrationAsync(3L, "m2", "d", "a").toCompletableFuture().join());
         service.prepareMigrationAsync("m1").toCompletableFuture().join();
         service.commitMigrationAsync("m1").toCompletableFuture().join();
         service.releaseSourceAsync("m1").toCompletableFuture().join();
-        service.migrateAsync("m3", "d", "a").toCompletableFuture().join();
+        service.migrateAsync(4L, "m3", "d", "a").toCompletableFuture().join();
         service.commitMigrationAsync("m1").toCompletableFuture().join();
         assertEquals("a", service.snapshot("d").ownerShardId());
     }

@@ -31,7 +31,7 @@ For later runs from this project directory, the following commands require Maven
 Expected output:
 
 ~~~text
-local-game=ok|mode=__RUNTIME_PROFILE__|name=__PROJECT_NAME__|uid=1001|position=3,5|logs=7|metrics=6|maxProtocolId=90105
+local-game=ok|mode=__RUNTIME_PROFILE__|name=__PROJECT_NAME__|uid=1001|position=3,5|logs=7|metrics=6|maxProtocolId=90202
 ~~~
 
 ## Layout
@@ -66,11 +66,11 @@ Only projects generated with `--components net` contain `__SERVER_CLASS__` and t
 ./mvnw -q exec:java '-Dexec.mainClass=__PACKAGE__.__SERVER_CLASS__' '-Dexec.args=--port=0 --once'
 ~~~
 
-This binds a loopback ephemeral port, sends a real TCP smoke request and closes resources. Remove `--once` and use `--port=6200` to keep listening; Ctrl+C stops the server. The client helper has no standalone main method. The response is a minimal request DTO echo, not a complete login response protocol. Authentication, TLS, heartbeat, rate limiting and production capacity remain application responsibilities.
+This binds a loopback ephemeral port, sends a real TCP smoke request and closes resources. Remove `--once` and use `--port=6200` to keep listening; Ctrl+C stops the server. The client helper has no standalone main method. The response is a generated login-result DTO with the actual UID, account, session and trace. Authentication, TLS, heartbeat, rate limiting and production capacity remain application responsibilities.
 
 ## Async Boundary
 
-`LocalGameBO`, `LocalGameFlow`, `LocalGameFixture` and `LocalGameObservation` are separate generated files for asynchronous business adapters. Business services return `CompletionStage`; handler and Actor paths must never call `join()` or `get()`. Demo and TCP both dispatch through the same LocalGameFlow and LocalGameBO. Only CLI orchestration waits for completion. SUCCESS is recorded after actual completion; FAILURE preserves the stable ErrorCode and trace. The TCP echo is sent only after success, with the existing error flag used on failure. `runDemo` is not a long-running production server.
+`LocalGameBO`, `LocalGameFlow`, `LocalGameFixture` and `LocalGameObservation` are separate generated files for asynchronous business adapters. Business services return `CompletionStage`; handler and Actor paths must never call `join()` or `get()`. Demo and TCP both dispatch through the same LocalGameFlow and LocalGameBO. Only CLI orchestration waits for completion. SUCCESS is recorded after actual completion; FAILURE preserves the stable ErrorCode and trace. The typed TCP response is encoded only after success, with the standard error frame used on failure. `runDemo` is not a long-running production server.
 
 ## Next Business Step
 
@@ -123,3 +123,7 @@ stop
 run (alias demo) completes the foreground demo. serve requires the generated local + net Server and waits up to 30 seconds for its ready file; it launches the actual Java process after compilation. --timeoutSeconds accepts 1..60 (stop defaults to 15). State defaults to target/zero-entry; set ZERO_STATE_DIR to isolate multiple projects. Relative paths for process commands resolve from the framework repository root. Use absolute project/config paths for automation.
 
 Server binding accepts only literal 127.0.0.1 or ::1. Set ZERO_NET_PORT=0 for an ephemeral port; explicit Server --host/--port overrides external configuration. The state directory retains per-run stdout/stderr logs. status is an inspection command (zero exit code for idle/exited/not-ready); inspect its zero-status value for health. stop requests cooperative shutdown, waits, and reports forced=true if termination was needed. This development tool does not replace an operating-system service manager.
+
+## Player data and asynchronous responses
+
+LocalGameFixture obtains the `players` repository role from RepositoryCatalog using PlayerProfileRepository.DEFINITION; remote IO belongs to the runtime. The unique selected external data source becomes the default players source; set `zero.player.repositorySource` explicitly when choosing among multiple sources. LocalGameBO implements generated Async interfaces. LocalGameFlow binds generated request/response codecs, and the client decodes real login results. Change Game.si, BO/domain logic and assertions for a new business operation. This loopback prototype has a fixed UID resolver; for verified SecurityContext, request deadlines and durable reward notifications, follow the framework business-slice recipe.

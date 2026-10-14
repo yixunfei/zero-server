@@ -18,6 +18,10 @@ public final class GeneratedProtocolDispatcher {
      * 协议处理器表。
      */
     private final Map<Integer, Handler> handlers = new HashMap<>();
+
+    /** 类型化异步处理器；启动时注册后安全发布。 */
+    private final Map<Integer, java.util.function.Function<ZeroReader,
+            java.util.concurrent.CompletionStage<Object>>> asyncHandlers = new HashMap<>();
 <#list registrations as registration>
 
     /**
@@ -25,6 +29,48 @@ public final class GeneratedProtocolDispatcher {
      */
     private ${registration.boName} ${registration.fieldName};
 </#list>
+
+<#list registrations as registration>
+    /** 注册类型化异步 BO；与同步入口独立，结果由框架直接返回。
+     * @param bo 异步业务。 @param <R> 返回类型；启动线程调用，重复注册替换原处理器。 */
+    public <R> void ${registration.registerName}Async(final ${registration.boName}.Async<R> bo) {
+        Objects.requireNonNull(bo, "bo");
+<#list registration.handlers as handler>
+        asyncHandlers.put(ProtocolIds.${handler.protocolConstant}, payload -> {
+            ${handler.requestMessage} request = ${handler.codecName}.INSTANCE.read(payload);
+            requireFullyRead(payload);
+            return Objects.requireNonNull(bo.${handler.methodName}(${handler.arguments}), "business stage")
+                    .thenApply(value -> (Object) value);
+        });
+</#list>
+    }
+<#list registration.handlers as handler>
+
+    /** 为同一异步 BO 创建类型化帧端点，供本地或 TCP 入口共用。
+     * @param bo 业务。 @param responseId 响应号。 @param responseCodec 响应 codec。
+     * @param <R> 结果类型。 @return 无状态端点；线程安全性由 BO 决定。 */
+    public static <R> group.zn.zero.protocol.AsyncProtocolEndpoint<${handler.requestMessage}, ${handler.resultType}>
+            endpoint${registration.boName}${handler.methodName}(final ${registration.boName}.Async<R> bo,
+            final int responseId, final group.zn.zero.protocol.codec.ZeroPayloadCodec<${handler.resultType}> responseCodec) {
+        Objects.requireNonNull(bo, "bo");
+        return new group.zn.zero.protocol.AsyncProtocolEndpoint<>(ProtocolIds.${handler.protocolConstant},
+                ${handler.codecName}.INSTANCE, responseId, responseCodec, request -> bo.${handler.methodName}(${handler.arguments}));
+    }
+</#list>
+</#list>
+
+    /** 分发并等待真实异步业务完成；不阻塞、不收集跨请求状态。
+     * @param protocolId 协议号。 @param payload 请求内容。 @return 实际结果或失败阶段；线程安全。
+     * 未注册、解码失败或 BO 同步失败均转为失败阶段。 */
+    public java.util.concurrent.CompletionStage<Object> dispatchAsync(final int protocolId, final byte[] payload) {
+        try {
+            var handler = asyncHandlers.get(protocolId);
+            if (handler == null) throw ZeroException.of(ProtocolErrorCode.PROTOCOL_NOT_FOUND);
+            return handler.apply(ZeroReader.readOnly(Objects.requireNonNull(payload, "payload")));
+        } catch (RuntimeException failure) {
+            return java.util.concurrent.CompletableFuture.failedFuture(failure);
+        }
+    }
 <#list registrations as registration>
 
     /**

@@ -19,7 +19,7 @@ public final class WorldShardApplication {
                 new group.zn.zero.world.Shard("shard-b", "world-1", 0)));
         EntitySnapshot entered = EntitySnapshot.of(service.enterWorldAsync("entity-1", "world-1").toCompletableFuture().join());
         service.moveEntityAsync("entity-1", entered.ownerShardId(), 10, 20).toCompletableFuture().join();
-        Migration migration = service.migrateAsync("migration-1", "entity-1", "shard-b").toCompletableFuture().join();
+        Migration migration = service.migrateAsync(1L, "migration-1", "entity-1", "shard-b").toCompletableFuture().join();
         EntitySnapshot moved = service.snapshot("entity-1");
         Migration replay = service.migration("migration-1");
         return new Result(moved, migration.state().name(), replay.state().name(), service.events().size());

@@ -21,6 +21,12 @@ public interface PersistenceScheduleHandle extends AutoCloseable {
      */
     boolean cancelled();
 
+    /** @return 异步动作失败总次数；线程安全，部分落库失败计为一次任务失败。 */
+    long failureCount();
+
+    /** @return 最近一次失败或 null；线程安全，仅供内部诊断，可能包含后端信息。 */
+    Throwable lastFailure();
+
     /**
      * 关闭调度句柄。
      */

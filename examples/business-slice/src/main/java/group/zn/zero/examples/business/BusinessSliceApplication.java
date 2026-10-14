@@ -3,16 +3,13 @@ package group.zn.zero.examples.business;
 import group.zn.zero.cache.CacheStatistics;
 import group.zn.zero.cache.InMemoryCacheService;
 import group.zn.zero.core.config.MapZeroConfig;
-import group.zn.zero.data.repository.InMemoryCrudRepository;
 import group.zn.zero.event.EventType;
 import group.zn.zero.event.bus.EventSubscription;
 import group.zn.zero.event.bus.InMemoryEventBus;
 import group.zn.zero.event.deadletter.InMemoryDeadLetterSink;
-import group.zn.zero.examples.business.generated.bo.DailyRewardClaimDailyRewardEventBO;
 import group.zn.zero.examples.business.generated.dto.DailyRewardClaimDailyRewardProtocolDTO;
 import group.zn.zero.examples.business.generated.dto.codec.DailyRewardClaimDailyRewardProtocolDTOCodec;
 import group.zn.zero.examples.business.generated.protocol.ProtocolIds;
-import group.zn.zero.examples.business.generated.protocol.dispatch.GeneratedProtocolDispatcher;
 import group.zn.zero.log.InMemoryLogSink;
 import group.zn.zero.log.LogLevel;
 import group.zn.zero.log.LogOperation;
@@ -34,10 +31,8 @@ import group.zn.zero.starter.LocalRuntime;
 import group.zn.zero.starter.ZeroServerApplication;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -88,30 +83,37 @@ public final class BusinessSliceApplication {
                         ZeroRuntimeConfigKeys.ZERO_NAME, MODULE)),
                 logSink,
                 ZeroRuntimeExecutors.localPrototype("zero-example-business-slice", 2))
+                .register(group.zn.zero.runtime.data.DataRuntime.repositories(Map.of("game", "local")).providers().getFirst())
+                .override(group.zn.zero.runtime.data.DataRuntime.REPOSITORIES,
+                        group.zn.zero.runtime.api.ComponentId.of("zero.data.repository-catalog"))
+                .require(group.zn.zero.runtime.data.DataRuntime.REPOSITORIES)
                 .replace(MonitorRuntimeComponent.MONITOR_RUNTIME, monitorRuntime)
                 .build();
         ZeroServerApplication application = new ZeroServerApplication(runtime);
         application.start();
         try {
             registerMetrics(monitorRuntime);
-            InMemoryCrudRepository<Long, DailyRewardInventory> inventories = new InMemoryCrudRepository<>();
+            var inventories = runtime.require(group.zn.zero.runtime.data.DataRuntime.REPOSITORIES)
+                    .create(new group.zn.zero.data.repository.RepositoryRequest<>("game", DailyRewardRepository.DEFINITION));
             InMemoryCacheService<Long, DailyRewardInventory> inventoryCache = new InMemoryCacheService<>();
             InMemoryDeadLetterSink deadLetters = new InMemoryDeadLetterSink();
             InMemoryEventBus eventBus = new InMemoryEventBus(deadLetters, Clock.systemUTC(), Runnable::run);
             AtomicInteger eventCount = new AtomicInteger();
-            try (EventSubscription ignored = registerEventHandler(runtime, eventBus, eventCount)) {
+            try (EventSubscription ignored = registerEventHandler(runtime, eventBus, eventCount);
+                    var actors = new group.zn.zero.game.ActorRequestExecutor(
+                            runtime.require(group.zn.zero.runtime.actor.ActorRuntime.ACTOR_SCHEDULER))) {
                 DailyRewardService service = new DailyRewardService(
                         inventories, inventoryCache, eventBus,
                         Clock.fixed(Instant.parse("2026-10-12T12:00:00Z"), java.time.ZoneOffset.UTC));
-                FlowResults results = new FlowResults();
-                GeneratedProtocolDispatcher dispatcher = registerBusinessHandler(service, results);
-                dispatch(dispatcher, request("claim-1001-2026-10-12", "trace-claim-first"));
-                dispatch(dispatcher, request("claim-1001-2026-10-12", "trace-claim-replay"));
+                var flow = new DailyRewardFlow(new DailyRewardBO(actors, service));
+                var statuses = List.of(
+                        dispatch(flow, request("claim-1001-2026-10-12", "trace-claim-first")),
+                        dispatch(flow, request("claim-1001-2026-10-12", "trace-claim-replay")));
                 DailyRewardInventory inventory = service.loadInventory(1001L).toCompletableFuture().join();
                 service.loadInventory(1001L).toCompletableFuture().join();
                 CacheStatistics cacheStatistics = inventoryCache.statistics();
                 return new DemoResult(
-                        results.statuses(),
+                        statuses,
                         inventory.quantity(),
                         eventCount.get(),
                         logSink.records().size(),
@@ -149,27 +151,6 @@ public final class BusinessSliceApplication {
         });
     }
 
-    private static GeneratedProtocolDispatcher registerBusinessHandler(
-            final DailyRewardService service,
-            final FlowResults results) {
-        GeneratedProtocolDispatcher dispatcher = new GeneratedProtocolDispatcher();
-        dispatcher.registerDailyRewardClaimDailyRewardEventBO(
-                new DailyRewardClaimDailyRewardEventBO() {
-                    @Override
-                    public void claimDailyReward(final DailyRewardClaimDailyRewardProtocolDTO request) {
-                        // 仅命令行等待本地完成链；网络入口须认证 uid 并异步回到玩家执行域。
-                        DailyRewardClaimResult result = service.claim(
-                                request.uid,
-                                request.idempotencyKey,
-                                request.itemId,
-                                request.quantity,
-                                request.traceId).toCompletableFuture().join();
-                        results.add(result);
-                    }
-                });
-        return dispatcher;
-    }
-
     private static DailyRewardClaimDailyRewardProtocolDTO request(
             final String idempotencyKey,
             final String traceId) {
@@ -182,14 +163,25 @@ public final class BusinessSliceApplication {
         return request;
     }
 
-    private static void dispatch(
-            final GeneratedProtocolDispatcher dispatcher,
+    private static DailyRewardClaimResult.Status dispatch(final DailyRewardFlow flow,
             final DailyRewardClaimDailyRewardProtocolDTO request) {
+        Instant now = Instant.now();
+        var identity = new group.zn.zero.security.SecurityContext("1001", now, now.plusSeconds(60),
+                "local", "local", "local", request.traceId, request.idempotencyKey,
+                java.util.Set.of("reward:claim"), Map.of());
+        var scope = group.zn.zero.security.SecurityContextBridge.with(identity,
+                () -> group.zn.zero.game.RequestExecution.capture(java.time.Duration.ofSeconds(3)));
         try (ZeroWriter writer = new ZeroWriter()) {
             DailyRewardClaimDailyRewardProtocolDTOCodec.INSTANCE.write(writer, request);
-            if (!dispatcher.dispatch(ProtocolIds.DAILY_REWARD_CLAIM_DAILY_REWARD_PROTOCOL, writer.toByteArray())) {
-                throw new IllegalStateException("daily reward protocol handler not found");
+            var frame = new group.zn.zero.protocol.ProtocolFrame(ProtocolIds.DAILY_REWARD_CLAIM_DAILY_REWARD_PROTOCOL,
+                    1, 0, null, writer.toByteArray());
+            var response = flow.handle(frame, scope).toCompletableFuture().join();
+            if (response.protocolId() != ProtocolIds.DAILY_REWARD_CLAIM_RESULT_PROTOCOL) {
+                throw new IllegalStateException("reward response failed");
             }
+            var dto = group.zn.zero.examples.business.generated.dto.codec.DailyRewardClaimResultProtocolDTOCodec.INSTANCE
+                    .read(response.payloadReader());
+            return DailyRewardClaimResult.Status.valueOf(dto.status);
         }
     }
 
@@ -245,31 +237,4 @@ public final class BusinessSliceApplication {
         }
     }
 
-    /**
-     * 业务处理器的最小结果收集器。
-     *
-     * @author zn
-     */
-    private static final class FlowResults {
-        /** 领取状态列表。 */
-        private final List<DailyRewardClaimResult.Status> statuses = new ArrayList<>();
-
-        /**
-         * 记录一次结果。
-         *
-         * @param result 领取结果；不可为空。
-         */
-        private void add(final DailyRewardClaimResult result) {
-            statuses.add(Objects.requireNonNull(result, "result").status());
-        }
-
-        /**
-         * 返回不可变状态快照。
-         *
-         * @return 有序、不可变状态列表；线程安全。
-         */
-        private List<DailyRewardClaimResult.Status> statuses() {
-            return List.copyOf(statuses);
-        }
-    }
 }

@@ -2,3 +2,6 @@
 
 client_to_server:
   claimDailyReward(long uid, String idempotencyKey, String itemId, int quantity, String traceId); // 按玩家和服务端日期限领，itemId/quantity 必须为服务端配置 coin/100。
+
+server_to_client:
+  claimResult(String status, String idempotencyKey, String itemId, int quantity, String traceId); // 库存已提交后响应；通知故障使用统一错误帧并保留待重放状态。

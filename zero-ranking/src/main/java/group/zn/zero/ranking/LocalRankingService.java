@@ -23,12 +23,6 @@ public final class LocalRankingService implements RankingService {
     private final Map<Key, Board> boards = new HashMap<>();
     /** 全局已退役赛季水位，防止删除后隐式重建旧赛季。 */
     private long retiredSeason;
-    /** 过渡旧入口分配的本地序号。 */
-    private long legacySequence;
-    /** 过渡旧请求序号。 */
-    private final Map<String, Long> legacyRequestSequences = new HashMap<>();
-    /** 过渡旧赛季序号。 */
-    private final Map<String, Long> legacySeasonSequences = new HashMap<>();
     /** 事件通知端口。 */
     private final RankingEventSink events;
     /** 低基数统计端口。 */
@@ -48,30 +42,6 @@ public final class LocalRankingService implements RankingService {
         this.metrics = Objects.requireNonNull(metrics, "metrics");
     }
 
-    /**
-     * 合并分数并同步更新 UID/排序索引及版本；线程安全，同 UID 同键同请求精确重放原结果。
-     * @param rankingId 榜单 ID，不可为空。
-     * @param seasonId 赛季 ID，不可为空。
-     * @param uid 玩家 ID，不可为空或空白。
-     * @param score 新分数或增量。
-     * @param tieBreakValue 同分时升序比较的值。
-     * @param mode 合并策略，不可为空。
-     * @param idempotencyKey 幂等键，不可为空或空白。
-     * @return 不可变条目，可跨线程共享。
-     * @throws group.zn.zero.core.error.ZeroException 赛季不接受更新、ADD 溢出、同键冲突或收据容量已满；拒绝不变更索引。
-     * @throws IllegalArgumentException UID/幂等键为空白。
-     * @throws NullPointerException 必填参数为空。
-     */
-    @Override public RankingEntry submitScore(final String rankingId, final String seasonId,
-            final String uid, final long score, final long tieBreakValue, final ScoreMergeMode mode,
-            final String idempotencyKey) {
-        final long sequence;
-        synchronized (this) {
-            sequence = legacyRequestSequence(rankingId, seasonId, idempotencyKey);
-        }
-        return submitScore(rankingId, seasonId, uid, score, tieBreakValue, mode, sequence, idempotencyKey);
-    }
-
     /** 提交带显式单调序号的评分请求。 */
     @Override public RankingEntry submitScore(final String rankingId, final String seasonId,
             final String uid, final long score, final long tieBreakValue, final ScoreMergeMode mode,
@@ -79,14 +49,11 @@ public final class LocalRankingService implements RankingService {
         RankingEntry result;
         boolean submitted = false;
         synchronized (this) {
-            Key key = key(rankingId, seasonId);
             Objects.requireNonNull(uid, "uid");
             Objects.requireNonNull(mode, "mode");
             Objects.requireNonNull(idempotencyKey, "idempotencyKey");
             if (idempotencyKey.isBlank()) throw new IllegalArgumentException("idempotencyKey");
-            requireLiveSeason(rankingId, seasonId, sequence);
-            Board board = boards.computeIfAbsent(key, ignored -> new Board());
-            board.seasonId = seasonId;
+            Board board = board(rankingId, seasonId);
             if (board.state != SeasonState.OPEN) {
                 throw RankingErrorCode.RANKING_SEASON_STATE_INVALID.failure("season is " + board.state);
             }
@@ -125,13 +92,6 @@ public final class LocalRankingService implements RankingService {
             metrics.increment("submit", "success");
         }
         return result;
-    }
-
-    /** 参数顺序适配入口。 */
-    public RankingEntry submitScore(final String rankingId, final String seasonId,
-            final String uid, final long score, final long tieBreakValue, final ScoreMergeMode mode,
-            final String idempotencyKey, final long sequence) {
-        return submitScore(rankingId, seasonId, uid, score, tieBreakValue, mode, sequence, idempotencyKey);
     }
 
     /**
@@ -188,29 +148,17 @@ public final class LocalRankingService implements RankingService {
         return snapshot;
     }
 
-    /** @param rankingId 榜单 ID。 @param seasonId 赛季 ID。 @return 当前状态；只读、线程安全，缺失为 CREATED。 */
-    @Override public synchronized SeasonState seasonState(final String rankingId, final String seasonId) {
+    /** @param rankingId 榜单 ID。 @param seasonId 赛季 ID。 @param seasonSequence 赛季序号。
+     * @return 当前状态；只读、线程安全，缺失按序号水位判断，详见接口契约。 */
+    @Override public synchronized SeasonState seasonState(final String rankingId, final String seasonId,
+            final long seasonSequence) {
+        if (seasonSequence <= 0) throw new IllegalArgumentException("seasonSequence must be positive");
         Board board = boards.get(key(rankingId, seasonId));
-        if (board == null && retiredSeason > 0) return SeasonState.ARCHIVED;
-        return board == null ? SeasonState.CREATED : board.state;
-    }
-
-    /**
-     * 幂等推进赛季状态并通知观察器；线程安全。
-     * @param rankingId 榜单 ID。
-     * @param seasonId 赛季 ID。
-     * @param target 目标状态，不可为空。
-     * @param idempotencyKey 转换幂等键，不可为空。
-     * @return 变更后的赛季状态。
-     * @throws group.zn.zero.core.error.ZeroException 状态转换非法。
-     */
-    @Override public SeasonState transitionSeason(final String rankingId, final String seasonId,
-            final SeasonState target, final String idempotencyKey) {
-        final long sequence;
-        synchronized (this) {
-            sequence = legacySeasonSequence(rankingId, seasonId);
+        if (board != null && board.seasonSequence != seasonSequence) {
+            throw RankingErrorCode.RANKING_IDEMPOTENCY_CONFLICT.failure("season sequence mismatch");
         }
-        return transitionSeason(rankingId, seasonId, target, sequence, idempotencyKey);
+        if (board == null && seasonSequence <= retiredSeason) return SeasonState.ARCHIVED;
+        return board == null ? SeasonState.CREATED : board.state;
     }
 
     /** 推进赛季状态并绑定显式单调序号。 */
@@ -220,20 +168,23 @@ public final class LocalRankingService implements RankingService {
             Objects.requireNonNull(target, "target");
             Objects.requireNonNull(idempotencyKey, "idempotencyKey");
             Key season = key(rankingId, seasonId);
-            requireLiveSeason(rankingId, seasonId, sequence);
-            Board board = boards.computeIfAbsent(season, ignored -> new Board());
-            board.seasonId = seasonId;
             if (sequence <= 0) throw new IllegalArgumentException("sequence must be positive");
-            if (board.seasonSequence == 0) board.seasonSequence = sequence;
-            else if (board.seasonSequence != sequence) {
+            if (sequence <= retiredSeason) {
+                throw RankingErrorCode.RANKING_SEASON_STATE_INVALID.failure("season retired");
+            }
+            Board board = boards.get(season);
+            if (board == null) board = new Board();
+            if (board.seasonSequence != 0 && board.seasonSequence != sequence) {
                 throw RankingErrorCode.RANKING_IDEMPOTENCY_CONFLICT.failure("season sequence mismatch");
             }
             if (idempotencyKey.equals(board.transitionKeys.get(target))) return board.state;
             if (!allowed(board.state, target)) {
                 throw RankingErrorCode.SEASON_TRANSITION_REJECTED.failure(board.state + " -> " + target);
             }
+            board.seasonSequence = sequence;
             board.state = target;
             board.transitionKeys.put(target, idempotencyKey);
+            boards.put(season, board);
         }
         events.onEvent(new RankingEvent("SEASON_" + target, rankingId, seasonId, null, 0));
         return target;
@@ -267,17 +218,6 @@ public final class LocalRankingService implements RankingService {
         catch (ArithmeticException failure) { throw RankingErrorCode.RANKING_SCORE_REJECTED.failure("score addition overflow"); }
     }
 
-    /** 归档后释放收据；同一水位可幂等重试，回退拒绝，不变更评分与排名。 */
-    @Override public synchronized int acknowledgeRequestsThrough(final String rankingId, final String seasonId,
-            final String idempotencyKey) {
-        Objects.requireNonNull(idempotencyKey, "idempotencyKey");
-        if (idempotencyKey.isBlank()) throw new IllegalArgumentException("idempotencyKey");
-        Board board = boards.get(key(rankingId, seasonId));
-        if (board == null) throw RankingErrorCode.RANKING_SEASON_STATE_INVALID.failure("season not found");
-        long sequence = legacyRequestSequence(rankingId, seasonId, idempotencyKey);
-        return acknowledgeRequestsThrough(rankingId, seasonId, sequence);
-    }
-
     @Override public synchronized int acknowledgeRequestsThrough(final String rankingId, final String seasonId,
             final long sequence) {
         if (sequence <= 0 || sequence < board(rankingId, seasonId).retiredRequest) {
@@ -288,15 +228,6 @@ public final class LocalRankingService implements RankingService {
         board.receipts.entrySet().removeIf(entry -> entry.getValue().sequence() <= sequence);
         board.retiredRequest = sequence;
         return before - board.receipts.size();
-    }
-
-    /** 显式确认已导出终态赛季后释放完整目录；旧赛季水位保存在单个标量中。 */
-    @Override public synchronized int retireSeasonsThrough(final String seasonId) {
-        Objects.requireNonNull(seasonId, "seasonId");
-        long sequence = boards.values().stream().filter(board -> seasonId.equals(board.seasonId))
-                .mapToLong(board -> board.seasonSequence).max().orElseThrow(
-                        () -> new IllegalArgumentException("unknown season id"));
-        return retireSeasonsThrough(sequence);
     }
 
     @Override public synchronized int retireSeasonsThrough(final long sequence) {
@@ -314,23 +245,10 @@ public final class LocalRankingService implements RankingService {
         return before - boards.size();
     }
 
-    private void requireLiveSeason(final String rankingId, final String seasonId, final long sequence) {
-        if (!boards.containsKey(key(rankingId, seasonId)) && retiredSeason > 0 && sequence <= retiredSeason) {
-            throw RankingErrorCode.RANKING_SEASON_STATE_INVALID.failure("season retired");
-        }
-    }
     private Board board(final String rankingId, final String seasonId) {
         Board board = boards.get(key(rankingId, seasonId));
         if (board == null) throw RankingErrorCode.RANKING_SEASON_STATE_INVALID.failure("season not found");
         return board;
-    }
-    private long legacyRequestSequence(final String rankingId, final String seasonId, final String idempotencyKey) {
-        String mapKey = rankingId + "\u0000" + seasonId + "\u0000" + idempotencyKey;
-        return legacyRequestSequences.computeIfAbsent(mapKey, ignored -> ++legacySequence);
-    }
-    private long legacySeasonSequence(final String rankingId, final String seasonId) {
-        String mapKey = rankingId + "\u0000" + seasonId;
-        return legacySeasonSequences.computeIfAbsent(mapKey, ignored -> ++legacySequence);
     }
     private static boolean allowed(final SeasonState from, final SeasonState to) {
         return (from == SeasonState.CREATED && to == SeasonState.OPEN)
@@ -355,8 +273,6 @@ public final class LocalRankingService implements RankingService {
         private long retiredRequest;
         /** 首次状态转换绑定的赛季序号。 */
         private long seasonSequence;
-        /** 赛季标识，便于退役后的查询判定。 */
-        private String seasonId;
         /** 冻结状态是否已向应用交付快照。 */
         private boolean snapshotExported;
         /** 默认新赛季。 */

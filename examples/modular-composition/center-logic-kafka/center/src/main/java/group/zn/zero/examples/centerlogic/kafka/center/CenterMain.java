@@ -27,6 +27,7 @@ public final class CenterMain {
         String bootstrap = required(args, 0, "bootstrap");
         String prefix = required(args, 1, "topicPrefix");
         Path control = Path.of(required(args, 2, "controlDir"));
+        CenterLogicSecurity security = CenterLogicSecurity.fromEnvironment(prefix);
         Files.createDirectories(control);
         String group = "center-group-" + suffix(prefix);
         KafkaRpcSettings settings = settings(bootstrap, "center-" + suffix(prefix), group, prefix, "reply-center-" + suffix(prefix));
@@ -39,6 +40,7 @@ public final class CenterMain {
              KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings,
                      runtime.require(RuntimeBasics.EXECUTORS).scheduledExecutor("kafka-rpc"))) {
             CenterService service = new CenterService(draining, active, requests);
+            adapter.securityMetadataVerifier(security.verifier());
             RpcBoundService binding = new RpcServiceBinder(adapter, codecs).bind(CenterContract.class, service);
             runtime.start();
             Files.writeString(control.resolve("center.ready"), "READY");

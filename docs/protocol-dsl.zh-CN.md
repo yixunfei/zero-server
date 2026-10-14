@@ -1,5 +1,10 @@
 # 协议 DSL 与代码生成设计
 
+## 2026-10-14 异步业务结果
+
+Java BO 新增 Async<R> 与 CompletionStage 返回，生成 dispatcher 的 register...Async/dispatchAsync 直接交付实际完成阶段。endpoint... 工厂将同一 BO 与响应 codec 组合为 AsyncProtocolEndpoint，完整解码检查在业务前完成。同步入口独立保留；有显式 response 时使用其 DTO，无声明时组合根指定 R。类型化帧端点不负责认证，业务不能阻塞等待自身 Actor。迁移及 local 新响应号见[说明](migrations/20261014-product-goal-remediation.zh-CN.md)。
+
+
 ## 2026-10-07 presence 分配边界
 
 Java `ZeroReader.readPresenceBits(int knownFieldCount)` 和 C#/TypeScript/GDScript 对应方法要求显式传入可信 schema 的 nullable 字段数；无参方法已删除。重新生成各端协议代码，手写 codec 同步传参，不得传入网络声明长度。

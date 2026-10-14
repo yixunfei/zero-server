@@ -1,6 +1,8 @@
 # zeroServer 能力矩阵
 
-本文给出 `0.1.1` 的实现状态和明确边界，核对日期为 2026-09-28。状态只描述当前仓库代码与测试，不等同于生产容量或稳定性承诺；`productionReady=false`。
+本文用于 `0.1.2-SNAPSHOT`。2026-10-14 增量核对玩家异步链路、保存配方、NPC、World/Ranking、缓存选项与公开示例；其余条目沿用各自标注的盘点日期。状态只描述当前仓库代码与测试，不等同于生产容量或稳定性承诺；`productionReady=false`。
+
+2026-10-14：D01–D08 已修复；Java 生成 Async BO/类型化帧端点、可信请求范围到 Actor/第二跳 signed RPC、玩家档案具名 Repository 与 Actor 周期保存已验证。每日奖励 local/认证 TCP 使用同一 BO，真实 PostgreSQL runtime 重建后恢复库存并重放待通知。取消只影响交付，通知至少一次，跨进程玩家 owner 恢复尚未贯通；详见[本轮报告](reports/20261014-product-goal-remediation.zh-CN.md)。
 
 2026-09-28 报告核实补充：TCP 默认工厂要求显式 production lifecycle；Redis 本地实现仅可通过显式 prototype 入口使用；Nacos/Kafka 已有真实 adapter 但外部集群证据仍需项目提供。KCP 后续在本分支补齐服务端接入闭环，见 [KCP 迁移与验证](migrations/20260928-kcp-support.md)；普通 UDP 的可靠性、跨节点 replay、可靠房间事件日志和跨进程 world ownership 仍是明确缺口。其他逐项源码、证据见[报告核实迁移说明](migrations/20260928-report-audit-remediation.md)。
 
@@ -46,7 +48,7 @@
 
 | 能力 | 状态 | 已有 | 主要缺口 |
 | --- | --- | --- | --- |
-| 游戏执行域 | implemented | 请求上下文、Actor 投递网关 | 正式多项目业务模块规范仍需实践验证 |
+| 游戏执行域 | implemented | RequestExecution 可信身份/trace/deadline/取消、ContextualActorScheduler、类型化 ActorRequestExecutor；真实 Actor 到 signed RPC 回归 | 任意业务自建异步回调需显式恢复 scope，正式多项目业务模块规范仍需实践验证 |
 | Player | prototype | 登录、会话、加载、查询、Repository/Cache 接入 | 真实鉴权、断线恢复、跨服迁移、在线数据长稳 |
 | Scene | prototype | 进入、移动、离开、实体状态和快照 | AOI、广播、tick、跨场景/跨服迁移 |
 | Room | minimum-slice | `zero-room` 本地内存房间、容量、幂等、重连窗口、快照与统计；状态写入绑定 room lane | 生产持久化、跨服、匹配、容量与长稳未证明 |
@@ -65,6 +67,8 @@
 | Redis Data Adapter | minimum-slice | snapshot、追加日志、真实 Redis store、超时和健康 | Redis Cluster、恢复演练、磁盘日志生产治理 |
 | PostgreSQL Adapter | minimum-slice | envelope table、连接 timeout、健康检查 | 连接池策略、迁移、批量和关系模型工具 |
 | L1/L2 Cache | implemented | cache-aside、single-flight、负缓存、版本、Redis L2、统计 | 热点倾斜、集群失效、网络分区和容量 |
+| Actor 在线状态保存 | minimum-slice | 不可变 BoundPersistentEntity、脏代际、lane 快照与成功版本确认、确认失败重试、完成感知周期 flush 与关闭排空 | 接受内存更新不等于耐久确认；回调须幂等；自定义取消阻塞与进程宕机恢复需应用另行验证 |
+| 玩家奖励可靠通知配方 | minimum-slice | 单聚合库存/领取日期/待通知 CAS，稳定事件 ID、受管分页重放；认证 TCP 及 PostgreSQL runtime 重建回归 | 至少一次，消费者去重；未实现分布式 outbox claim 或跨进程 owner 恢复 |
 
 ## 运营与可观测性
 
@@ -83,7 +87,7 @@
 | 能力 | 状态 | 已有 | 主要缺口 |
 | --- | --- | --- | --- |
 | 阶段 0 本地开箱验收 | implemented | quick/full 统一入口、确定性摘要、独立日志、首错停止、示例与七类脚手架黑盒验证 | 不覆盖真实中间件、容量、长稳或生产就绪 |
-| 本地 Starter | implemented | 无 Docker 默认装配、Builder 覆盖、执行域、诊断、生命周期；`ZeroServerTcpApplication` 管理显式 TCP 启停；新生成 `local + net` 工程已通过编译、3 项测试及真实本地 TCP 回显 | 响应仍是最小回显；真实认证与生产安全接线、线程池/容量策略待应用落实 |
+| 本地 Starter | implemented | 无 Docker 默认装配、Builder 覆盖、执行域、诊断、生命周期；`ZeroServerTcpApplication` 管理显式 TCP 启停；local 模板消费 players Repository 并返回生成 loginResult/sceneResult，真实 TCP 测试通过 | local 模板固定 UID、仅 loopback；正式认证、安全策略与容量需应用落实，认证示例见 business-slice |
 | Production Starter | minimum-slice | 按需显式 Adapter 选择、严格 selector、必填配置、启动健康/预算、逆序资源事务、安全异常；外部组件失败禁止本地回退 | 未启用的能力可使用本地实现，项目必须显式选择需要的持久/分布式能力；周期健康、自动恢复、完整熔断、硬 wall-clock 取消 |
 | 模块化运行时装配 | minimum-slice | 中立 `zero-runtime`、显式 catalog/preset/profile、typed config、最小依赖图、事务回滚、独立 assembly/startup deadline、启动健康、single-use、安全诊断、共享能力模型、Local Starter 与生成器迁移；Kafka RPC、MongoDB data、Redis shared resource/data/cache、PostgreSQL data、Nacos discovery/RPC resolver 和 network lifecycle provider 已正式接入；Production 门面直接实现 `GameRuntime` | 周期健康、自动恢复、每组件独立预算、完整 production policy 和真实中间件故障验证仍待后续阶段 |
 | Docker/编排 | minimum-slice | `deploy/docker-compose.yml` 提供可运行的 Compose 基线：环境变量、非 root、只读根文件系统、healthcheck、内部网络、资源上限、可选 Redis/PostgreSQL 和 secret 路径占位 | app 镜像必须由项目提供；不含 TLS/WAF/DDoS、滚动发布、自动恢复、跨主机灾备、容量或生产就绪证明 |
@@ -106,7 +110,7 @@
 - 2026-09-18 报告中的 net 生成装配编译错误已于 9 月 23 日修复，见[依赖与入口修复记录](migrations/20260923-dependency-upgrades.md)。默认业务模板与 `local + net` 仍分别验收，TCP 回显不代表生产安全链完整。
 
 - 脚手架已有 ownership manifest、plan/diff、升级事务与回滚；流程见[迁移说明](migrations/20260914-scaffold-ownership-manifest.md)。
-- Kafka 中心—逻辑三模块及双 JVM 验收脚本已存在；历史真实 broker 验收记录为 blocked，当前不能宣称外部链路通过，见[双进程说明](migrations/20260915-center-logic-kafka-two-process.md)。
+- Kafka 中心—逻辑三模块及双 JVM 脚本在 2026-10-14 补齐签验，真实 broker 注册、三次调用、注销及退出通过。历史 blocked 记录仍保留，当前证据见[本轮报告](reports/20261014-product-goal-remediation.zh-CN.md)，不外推为集群故障或容量证明。
 - 缓存、事件、持久化、帧同步、房间、状态同步、榜单、AOI、协议和 RPC 的 9 月 17 日修复已在当前工作区实现，行为变化见[修复迁移说明](migrations/20260917-bug-report-verification.md)。
 - 平台 gate 的历史 CI job 结论与 artifact 内容审查分开记录，见[平台验证说明](migrations/20260915-platform-and-production-gates.md)；不推定后续代码已通过三平台验证。
 

@@ -23,17 +23,17 @@ class WorldHandoffSerialTest {
     @Test void ownershipTokenSurvivesUntilSourceRelease() {
         var service = world(new group.zn.zero.actor.scheduler.LocalActorScheduler());
         service.enterWorldAsync("d", "w").toCompletableFuture().join();
-        service.requestMigrationAsync("first", "d", "b").toCompletableFuture().join();
+        service.requestMigrationAsync(1L, "first", "d", "b").toCompletableFuture().join();
         assertThrows(RuntimeException.class, () -> service.releaseSourceAsync("first").toCompletableFuture().join());
         assertThrows(RuntimeException.class, () -> service.commitMigrationAsync("first").toCompletableFuture().join());
         service.prepareMigrationAsync("first").toCompletableFuture().join();
         service.commitMigrationAsync("first").toCompletableFuture().join();
         assertEquals("b", service.snapshot("d").ownerShardId());
         assertThrows(RuntimeException.class, () -> service.moveEntityAsync("d", "b", 1, 1).toCompletableFuture().join());
-        assertThrows(RuntimeException.class, () -> service.requestMigrationAsync("second", "d", "a").toCompletableFuture().join());
+        assertThrows(RuntimeException.class, () -> service.requestMigrationAsync(2L, "second", "d", "a").toCompletableFuture().join());
         service.releaseSourceAsync("first").toCompletableFuture().join();
         service.moveEntityAsync("d", "b", 2, 2).toCompletableFuture().join();
-        service.requestMigrationAsync("second", "d", "a").toCompletableFuture().join();
+        service.requestMigrationAsync(2L, "second", "d", "a").toCompletableFuture().join();
         service.releaseSourceAsync("first").toCompletableFuture().join();
         assertEquals(EntityStatus.MIGRATING_OUT, service.entityStatus("d"));
         service.prepareMigrationAsync("second").toCompletableFuture().join();
@@ -64,7 +64,7 @@ class WorldHandoffSerialTest {
             service.enterWorldAsync("d", "w").toCompletableFuture().join();
             service.moveEntityAsync("d", "a", 1, 1).toCompletableFuture().join();
             assertEquals(MigrationState.COMPLETED,
-                    service.migrateAsync("m", "d", "b").toCompletableFuture().get(3, TimeUnit.SECONDS).state());
+                    service.migrateAsync(3L, "m", "d", "b").toCompletableFuture().get(3, TimeUnit.SECONDS).state());
             assertEquals("b", service.snapshot("d").ownerShardId());
             assertTrue(lanes.size() >= 6);
             assertTrue(lanes.stream().allMatch(LaneKey.entity("d")::equals));

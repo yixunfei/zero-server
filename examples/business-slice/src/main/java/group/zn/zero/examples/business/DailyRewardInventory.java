@@ -17,16 +17,20 @@ import java.time.LocalDate;
  * @param quantity 非负库存。
  * @param claimDay 最近领取的 ISO 日期；从未领取时为空字符串。
  * @param claimKey 最近领取请求标识；从未领取时为空字符串。
+ * @param pendingNotification 是否仍需通知；单槽，积压时禁止覆盖为下一天的奖励。
+ * @param notificationTrace 原领取 trace，重放仍可关联原提交。
  * @author zn
  */
-@ZeroDataObject(namespace = "business_slice", collection = "daily_reward_inventory", schemaVersion = 2)
+@ZeroDataObject(namespace = "business_slice", collection = "daily_reward_inventory", schemaVersion = 3)
 public record DailyRewardInventory(
         @ZeroDataId Long id,
         @ZeroDataVersion long version,
         @ZeroDataField(order = 1) String itemId,
         @ZeroDataField(order = 2) int quantity,
         @ZeroDataField(order = 3) String claimDay,
-        @ZeroDataField(order = 4) String claimKey) implements VersionedEntity<Long> {
+        @ZeroDataField(order = 4) String claimKey,
+        @ZeroDataField(order = 5) boolean pendingNotification,
+        @ZeroDataField(order = 6) String notificationTrace) implements VersionedEntity<Long> {
 
     /**
      * 校验快照，不修改外部数据。
@@ -37,7 +41,8 @@ public record DailyRewardInventory(
         if (id == null || id <= 0 || version < 0 || !DailyRewardService.REWARD_ITEM.equals(itemId)
                 || quantity < 0 || claimDay == null || claimKey == null
                 || claimDay.isEmpty() != claimKey.isEmpty()
-                || (!claimKey.isEmpty() && claimKey.isBlank())) {
+                || (!claimKey.isEmpty() && claimKey.isBlank()) || notificationTrace == null
+                || pendingNotification && (claimDay.isEmpty() || notificationTrace.isBlank())) {
             throw new IllegalArgumentException("invalid daily reward inventory");
         }
         if (!claimDay.isEmpty()) {
@@ -52,7 +57,7 @@ public record DailyRewardInventory(
      * @throws IllegalArgumentException uid 非法。
      */
     public static DailyRewardInventory empty(final long uid) {
-        return new DailyRewardInventory(uid, 0, DailyRewardService.REWARD_ITEM, 0, "", "");
+        return new DailyRewardInventory(uid, 0, DailyRewardService.REWARD_ITEM, 0, "", "", false, "");
     }
 
     /**
@@ -63,16 +68,21 @@ public record DailyRewardInventory(
      */
     @Override
     public DailyRewardInventory withVersion(final long next) {
-        return new DailyRewardInventory(id, next, itemId, quantity, claimDay, claimKey);
+        return new DailyRewardInventory(id, next, itemId, quantity, claimDay, claimKey, pendingNotification, notificationTrace);
     }
 
     /** 由服务校验领取资格后构造一次写入的完整快照。 */
-    DailyRewardInventory claim(final String day, final String key) {
+    DailyRewardInventory claim(final String day, final String key, final String trace) {
         try {
             return new DailyRewardInventory(id, version, itemId,
-                    Math.addExact(quantity, DailyRewardService.REWARD_QUANTITY), day, key);
+                    Math.addExact(quantity, DailyRewardService.REWARD_QUANTITY), day, key, true, trace);
         } catch (ArithmeticException failure) {
             throw ZeroException.of(SystemErrorCode.INVALID_ARGUMENT, "inventory quantity overflow", failure);
         }
+    }
+
+    /** 条件确认通知成功，不改变库存；保留原事件身份用于诊断。 */
+    DailyRewardInventory notified() {
+        return new DailyRewardInventory(id, version, itemId, quantity, claimDay, claimKey, false, notificationTrace);
     }
 }

@@ -39,6 +39,8 @@ import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * 编译并执行真实生成物，验证只读分发、输入完整性及输出布局契约。
@@ -62,6 +64,66 @@ class GeneratedDispatcherContractTest {
         verifyGeneratedDispatcher(true);
     }
 
+    /** 显式响应声明在 DTO 和展开参数两种签名下都能编译并返回实际异步响应。 */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @SuppressWarnings("unchecked")
+    void explicitResponseShouldCompileAndComplete(final boolean expanded) throws Exception {
+        var parsed = new group.zn.zero.codegen.dsl.DefaultProtocolDslParser().parse("""
+                namespace group.zn.zero.generated
+                message LoginRequest {
+                  field 1 long uid
+                  field 2 string token
+                }
+                message LoginResponse {
+                  field 1 boolean ok
+                }
+                protocol LoginRequest {
+                  id 1001
+                  direction client_to_server
+                }
+                method login {
+                  protocol LoginRequest
+                  request LoginRequest
+                  response LoginResponse
+                  bo LoginEventBO
+                }
+                """);
+        var method = parsed.methods().getFirst();
+        var document = new group.zn.zero.codegen.dsl.ProtocolDslDocument(parsed.namespace(), parsed.protocols(),
+                parsed.enums(), parsed.messages(), List.of(new group.zn.zero.codegen.model.ProtocolMethod(
+                        method.definition(), method.requestMessage(), method.responseMessage(), method.boName(),
+                        method.methodName(), method.comment(), parsed.messages().getFirst().fields(), expanded)));
+        var request = new CodegenRequest(document, root.resolve("sources"), List.of(CodegenLanguage.JAVA), true);
+        new DefaultCodeGenerator().generate(request);
+        try (var loader = compile()) {
+            var requestType = loader.loadClass(request.javaPackage(JavaArtifactKind.DTO) + ".LoginRequestDTO");
+            var responseType = loader.loadClass(request.javaPackage(JavaArtifactKind.DTO) + ".LoginResponseDTO");
+            var async = loader.loadClass(request.javaPackage(JavaArtifactKind.BO) + ".LoginEventBO$Async");
+            var dispatcher = loader.loadClass(request.javaPackage(JavaArtifactKind.DISPATCHER) + ".GeneratedProtocolDispatcher");
+            var pending = new java.util.concurrent.CompletableFuture<Object>();
+            Object bo = Proxy.newProxyInstance(loader, new Class<?>[] {async}, (proxy, invoked, args) -> {
+                assertEquals(1001L, expanded ? args[0] : requestType.getField("uid").get(args[0]));
+                assertEquals("token", expanded ? args[1] : requestType.getField("token").get(args[0]));
+                return pending;
+            });
+            var requestCodec = codec(loader, request, "LoginRequestDTO");
+            var responseCodec = codec(loader, request, "LoginResponseDTO");
+            var endpoint = (group.zn.zero.protocol.AsyncProtocolEndpoint<Object, Object>) dispatcher.getMethod(
+                    "endpointLoginEventBOlogin", async, int.class, ZeroPayloadCodec.class).invoke(null, bo, 1002, responseCodec);
+            Object input = requestType.getConstructor().newInstance();
+            requestType.getField("uid").setLong(input, 1001L);
+            requestType.getField("token").set(input, "token");
+            var delivered = endpoint.handle(new ProtocolFrame(1001, 1, 0, null, encode(requestCodec, input))).toCompletableFuture();
+            assertFalse(delivered.isDone());
+            Object output = responseType.getConstructor().newInstance();
+            responseType.getField("ok").setBoolean(output, true);
+            pending.complete(output);
+            assertEquals(1002, delivered.join().protocolId());
+            assertArrayEquals(encode(responseCodec, output), delivered.join().payload());
+        }
+    }
+
     private void verifyGeneratedDispatcher(final boolean split) throws Exception {
         CodegenRequest request = generate(split);
         try (URLClassLoader loader = compile()) {
@@ -81,6 +143,7 @@ class GeneratedDispatcherContractTest {
             register.invoke(dispatcher, business(bo, received));
             ZeroPayloadCodec<Object> codec = codec(loader, request, dtoName);
             byte[] payload = encode(codec, newRequest(dto));
+            verifyAsync(loader, request, dispatcherType, codec, payload, id);
             ProtocolFrame ownedFrame = new ProtocolFrame(id, 1, 0, null, payload);
             assertEquals(true, bytes.invoke(dispatcher, id, payload));
             assertEquals(true, frame.invoke(dispatcher, ownedFrame));
@@ -112,6 +175,41 @@ class GeneratedDispatcherContractTest {
             assertInstanceOf(NullPointerException.class, assertThrows(InvocationTargetException.class,
                     () -> bytes.invoke(dispatcher, id, null)).getCause());
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void verifyAsync(final ClassLoader loader, final CodegenRequest request, final Class<?> dispatcherType,
+            final ZeroPayloadCodec<Object> codec, final byte[] payload, final int id) throws Exception {
+        Class<?> async = loader.loadClass(request.javaPackage(JavaArtifactKind.BO) + ".PlayerQueryEventBO$Async");
+        var pending = new java.util.concurrent.CompletableFuture<Object>();
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var argument = new java.util.concurrent.atomic.AtomicReference<Object>();
+        Object bo = Proxy.newProxyInstance(loader, new Class<?>[]{async}, (proxy, method, args) -> {
+            calls.incrementAndGet(); argument.set(args[0]); return pending;
+        });
+        var endpoint = (group.zn.zero.protocol.AsyncProtocolEndpoint<Object, Object>) dispatcherType.getMethod(
+                "endpointPlayerQueryEventBOquery", async, int.class, ZeroPayloadCodec.class).invoke(null, bo, id + 1, codec);
+        var response = endpoint.handle(new ProtocolFrame(id, 1, 0, null, payload)).toCompletableFuture();
+        assertFalse(response.isDone(), "typed response must await business completion");
+        var malformed = endpoint.handle(new ProtocolFrame(id, 1, 0, null,
+                Arrays.copyOf(payload, payload.length + 1))).toCompletableFuture().join();
+        assertTrue(group.zn.zero.protocol.ProtocolFeature.ERROR.enabledIn(malformed.flags()));
+        assertEquals(1, calls.get(), "reject trailing bytes before side effects");
+        pending.complete(argument.get());
+        var frame = response.join();
+        assertEquals(id + 1, frame.protocolId());
+        assertArrayEquals(payload, frame.payload());
+        var failed = new java.util.concurrent.CompletableFuture<Object>();
+        Object failureBo = Proxy.newProxyInstance(loader, new Class<?>[]{async}, (proxy, method, args) -> failed);
+        Object dispatcher = dispatcherType.getConstructor().newInstance();
+        dispatcherType.getMethod("registerPlayerQueryEventBOAsync", async).invoke(dispatcher, failureBo);
+        var delivered = (java.util.concurrent.CompletionStage<Object>) dispatcherType.getMethod(
+                "dispatchAsync", int.class, byte[].class).invoke(dispatcher, id, payload);
+        assertFalse(delivered.toCompletableFuture().isDone());
+        var cause = ZeroException.of(ProtocolErrorCode.DECODE_FAILED);
+        failed.completeExceptionally(cause);
+        assertEquals(cause, assertThrows(java.util.concurrent.CompletionException.class,
+                () -> delivered.toCompletableFuture().join()).getCause());
     }
 
     private void verifyRejectedPayloads(final Object dispatcher, final Method bytes, final Method frame,

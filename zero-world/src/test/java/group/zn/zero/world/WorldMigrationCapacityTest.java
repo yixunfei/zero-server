@@ -18,19 +18,19 @@ class WorldMigrationCapacityTest {
         var other = service.enterWorldAsync("other", "w").toCompletableFuture().join();
         assertEquals(7, first.routeEpoch());
         assertThrows(CompletionException.class,
-                () -> service.requestMigrationAsync("bad", "first", "b", 6).toCompletableFuture().join());
-        service.requestMigrationAsync("m", "first", "b", 7).toCompletableFuture().join();
+                () -> service.requestMigrationAsync(1L, "bad", "first", "b", 6).toCompletableFuture().join());
+        service.requestMigrationAsync(2L, "m", "first", "b", 7).toCompletableFuture().join();
         var rejected = assertThrows(CompletionException.class,
-                () -> service.requestMigrationAsync("n", "other", "b", 7).toCompletableFuture().join());
+                () -> service.requestMigrationAsync(3L, "n", "other", "b", 7).toCompletableFuture().join());
         assertEquals(WorldErrorCode.MIGRATION_CAPACITY_EXCEEDED, ((ZeroException) rejected.getCause()).errorCode());
         assertEquals(EntitySnapshot.of(other), service.snapshot("other"));
         assertThrows(CompletionException.class,
-                () -> service.requestMigrationAsync("m", "other", "b", 7).toCompletableFuture().join());
+                () -> service.requestMigrationAsync(2L, "m", "other", "b", 7).toCompletableFuture().join());
         service.prepareMigrationAsync("m").toCompletableFuture().join();
         service.commitMigrationAsync("m").toCompletableFuture().join();
         var completed = service.releaseSourceAsync("m").toCompletableFuture().join();
         assertEquals(MigrationState.COMPLETED, completed.state());
-        assertSame(completed, service.requestMigrationAsync("m", "first", "b", 7).toCompletableFuture().join());
+        assertSame(completed, service.requestMigrationAsync(2L, "m", "first", "b", 7).toCompletableFuture().join());
         assertEquals(1, service.migrationCount());
     }
 
@@ -38,10 +38,10 @@ class WorldMigrationCapacityTest {
         var service = new LocalWorldService(new LocalActorScheduler(), event -> { }, WorldMetrics.NOOP, 1);
         service.createWorld("w", "a");
         service.enterWorldAsync("entity", "w").toCompletableFuture().join();
-        service.requestMigrationAsync("m", "entity", "a").toCompletableFuture().join();
+        service.requestMigrationAsync(2L, "m", "entity", "a").toCompletableFuture().join();
         var failed = service.prepareMigrationAsync("m", false).toCompletableFuture().join();
         assertEquals(MigrationState.FAILED, failed.state());
-        assertSame(failed, service.requestMigrationAsync("m", "entity", "a").toCompletableFuture().join());
+        assertSame(failed, service.requestMigrationAsync(2L, "m", "entity", "a").toCompletableFuture().join());
         assertEquals(EntityStatus.ACTIVE, service.entityStatus("entity"));
     }
 }

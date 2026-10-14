@@ -18,22 +18,22 @@ public final class RankingSeasonApplication {
 
     public static DemoResult runDemo() {
         RankingService ranking = new LocalRankingService();
-        ranking.transitionSeason("points", "season-1", SeasonState.OPEN, "open-1");
-        ranking.submitScore("points", "season-1", "1001", 100, 1001, ScoreMergeMode.SET, "set-1001");
-        ranking.submitScore("points", "season-1", "1002", 240, 1002, ScoreMergeMode.SET, "set-1002");
-        ranking.submitScore("points", "season-1", "1003", 180, 1003, ScoreMergeMode.SET, "set-1003");
-        ranking.submitScore("points", "season-1", "1001", 80, 1001, ScoreMergeMode.MAX, "max-1001");
-        ranking.submitScore("points", "season-1", "1001", 20, 1001, ScoreMergeMode.ADD, "add-1001");
-        ranking.submitScore("points", "season-1", "1001", 20, 1001, ScoreMergeMode.ADD, "add-1001");
+        ranking.transitionSeason("points", "season-1", SeasonState.OPEN, 1L, "open-1");
+        ranking.submitScore("points", "season-1", "1001", 100, 1001, ScoreMergeMode.SET, 1L, "set-1001");
+        ranking.submitScore("points", "season-1", "1002", 240, 1002, ScoreMergeMode.SET, 2L, "set-1002");
+        ranking.submitScore("points", "season-1", "1003", 180, 1003, ScoreMergeMode.SET, 3L, "set-1003");
+        ranking.submitScore("points", "season-1", "1001", 80, 1001, ScoreMergeMode.MAX, 4L, "max-1001");
+        ranking.submitScore("points", "season-1", "1001", 20, 1001, ScoreMergeMode.ADD, 5L, "add-1001");
+        ranking.submitScore("points", "season-1", "1001", 20, 1001, ScoreMergeMode.ADD, 5L, "add-1001");
         List<RankingEntry> top = ranking.queryTop("points", "season-1", 2);
-        ranking.transitionSeason("points", "season-1", SeasonState.FROZEN, "freeze-1");
+        ranking.transitionSeason("points", "season-1", SeasonState.FROZEN, 1L, "freeze-1");
         RankSnapshot snapshot = ranking.snapshot("points", "season-1");
         boolean dryRun = true; // The formal API has no side-effecting dry-run call.
-        ranking.transitionSeason("points", "season-1", SeasonState.SETTLING, "settling-1");
+        ranking.transitionSeason("points", "season-1", SeasonState.SETTLING, 1L, "settling-1");
         boolean executed = ranking.settle("points", "season-1", "settlement-1");
         boolean replay = ranking.settle("points", "season-1", "settlement-1");
-        ranking.transitionSeason("points", "season-1", SeasonState.ARCHIVED, "archive-1");
-        return new DemoResult(ranking.seasonState("points", "season-1"), top, snapshot,
+        ranking.transitionSeason("points", "season-1", SeasonState.ARCHIVED, 1L, "archive-1");
+        return new DemoResult(ranking.seasonState("points", "season-1", 1L), top, snapshot,
                 dryRun, executed, replay);
     }
 

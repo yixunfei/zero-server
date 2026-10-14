@@ -1,5 +1,18 @@
 # zeroServer 模块图
 
+## 2026-10-14 产品目标报告修复与玩家链路
+
+| 入口 / 常见修改位置 | 职责与依赖 | 风险边界 |
+| --- | --- | --- |
+| zero-game/RequestExecution、ContextualActorScheduler、ActorRequestExecutor | 可选业务组合桥；game → actor + rpc → security/protocol | 仅框架拥有的入口/回调恢复 scope，取消不释放物理任务的 lane；core/actor 不反向依赖 security |
+| zero-protocol/AsyncProtocolEndpoint；zero-codegen Java BO/dispatcher 模板 | 类型化异步响应及编解码；protocol → core，codegen 生成端点胶水 | 编解码边界不负责认证，必须在可信入口外层建立 RequestExecution |
+| zero-runtime-data/ActorPersistenceBindingExecutor、ManagedPersistenceScheduler | runtime-data → data/bootstrap/actor；绑定快照/确认及受管调度 | 管理器先停，再关闭绑定器/Actor/IO；禁止从同 lane 阻塞等待保存 |
+| zero-data/BoundPersistentEntity、DefaultPersistenceManager | 不可变聚合、脏代际、保存确认重试 | data 不依赖 Actor；确认回调必须幂等，已写成功不重复写旧快照 |
+| zero-player/PlayerProfileRepository；local 模板 LocalGameFixture | 正式 profile codec；从具名 players Repository 取数 | 原型默认固定 UID，仅 loopback，不作为账号认证实现 |
+| examples/business-slice/DailyRewardBO、Flow、TcpServer、NotificationReplay | 已认证同业务 local/TCP、玩家 lane、单聚合 CAS 与恢复 | 示例依赖框架；框架不依赖示例；跨进程 owner 恢复仍未交付 |
+
+LocalNpcZone 使用 LinkedHashMap 轮转，NpcEvent.failure 保留统一异常；World/Ranking 使用显式归档序号；CachePolicy 拒绝 stale=true。Kafka 示例复用既有签验。两条新增依赖已登记 module-dependencies.tsv，没有引入新的驱动依赖。公共 API、数据和关闭风险见[迁移说明](migrations/20261014-product-goal-remediation.zh-CN.md)。
+
 ## 2026-10-12 模块接入应用
 
 新增 [examples/module-recipes](../examples/module-recipes/README.md)，是独立消费者聚合工程，不进入框架发布 Reactor。Java 包为 `group.zn.zero.examples.recipes.<场景>`；各子工程只向下依赖框架，核心与 Adapter 不反向依赖示例。

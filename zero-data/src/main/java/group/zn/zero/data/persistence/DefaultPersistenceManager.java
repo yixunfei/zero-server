@@ -37,6 +37,8 @@ import java.util.function.Supplier;
  * @author zn
  */
 public final class DefaultPersistenceManager extends AbstractLifecycle implements PersistenceManager {
+    /** 已物理提交但尚未完成绑定域确认的快照；与脏目录共用容量边界。 */
+    private final java.util.concurrent.ConcurrentMap<DirtyKey, Confirmation> confirmations = new ConcurrentHashMap<>();
 
     /**
      * 默认最大批量数量。
@@ -265,10 +267,19 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             final ID id,
             final DataThreadBinding binding,
             final Supplier<T> snapshotSupplier) {
+        markDirty(targetName, id, binding, snapshotSupplier, ignored -> { });
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public <ID, T extends VersionedEntity<ID>> void markDirty(final String targetName, final ID id,
+            final DataThreadBinding binding, final Supplier<T> snapshotSupplier,
+            final java.util.function.Consumer<T> confirmed) {
         String currentTargetName = requireText(targetName, "targetName");
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(binding, "binding");
         Objects.requireNonNull(snapshotSupplier, "snapshotSupplier");
+        Objects.requireNonNull(confirmed, "confirmed");
         requireTarget(currentTargetName);
         DirtyKey key = new DirtyKey(currentTargetName, id);
         synchronized (admissionLock) {
@@ -280,7 +291,7 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
                         "persistence dirty entry limit exceeded", null);
             }
             dirtyEntries.put(key, new DirtyEntry<>(key, currentTargetName, id, binding, snapshotSupplier,
-                    dirtyMarkCount.incrementAndGet()));
+                    confirmed, dirtyMarkCount.incrementAndGet()));
         }
     }
 
@@ -344,7 +355,7 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
         PersistenceScheduleHandle handle = Objects.requireNonNull(scheduler.scheduleAtFixedRate(
                 serviceName + "-flush",
                 currentInterval,
-                () -> flushNow()), "schedule handle");
+                this::scheduledFlush), "schedule handle");
         synchronized (admissionLock) {
             if (!stopping && generation == scheduleGeneration) {
                 scheduleHandles.add(handle);
@@ -354,6 +365,16 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
         handle.cancel();
         throw ZeroException.of(DataErrorCode.PERSISTENCE_FLUSH_FAILED,
                 "persistence stopped during schedule registration", null);
+    }
+
+    private CompletionStage<PersistenceFlushResult> scheduledFlush() {
+        return flushNow().thenApply(result -> {
+            if (result.failureCount() > 0) {
+                throw ZeroException.of(DataErrorCode.PERSISTENCE_FLUSH_FAILED,
+                        "scheduled flush failed for " + result.failureCount() + " entries; inspect persistence failures", null);
+            }
+            return result;
+        });
     }
 
     /**
@@ -387,8 +408,25 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             handles = List.copyOf(scheduleHandles);
             scheduleHandles.clear();
         }
-        for (PersistenceScheduleHandle handle : handles) handle.cancel();
         long startedAt = System.nanoTime();
+        RuntimeException cancellationFailure = null;
+        for (PersistenceScheduleHandle handle : handles) {
+            try { handle.cancel(); }
+            catch (RuntimeException failure) {
+                if (cancellationFailure == null) cancellationFailure = failure;
+                else cancellationFailure.addSuppressed(failure);
+            }
+        }
+        try { drainOnStop(startedAt); }
+        catch (RuntimeException failure) {
+            if (cancellationFailure != null) failure.addSuppressed(cancellationFailure);
+            throw failure;
+        }
+        if (cancellationFailure != null) throw ZeroException.of(DataErrorCode.PERSISTENCE_FLUSH_FAILED,
+                "persistence schedule cancellation failed", cancellationFailure);
+    }
+
+    private void drainOnStop(final long startedAt) {
         try {
             do {
                 long remaining = shutdownTimeout.toNanos() - (System.nanoTime() - startedAt);
@@ -482,8 +520,13 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
     private <ID, T extends VersionedEntity<ID>> CompletionStage<Void> flushTyped(
             final DirtyEntry<ID, T> entry) {
         PersistenceTarget<ID, T> target = target(entry.targetName());
-        return bindingExecutor.capture(entry.binding(), entry.snapshotSupplier())
-                .thenCompose(entity -> saveSnapshot(entry, target, entity))
+        Confirmation pending = confirmations.get(entry.key());
+        CompletionStage<Void> previous = pending == null ? CompletableFuture.completedFuture(null)
+                : confirm(entry.key(), pending);
+        return previous.thenCompose(ignored -> pending != null && pending.generation() == entry.generation()
+                    ? CompletableFuture.completedFuture(null)
+                    : bindingExecutor.capture(entry.binding(), entry.snapshotSupplier())
+                            .thenCompose(entity -> saveSnapshot(entry, target, entity)))
                 .thenRun(() -> {
                     synchronized (admissionLock) {
                         if (dirtyEntries.remove(entry.key(), entry)) {
@@ -504,7 +547,21 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
         if (!entry.id().equals(entity.id())) {
             return failedFuture(DataErrorCode.INVALID_ENTITY, "persistence snapshot id mismatch", null);
         }
-        return target.repository().save(entity);
+        return target.repository().save(entity).thenCompose(ignored -> {
+            @SuppressWarnings("unchecked")
+            T saved = (T) entity.withVersion(Math.addExact(entity.version(), 1));
+            var confirmation = new Confirmation(entry.generation(), entry.binding(), () -> entry.confirmed().accept(saved));
+            confirmations.put(entry.key(), confirmation);
+            return confirm(entry.key(), confirmation);
+        });
+    }
+
+    private CompletionStage<Void> confirm(final DirtyKey key, final Confirmation confirmation) {
+        return bindingExecutor.capture(confirmation.binding(), () -> {
+            confirmation.action().run();
+            confirmations.remove(key, confirmation);
+            return (Void) null;
+        });
     }
 
     private PersistenceFlushResult completeResult(final FlushAccumulator accumulator) {
@@ -624,8 +681,11 @@ public final class DefaultPersistenceManager extends AbstractLifecycle implement
             String targetName,
             ID id,
             DataThreadBinding binding,
-            Supplier<T> snapshotSupplier, long generation) {
+            Supplier<T> snapshotSupplier, java.util.function.Consumer<T> confirmed, long generation) {
     }
+
+    /** 只在物理写入成功后登记，确认失败可重试；不再重写该快照。 @author zn */
+    private record Confirmation(long generation, DataThreadBinding binding, Runnable action) { }
 
     /**
      * flush 计数器。

@@ -135,7 +135,9 @@ public final class ScaffoldCatalog {
                 useCase,
                 summaryPrefix,
                 productionGap,
-                LOCAL_CAPABILITIES,
+                id.equals("local") ? java.util.stream.Stream.concat(LOCAL_CAPABILITIES.stream(),
+                        java.util.stream.Stream.of(StandardRuntimeCapabilityModel.PERSISTENCE_MANAGER)).toList()
+                        : LOCAL_CAPABILITIES,
                 id.equals("local") ? List.of(
                         DIRECT_DEPENDENCIES.getFirst(),
                         new ScaffoldDependency(MavenCoordinate.zero("zero-player"), ""),

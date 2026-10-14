@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 class RankIndexModelTest {
     @Test void randomizedUpdatesMatchSortedReference() {
         LocalRankingService service = new LocalRankingService();
-        service.transitionSeason("r", "s", SeasonState.OPEN, "open");
+        service.transitionSeason("r", "s", SeasonState.OPEN, 1L, "open");
         Map<String, RankingEntry> reference = new HashMap<>();
         Random random = new Random(90223);
         Comparator<RankingEntry> order = Comparator.comparingLong(RankingEntry::score).reversed()
@@ -30,11 +30,11 @@ class RankIndexModelTest {
                 case MAX -> Math.max(old.score(), score);
                 case ADD -> old.score() + score;
             };
-            RankingEntry actual = service.submitScore("r", "s", uid, score, tie, mode, "k" + step);
+            RankingEntry actual = service.submitScore("r", "s", uid, score, tie, mode, (long) step + 1, "k" + step);
             assertEquals(expected, actual.score());
             assertEquals(step + 1, actual.version());
             reference.put(uid, actual);
-            assertEquals(actual, service.submitScore("r", "s", uid, score, tie, mode, "k" + step));
+            assertEquals(actual, service.submitScore("r", "s", uid, score, tie, mode, (long) step + 1, "k" + step));
             if (step % 41 == 0) {
                 List<RankingEntry> sorted = reference.values().stream().sorted(order).toList();
                 assertEquals(sorted.subList(0, Math.min(100, sorted.size())), service.queryTop("r", "s", 100));
@@ -44,19 +44,19 @@ class RankIndexModelTest {
                 assertTrue(service.queryPlayerRank("r", "s", "missing").isEmpty());
             }
         }
-        service.transitionSeason("r", "s", SeasonState.FROZEN, "freeze");
+        service.transitionSeason("r", "s", SeasonState.FROZEN, 1L, "freeze");
         assertEquals(reference.values().stream().sorted(order).toList(), service.snapshot("r", "s").entries());
         assertThrows(UnsupportedOperationException.class, () -> service.queryTop("r", "s", 10).clear());
     }
 
     @Test void extremeScoresAndOverflowKeepIndexConsistent() {
         LocalRankingService service = new LocalRankingService();
-        service.transitionSeason("r", "s", SeasonState.OPEN, "open");
-        service.submitScore("r", "s", "min", Long.MIN_VALUE, 0, ScoreMergeMode.SET, "1");
-        service.submitScore("r", "s", "max", Long.MAX_VALUE, 0, ScoreMergeMode.SET, "1");
+        service.transitionSeason("r", "s", SeasonState.OPEN, 1L, "open");
+        service.submitScore("r", "s", "min", Long.MIN_VALUE, 0, ScoreMergeMode.SET, 1L, "1");
+        service.submitScore("r", "s", "max", Long.MAX_VALUE, 0, ScoreMergeMode.SET, 1L, "1");
         List<RankingEntry> before = service.queryTop("r", "s", 10);
         assertThrows(RuntimeException.class,
-                () -> service.submitScore("r", "s", "max", 1, 1, ScoreMergeMode.ADD, "2"));
+                () -> service.submitScore("r", "s", "max", 1, 1, ScoreMergeMode.ADD, 2L, "2"));
         assertEquals(before, service.queryTop("r", "s", 10));
         assertEquals(1, service.queryPlayerRank("r", "s", "max").orElseThrow().rank());
     }

@@ -52,9 +52,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * </pre>
  *
  * <p>This class is the network-to-business boundary of the scaffold. Business work stays inside
- * the generated BO implementations; the listener itself never contains game rules. The
- * generated dispatcher is synchronous today, so one decoded frame equals one dispatch call,
- * while business services keep returning {@code CompletionStage} on their own Actor lanes.</p>
+ * the generated BO implementations; the listener itself never contains game rules. Generated async endpoints encode typed
+ * response DTOs after business services complete on their own Actor lanes.</p>
  *
  * <p>Boundaries: no authentication, TLS, handshake, heartbeat, rate limiting, backpressure,
  * capacity or long-stability guarantee. Use {@code --once} only for a local smoke check.</p>
@@ -243,8 +242,7 @@ public final class __SERVER_CLASS__ {
                 this.runtime = LocalGameFlow.createRuntime(config, LocalGameObservation.consoleAppender());
                 MonitorRuntime monitor = runtime.require(MonitorRuntimeComponent.MONITOR_RUNTIME);
 
-                this.fixture = new LocalGameFixture(
-                        runtime.require(ActorRuntime.ACTOR_SCHEDULER), uid -> "profile-" + uid);
+                this.fixture = new LocalGameFixture(runtime);
                 this.flow = new LocalGameFlow(fixture.playerService(), fixture.sceneService(),
                         new LocalGameObservation(runtime.require(LogRuntime.LOG_APPENDER), monitor, LOG_SOURCE));
                 this.listener = listener(config, flow);
@@ -284,13 +282,11 @@ public final class __SERVER_CLASS__ {
         private ServerFrameHandler frameHandler(final LocalGameFlow generated) {
             return (connection, frame) -> {
                 handled.incrementAndGet();
-                return generated.dispatch(frame.protocolId(), frame.payload()).handle((value, failure) -> {
-                    if (failure != null) {
+                return generated.handle(frame).thenApply(response -> {
+                    if (group.zn.zero.protocol.ProtocolFeature.ERROR.enabledIn(response.flags())) {
                         dispatchFailures.incrementAndGet();
-                        return List.of(errorFrame(frame, LocalGameObservation.error(failure).code()));
                     }
-                    // 演示回包在业务真正完成后发出；协议仍是既有 DTO 回显。
-                    return List.of(frame);
+                    return List.of(response);
                 });
             };
         }

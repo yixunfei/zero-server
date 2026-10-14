@@ -25,7 +25,7 @@ public final class VerifyGeneratedCompositions {
             new Consumer("local-rpg", "local", "", localArtifacts()),
             new Consumer("redis", "runtime", "redis", Set.of("zero-core", "zero-runtime", "zero-runtime-bootstrap",
                     "zero-runtime-production", "zero-runtime-redis", "zero-runtime-data", "zero-runtime-cache",
-                    "zero-data", "zero-data-redis", "zero-cache", "zero-protocol")),
+                    "zero-data", "zero-data-redis", "zero-cache", "zero-protocol", "zero-actor")),
             new Consumer("custom-actor", "local", "custom-actor", localArtifacts()));
     private static final List<String> ABSENT_CLASSES = List.of(
             "group.zn.zero.starter.LocalRuntime", "group.zn.zero.codegen.ProtocolCodegenCli",
@@ -76,7 +76,8 @@ public final class VerifyGeneratedCompositions {
     private static Set<String> localArtifacts() {
         return Set.of("zero-core", "zero-runtime", "zero-runtime-bootstrap", "zero-runtime-actor", "zero-actor",
                 "zero-runtime-log", "zero-log", "zero-runtime-monitor", "zero-monitor", "zero-protocol",
-                "zero-player", "zero-scene", "zero-game", "zero-data", "zero-cache");
+                "zero-player", "zero-scene", "zero-game", "zero-data", "zero-cache", "zero-runtime-data",
+                "zero-rpc", "zero-rpc-common", "zero-security");
     }
 
     private static void verify(final Consumer consumer) throws Exception {

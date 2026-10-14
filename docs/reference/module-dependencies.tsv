@@ -51,6 +51,7 @@ edge	zero-frame-sync/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	fal
 edge	zero-frame-sync/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
 edge	zero-game/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-game/pom.xml#default
 edge	zero-game/pom.xml	group.zn.zero:zero-core:0.1.2-SNAPSHOT	compile	false	jar		zero-game/pom.xml#default
+edge	zero-game/pom.xml	group.zn.zero:zero-rpc:0.1.2-SNAPSHOT	compile	false	jar		zero-game/pom.xml#default
 edge	zero-game/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
 edge	zero-gm-rest/pom.xml	com.google.code.gson:gson:2.13.2	compile	false	jar		zero-gm-rest/pom.xml#default
 edge	zero-gm-rest/pom.xml	group.zn.zero:zero-gm:0.1.2-SNAPSHOT	compile	false	jar		zero-gm-rest/pom.xml#default
@@ -144,6 +145,7 @@ edge	zero-runtime-bootstrap/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	
 edge	zero-runtime-cache/pom.xml	group.zn.zero:zero-cache:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-cache/pom.xml#default
 edge	zero-runtime-cache/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-cache/pom.xml#default
 edge	zero-runtime-cache/pom.xml	org.junit.jupiter:junit-jupiter:5.10.3	test	false	jar		zero-parent/pom.xml#default
+edge	zero-runtime-data/pom.xml	group.zn.zero:zero-actor:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-data/pom.xml#default
 edge	zero-runtime-data/pom.xml	group.zn.zero:zero-data:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-data/pom.xml#default
 edge	zero-runtime-data/pom.xml	group.zn.zero:zero-runtime-bootstrap:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-data/pom.xml#default
 edge	zero-runtime-data/pom.xml	group.zn.zero:zero-runtime:0.1.2-SNAPSHOT	compile	false	jar		zero-runtime-data/pom.xml#default

@@ -108,14 +108,6 @@ public final class LocalWorldService {
         }
     }
 
-    /**
-     * 确认迁移结果已由应用归档后释放终态收据；线程安全，在途记录使批次原子拒绝。
-     * 迁移请求使用显式单调 long 序号；旧入口仅作为过渡适配。
-     * @param migrationId 已归档的包含边界。 @return 释放数量；不删除实体状态。
-     */
-    public int acknowledgeMigrationsThrough(final String migrationId) {
-        synchronized (stateLock) { return migrations.acknowledgeThrough(migrationId); }
-    }
     /** 确认单调序号之前的迁移已归档，并释放对应收据。 */
     public int acknowledgeMigrationsThrough(final long sequence) {
         synchronized (stateLock) { return migrations.acknowledgeThrough(sequence); }
@@ -155,11 +147,6 @@ public final class LocalWorldService {
             return moved;
         });
     }
-    /** Asynchronously locks the source entity for migration. */
-    public CompletionStage<Migration> requestMigrationAsync(
-            String migrationId, String entityId, String targetShardId) {
-        return requestMigrationAsync(migrations.legacySequence(migrationId), migrationId, entityId, targetShardId);
-    }
     /** Asynchronously locks the source entity with an explicit monotonic request sequence. */
     public CompletionStage<Migration> requestMigrationAsync(
             long sequence, String migrationId, String entityId, String targetShardId) {
@@ -167,11 +154,6 @@ public final class LocalWorldService {
                 targetShardId, world(entity(entityId).worldId()).routeEpoch(), sequence));
     }
 
-    /** Asynchronously locks the source entity using an explicit route epoch. */
-    public CompletionStage<Migration> requestMigrationAsync(
-            String migrationId, String entityId, String targetShardId, long routeEpoch) {
-        return requestMigrationAsync(migrations.legacySequence(migrationId), migrationId, entityId, targetShardId, routeEpoch);
-    }
     /** Asynchronously locks the source entity with an explicit sequence and route epoch. */
     public CompletionStage<Migration> requestMigrationAsync(
             long sequence, String migrationId, String entityId, String targetShardId, long routeEpoch) {
@@ -182,6 +164,7 @@ public final class LocalWorldService {
     private Migration requestMigrationInLane(
             String migrationId, String entityId, String targetShardId, long routeEpoch, long sequence) {
             Objects.requireNonNull(migrationId);
+            if (sequence <= 0) throw new IllegalArgumentException("sequence must be positive");
             Entity current = entity(entityId);
             if (migrations.isRetired(sequence)) {
                 throw ZeroException.of(WorldErrorCode.MIGRATION_RETIRED,
@@ -283,21 +266,6 @@ public final class LocalWorldService {
         recordMetric("migration", "success", "completed");
         return result;
     }
-    /**
-     * Runs the complete migration without synchronously waiting between actor stages.
-     *
-     * @param id migration identity; non-blank
-     * @param entity entity identity; non-blank
-     * @param target target shard identity; non-blank
-     * @return completion signal containing the completed migration
-     */
-    public CompletionStage<Migration> migrateAsync(String id, String entity, String target) {
-        return requestMigrationAsync(id, entity, target)
-                .thenCompose(requested -> prepareMigrationAsync(requested.migrationId()))
-                .thenCompose(prepared -> commitMigrationAsync(prepared.migrationId()))
-                .thenCompose(committed -> releaseSourceAsync(committed.migrationId()));
-    }
-
     /** 使用调用方提供的单调序号完成迁移；序号贯穿请求和归档重放边界。 */
     public CompletionStage<Migration> migrateAsync(final long sequence, final String id,
             final String entity, final String target) {

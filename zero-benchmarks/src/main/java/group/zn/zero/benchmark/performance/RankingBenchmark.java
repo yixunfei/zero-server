@@ -30,10 +30,14 @@ public class RankingBenchmark {
     @Setup
     public void setup() {
         service = new LocalRankingService();
-        service.transitionSeason("r", "s", SeasonState.OPEN, "open");
+        service.transitionSeason("r", "s", SeasonState.OPEN, 1L, "open");
         for (int i = 0; i < size; i++) {
-            service.submitScore("r", "s", "u" + i, i % 100, i % 7, ScoreMergeMode.SET, "initial");
+            long request = i + 1L;
+            service.submitScore("r", "s", "u" + i, i % 100, i % 7, ScoreMergeMode.SET, request, "initial");
+            if (request % 1024 == 0) service.acknowledgeRequestsThrough("r", "s", request);
         }
+        sequence = size;
+        service.acknowledgeRequestsThrough("r", "s", sequence);
     }
 
     /** @return 不可变 Top10 快照；只读，线程私有。 */
@@ -44,7 +48,9 @@ public class RankingBenchmark {
     @Benchmark public Object missing() { return service.queryPlayerRank("r", "s", "absent"); }
     /** @return 已完成更新；变更单条分数，线程私有。 */
     @Benchmark public Object update() {
-        return service.submitScore("r", "s", "u50", ++sequence % 100, 1, ScoreMergeMode.SET,
+        var result = service.submitScore("r", "s", "u50", ++sequence % 100, 1, ScoreMergeMode.SET, sequence,
                 Long.toString(sequence));
+        if (sequence % 1024 == 0) service.acknowledgeRequestsThrough("r", "s", sequence);
+        return result;
     }
 }

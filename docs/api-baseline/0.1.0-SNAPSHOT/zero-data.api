@@ -21,7 +21,7 @@ public abstract boolean cancelled();
 public abstract boolean nullable();
 public abstract class group.zn.zero.data.adapter.AbstractRepositoryAdapter extends group.zn.zero.core.lifecycle.AbstractLifecycle implements group.zn.zero.data.DataService {
 public abstract group.zn.zero.data.model.VersionedEntity<ID> withVersion(long);
-public abstract group.zn.zero.data.persistence.PersistenceScheduleHandle scheduleAtFixedRate(java.lang.String, java.time.Duration, java.lang.Runnable);
+public abstract group.zn.zero.data.persistence.PersistenceScheduleHandle scheduleAtFixedRate(java.lang.String, java.time.Duration, java.util.function.Supplier<? extends java.util.concurrent.CompletionStage<?>>);
 public abstract group.zn.zero.data.persistence.PersistenceScheduleHandle scheduleFlush(group.zn.zero.data.persistence.PersistenceScheduler, java.time.Duration);
 public abstract group.zn.zero.data.persistence.PersistenceStatistics statistics();
 public abstract int order();
@@ -181,7 +181,7 @@ public group.zn.zero.data.persistence.DefaultPersistenceManager(java.lang.String
 public group.zn.zero.data.persistence.DirectPersistenceBindingExecutor();
 public group.zn.zero.data.persistence.ManualPersistenceScheduler();
 public group.zn.zero.data.persistence.PersistenceFlushResult(long, long, int, int, int, int);
-public group.zn.zero.data.persistence.PersistenceScheduleHandle scheduleAtFixedRate(java.lang.String, java.time.Duration, java.lang.Runnable);
+public group.zn.zero.data.persistence.PersistenceScheduleHandle scheduleAtFixedRate(java.lang.String, java.time.Duration, java.util.function.Supplier<? extends java.util.concurrent.CompletionStage<?>>);
 public group.zn.zero.data.persistence.PersistenceScheduleHandle scheduleFlush(group.zn.zero.data.persistence.PersistenceScheduler, java.time.Duration);
 public group.zn.zero.data.persistence.PersistenceStatistics statistics();
 public group.zn.zero.data.persistence.PersistenceStatistics(int, long, long, long, long);

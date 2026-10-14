@@ -45,4 +45,14 @@ public final class SecurityContextBridge {
             CURRENT.set(previous);
         }
     }
+
+    /** 在无身份范围内执行框架后台动作，结束后恢复原 scope；线程安全。
+     * @param supplier 动作。 @param <T> 结果类型。 @return 动作结果。
+     * @throws RuntimeException 动作失败原样传播。 */
+    public static <T> T without(final Supplier<T> supplier) {
+        Objects.requireNonNull(supplier, "supplier");
+        SecurityContext previous = CURRENT.get();
+        CURRENT.remove();
+        try { return supplier.get(); } finally { restore(previous); }
+    }
 }

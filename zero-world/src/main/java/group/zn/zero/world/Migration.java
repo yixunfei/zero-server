@@ -8,10 +8,5 @@ public record Migration(long sequence, String migrationId, String entityId, Stri
   Objects.requireNonNull(migrationId);Objects.requireNonNull(entityId);Objects.requireNonNull(sourceShardId);
   Objects.requireNonNull(targetShardId);Objects.requireNonNull(state);
  }
- /** 兼容旧构造器；生产请求应显式传入单调序号。 */
- public Migration(String migrationId, String entityId, String sourceShardId, String targetShardId,
-         long routeEpoch, MigrationState state, EntitySnapshot snapshot) {
-  this(1, migrationId, entityId, sourceShardId, targetShardId, routeEpoch, state, snapshot);
- }
  public Migration withState(MigrationState next){return new Migration(sequence,migrationId,entityId,sourceShardId,targetShardId,routeEpoch,next,snapshot);}
 }

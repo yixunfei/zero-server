@@ -82,13 +82,10 @@ public final class __APP_CLASS__ {
                 Instant.now(), LogLevel.INFO, LogType.RUNTIME, LOG_SOURCE,
                 new LogOperation("runtime-start", LogResult.SUCCESS, null),
                 "bootstrap", "zeroServer started", Map.of("name", APP_NAME)));
-        try (LocalPlayerService playerService = new LocalPlayerService(
-                runtime.require(ActorRuntime.ACTOR_SCHEDULER),
-                request -> 1001L, group.zn.zero.player.MissingPlayerPolicy.CREATE_DEFAULT);
-                LocalSceneService sceneService = new LocalSceneService(runtime.require(ActorRuntime.ACTOR_SCHEDULER))) {
+        try (LocalGameFixture fixture = new LocalGameFixture(runtime)) {
             LocalGameObservation observation = new LocalGameObservation(runtime.require(LogRuntime.LOG_APPENDER),
                     monitorRuntime, LOG_SOURCE);
-            LocalGameFlow flow = new LocalGameFlow(playerService, sceneService, observation);
+            LocalGameFlow flow = new LocalGameFlow(fixture.playerService(), fixture.sceneService(), observation);
             // 只有命令行编排层等待结果；BO、Actor、网络处理器始终异步。
             PlayerLoginResult login = (PlayerLoginResult) flow.dispatch(ProtocolIds.GAME_LOGIN_PROTOCOL,
                     GameLoginProtocolDTOCodec.INSTANCE, loginRequest()).toCompletableFuture().join();

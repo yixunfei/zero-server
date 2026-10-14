@@ -29,16 +29,23 @@ public class SharedRankingBenchmark {
     private LocalRankingService service;
     /** 预构造目录 ID。 */
     private String[] names;
+    /** 每榜请求序号与连续完成水位；测量包括该可持续生命周期的协调开销。 */
+    private RankingBenchmarkRequests[] requests;
     /** 初始化所有共享榜单；setup 不参与测量。 */
     @Setup public void setup() {
         service = new LocalRankingService();
         names = new String[boards];
+        requests = new RankingBenchmarkRequests[boards];
         for (int board = 0; board < boards; board++) {
             names[board] = "r" + board;
-            service.transitionSeason(names[board], "s", SeasonState.OPEN, "open");
+            service.transitionSeason(names[board], "s", SeasonState.OPEN, 1L, "open");
             for (int i = 0; i < size; i++) {
-                service.submitScore(names[board], "s", "u" + i, i % 100, i % 7, ScoreMergeMode.SET, "initial");
+                long sequence = i + 1L;
+                service.submitScore(names[board], "s", "u" + i, i % 100, i % 7, ScoreMergeMode.SET, sequence, "initial");
+                if (sequence % 1024 == 0) service.acknowledgeRequestsThrough(names[board], "s", sequence);
             }
+            service.acknowledgeRequestsThrough(names[board], "s", size);
+            requests[board] = new RankingBenchmarkRequests(size);
         }
     }
     /** 每线程输入计数，服务仍共享。 @author zn */
@@ -53,10 +60,12 @@ public class SharedRankingBenchmark {
     }
     /** @param input 独立输入。 @param thread JMH 线程。 @return 精确完成结果。 */
     @Benchmark public Object mixed(final Input input, final ThreadParams thread) {
-        String board = names[thread.getThreadIndex() % boards];
-        long sequence = ++input.sequence;
-        return sequence % 100 < writes
-                ? service.submitScore(board, "s", input.uid, sequence, 0, ScoreMergeMode.SET, Long.toString(sequence))
-                : service.queryTop(board, "s", 10);
+        int index = thread.getThreadIndex() % boards;
+        String board = names[index];
+        if (++input.sequence % 100 >= writes) return service.queryTop(board, "s", 10);
+        long sequence = requests[index].next();
+        var result = service.submitScore(board, "s", input.uid, sequence, 0, ScoreMergeMode.SET, sequence, Long.toString(sequence));
+        requests[index].complete(sequence, service, board);
+        return result;
     }
 }

@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.CompletionStage;
+import java.util.function.Supplier;
 
 /**
  * 手动触发的持久化调度器。
@@ -38,7 +41,7 @@ public final class ManualPersistenceScheduler implements PersistenceScheduler {
     public PersistenceScheduleHandle scheduleAtFixedRate(
             final String taskName,
             final Duration interval,
-            final Runnable task) {
+            final Supplier<? extends CompletionStage<?>> task) {
         ManualScheduleHandle handle = new ManualScheduleHandle(
                 requireText(taskName, "taskName"),
                 requirePositive(interval),
@@ -98,7 +101,14 @@ public final class ManualPersistenceScheduler implements PersistenceScheduler {
         /**
          * 任务逻辑。
          */
-        private final Runnable task;
+        private final Supplier<? extends CompletionStage<?>> task;
+
+        /** 前一异步动作的准入标记。 */
+        private final AtomicBoolean running = new AtomicBoolean();
+        /** 任务级失败次数。 */
+        private final AtomicLong failures = new AtomicLong();
+        /** 最近一次异步失败，仅用于内部诊断。 */
+        private volatile Throwable failure;
 
         /**
          * 是否已取消。
@@ -112,7 +122,8 @@ public final class ManualPersistenceScheduler implements PersistenceScheduler {
          * @param interval 调度间隔；不可为空。
          * @param task 任务逻辑；不可为空。
          */
-        ManualScheduleHandle(final String taskName, final Duration interval, final Runnable task) {
+        ManualScheduleHandle(final String taskName, final Duration interval,
+                final Supplier<? extends CompletionStage<?>> task) {
             this.taskName = taskName;
             this.interval = interval;
             this.task = task;
@@ -135,6 +146,11 @@ public final class ManualPersistenceScheduler implements PersistenceScheduler {
         public boolean cancelled() {
             return cancelled.get();
         }
+
+        /** @return 累计失败数；线程安全。 */
+        @Override public long failureCount() { return failures.get(); }
+        /** @return 最近失败；线程安全。 */
+        @Override public Throwable lastFailure() { return failure; }
 
         /**
          * 返回任务名称。
@@ -160,11 +176,25 @@ public final class ManualPersistenceScheduler implements PersistenceScheduler {
          * @return true 表示已触发；线程安全。
          */
         boolean trigger() {
-            if (cancelled()) {
+            if (cancelled() || !running.compareAndSet(false, true)) {
                 return false;
             }
-            task.run();
+            if (cancelled()) {
+                running.set(false);
+                return false;
+            }
+            try {
+                Objects.requireNonNull(task.get(), "task stage").whenComplete((value, cause) -> complete(cause));
+            } catch (RuntimeException | Error cause) { complete(cause); }
             return true;
+        }
+
+        private void complete(final Throwable cause) {
+            if (cause != null) {
+                failure = cause;
+                failures.incrementAndGet();
+            }
+            running.set(false);
         }
     }
 }

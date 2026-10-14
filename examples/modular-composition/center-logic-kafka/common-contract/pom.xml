@@ -7,5 +7,6 @@
   <dependency><groupId>group.zn.zero</groupId><artifactId>zero-rpc-common</artifactId></dependency>
   <dependency><groupId>group.zn.zero</groupId><artifactId>zero-rpc</artifactId></dependency>
   <dependency><groupId>group.zn.zero</groupId><artifactId>zero-protocol</artifactId></dependency>
+  <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.10.3</version><scope>test</scope></dependency>
  </dependencies>
 </project>

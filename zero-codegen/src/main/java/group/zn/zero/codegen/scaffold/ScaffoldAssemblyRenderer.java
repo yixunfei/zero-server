@@ -47,6 +47,11 @@ final class ScaffoldAssemblyRenderer {
             String bindings = repositories.stream().map(name -> "\""
                     + (repositories.size() == 1 ? "main" : name) + "\", \"" + name + "\"")
                     .collect(java.util.stream.Collectors.joining(", "));
+            if (request.template().id().equals("local")) {
+                var externalSources = repositories.stream().filter(name -> !name.equals("local")).toList();
+                String playerSource = externalSources.size() == 1 ? externalSources.getFirst() : "local";
+                bindings += ", \"players\", config.getOrDefault(\"zero.player.repositorySource\", \"" + playerSource + "\")";
+            }
             source.append("        assembly.install(group.zn.zero.runtime.data.DataRuntime.repositories(\n")
                     .append("                java.util.Map.of(").append(bindings).append(")));\n");
         }

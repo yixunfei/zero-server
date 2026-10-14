@@ -2,10 +2,8 @@ package group.zn.zero.npc;
 
 import group.zn.zero.actor.ActorMessage;
 import group.zn.zero.core.error.ZeroException;
-import java.util.ArrayList;
+import group.zn.zero.core.error.SystemErrorCode;
 import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -25,7 +23,7 @@ public final class LocalNpcZone {
     /** 状态短锁，仅保护查询和状态提交，不跨越外部回调。 */
     private final Object stateLock = new Object();
     /** 区域快照表，受 stateLock 保护。 */
-    private final Map<NpcId, NpcSnapshot> npcs = new LinkedHashMap<>();
+    private final LinkedHashMap<NpcId, NpcSnapshot> npcs = new LinkedHashMap<>();
     /** 有界同步决策。 */
     private final BehaviorAdapter adapter;
     /** 提交后的事件观察者。 */
@@ -115,21 +113,28 @@ public final class LocalNpcZone {
         return removed;
     }
     private TickResult tick(final TickBudget budget, final String trace) {
-        List<NpcSnapshot> candidates;
-        synchronized (stateLock) { candidates = new ArrayList<>(npcs.values()); }
+        long start = System.nanoTime();
+        int candidates;
+        synchronized (stateLock) { candidates = npcs.size(); }
         var notifications = new NpcNotifications();
         int done = 0;
-        long start = System.nanoTime();
-        for (NpcSnapshot snapshot : candidates) {
+        while (done < candidates) {
             if (done >= budget.budgetOps() || (System.nanoTime() - start) / 1_000_000 >= budget.budgetMillis()) break;
+            NpcSnapshot snapshot;
+            synchronized (stateLock) {
+                var next = npcs.pollFirstEntry();
+                if (next == null) break;
+                snapshot = next.getValue();
+                npcs.putLast(next.getKey(), snapshot);
+            }
             try { decide(snapshot, done + 1, trace, notifications); }
             catch (Error failure) { notifications.record(failure); break; }
             done++;
         }
-        int skipped = candidates.size() - done;
+        int skipped = candidates - done;
         TickResult.Outcome outcome = skipped == 0 ? TickResult.Outcome.COMPLETED
                 : (done == 0 ? TickResult.Outcome.SKIPPED : TickResult.Outcome.DEGRADED);
-        var result = new TickResult(actor.zoneId(), candidates.size(), done, skipped, outcome);
+        var result = new TickResult(actor.zoneId(), candidates, done, skipped, outcome);
         notifications.attempt(() -> metrics.recordTick(result));
         notifications.finish();
         return result;
@@ -140,7 +145,10 @@ public final class LocalNpcZone {
         try { decision = Objects.requireNonNull(adapter.decide(snapshot,
                 new BehaviorContext(actor.zoneId(), step, trace)), "decision"); }
         catch (Exception failure) {
-            notifications.attempt(() -> events.publish(event(snapshot, NpcEvent.Type.BEHAVIOR_FAILED, trace)));
+            var diagnostic = ZeroException.of(failure instanceof ZeroException zero ? zero.errorCode()
+                    : SystemErrorCode.SYSTEM_ERROR, "NPC behavior decision failed", failure);
+            notifications.attempt(() -> events.publish(new NpcEvent(actor.zoneId(), snapshot.npcId(),
+                    NpcEvent.Type.BEHAVIOR_FAILED, snapshot.version(), trace, diagnostic)));
             notifications.attempt(() -> metrics.recordBehaviorFailure(actor.zoneId(), snapshot.behavior().type()));
             return;
         }
@@ -152,7 +160,7 @@ public final class LocalNpcZone {
         notifications.attempt(() -> events.publish(event(changed, NpcEvent.Type.BEHAVIOR_CHANGED, trace)));
     }
     private NpcEvent event(final NpcSnapshot snapshot, final NpcEvent.Type type, final String trace) {
-        return new NpcEvent(actor.zoneId(), snapshot.npcId(), type, snapshot.version(), trace);
+        return new NpcEvent(actor.zoneId(), snapshot.npcId(), type, snapshot.version(), trace, null);
     }
     private static ZeroException failure(final NpcErrorCode code) {
         return ZeroException.of(code, code.message(), null);

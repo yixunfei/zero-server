@@ -1,5 +1,14 @@
 # 数据与缓存设计
 
+## 2026-10-14 玩家数据与恢复
+
+PlayerProfileRepository 提供正式 schema/codec，local 模板通过 RepositoryCatalog 的 players 角色消费选定后端。BoundPersistentEntity 与 ActorPersistenceBindingExecutor 支持 lane 快照、异步保存和已确认版本回写；确认失败重试确认而不重复写入，内存接受与耐久提交分开表达。
+
+每日奖励使用直接 CAS，库存/日期/待通知同写；有界通知槽和周期重放支持至少一次交付，消费者按稳定 ID 去重。CachePolicy 明确拒绝尚未实现的 stale=true。格式、确认幂等和关闭责任见[迁移说明](migrations/20261014-product-goal-remediation.zh-CN.md)。
+
+
+2026-10-14：便利 InMemoryCrudRepository 对齐标准 local 的版本准入与批量错误分类。PersistenceScheduler 改为接收异步 stage，部分 flush 失败进入任务失败计数；zero-runtime-data 提供复用 PeriodicAsyncTask 的 ManagedPersistenceScheduler。此变更不自动启用玩家周期落库，不改变未知写结果的重试策略；API 与关闭顺序见[迁移说明](migrations/20261014-product-goal-remediation.zh-CN.md)。
+
 2026-10-11：Redis/MongoDB/PostgreSQL 原生运行 IO 使用各自 operation-timeout-millis，不再复用启动超时。Redis data/cache 共享运行预算及 READINESS；恢复快照与未知写结果处理见[统一配置指南](guides/configuration-and-catalog.zh-CN.md)。
 
 ## 2026-10-10 运行时远程 IO 恢复

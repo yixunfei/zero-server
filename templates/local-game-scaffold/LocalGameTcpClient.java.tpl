@@ -59,7 +59,7 @@ public final class __CLIENT_CLASS__ {
         java.util.Objects.requireNonNull(runtime, "runtime");
         ProtocolFrameCodec codec = new ZeroBinaryFrameCodec();
         ProtocolFrame response = exchange(bindAddress, codec, loginFrame());
-        if (response.protocolId() != ProtocolIds.GAME_LOGIN_PROTOCOL) {
+        if (response.protocolId() != ProtocolIds.GAME_LOGIN_RESULT_PROTOCOL) {
             throw new IllegalStateException("unexpected response protocol: " + response.protocolId());
         }
         if (group.zn.zero.protocol.ProtocolFeature.ERROR.enabledIn(response.flags())) {
@@ -67,14 +67,17 @@ public final class __CLIENT_CLASS__ {
                     + new String(response.payload(), java.nio.charset.StandardCharsets.UTF_8));
         }
         ZeroReader reader = new ZeroReader(response.payload());
-        GameLoginProtocolDTO login = GameLoginProtocolDTOCodec.INSTANCE.read(reader);
+        var login = __PACKAGE__.generated.dto.codec.GameLoginResultProtocolDTOCodec.INSTANCE.read(reader);
+        if (reader.isReadable() || login.uid <= 0 || login.sessionId == null || login.sessionId.isBlank()) {
+            throw new IllegalStateException("invalid typed login response");
+        }
         String mode = runtime.require(group.zn.zero.runtime.bootstrap.RuntimeBasics.CONFIG)
                 .getOrDefault(group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys.ZERO_MODE, "unknown");
         String name = runtime.require(group.zn.zero.runtime.bootstrap.RuntimeBasics.CONFIG)
                 .getOrDefault(group.zn.zero.runtime.bootstrap.ZeroRuntimeConfigKeys.ZERO_NAME, "unknown");
         return new SmokeResult(
                 response.protocolId(),
-                1001L,
+                login.uid,
                 login.traceId,
                 login.accountId,
                 mode,

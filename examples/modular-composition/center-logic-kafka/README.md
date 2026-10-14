@@ -21,6 +21,8 @@ pwsh -NoProfile -File scripts/VerifyCenterLogicKafka.ps1 -Plan
 pwsh -NoProfile -File scripts/VerifyCenterLogicKafka.ps1
 ```
 
+复用已有本机测试 broker 时，可执行 `pwsh -NoProfile -File scripts/VerifyCenterLogicKafka.ps1 -BootstrapServers 127.0.0.1:29092`。此模式自行构建三个工件，再启动两个 JVM；不创建、停止或删除 broker，使用独立 topic prefix 并保留运行证据。
+
 真实执行要求 Java 21、Docker Linux daemon 与 Compose；脚本创建隔离 broker 和两个 JVM，并在 `target/acceptance-evidence/center-logic-kafka/<runId>/` 写入 manifest 与日志。必须同时检查运行状态与清理状态。历史验收因外部前置条件不可用而 blocked，见[历史记录](../../../docs/migrations/20260915-kafka-and-production-audit.md)，不能把本地构建成功当作真实链路通过。
 
 需要 Kafka 3.9.x（KRaft）可达地址。每次运行使用唯一 `topicPrefix`，例如 `zero.onboarding.<runId>`：
@@ -31,6 +33,10 @@ java -cp <logic-classpath> group.zn.zero.examples.centerlogic.kafka.logic.LogicM
 ```
 
 Center 和 Logic 必须是两个独立 JVM。两端的 Kafka `clientId`、consumer group、reply topic 和 topic prefix 都带 run ID，不能使用默认固定 group。
+
+两个进程启动前必须设置相同的 `ZERO_CENTER_LOGIC_SECRET`（至少 32 个随机字节的 Base64 编码）。缺失或非法时在创建 Kafka 客户端之前失败。验收脚本自动生成本次运行专用材料，通过进程环境传入，结束后恢复原环境；不会写入命令行、manifest 或日志。手动启动时由部署环境注入密钥，不提交到仓库。
+
+Logic 在每次调用的短期服务身份 scope 内签名，Center 在绑定 handler 前安装 verifier，只接受当前 topic prefix 对应的 Logic 主体与 `center:invoke` 权限。签验使用框架 `SecurityMetadataAssertion`；该示例不代替生产密钥轮换、Kafka ACL 或 TLS。
 
 ## 生命周期与字段
 

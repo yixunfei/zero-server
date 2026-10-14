@@ -29,7 +29,7 @@ public final class DailyRewardService {
     private final CrudRepository<Long, DailyRewardInventory> inventories;
     /** 仅用于查询的缓存，不决定发奖资格。 */
     private final CacheService<Long, DailyRewardInventory> cache;
-    /** 提交后通知，不提供事务消息保证。 */
+    /** 至少一次通知，库存中的单槽待通知状态负责重放；消费者按事件 ID 去重。 */
     private final EventBus events;
     /** 服务端业务时钟，其时区决定每日边界。 */
     private final Clock clock;
@@ -54,8 +54,8 @@ public final class DailyRewardService {
      * 按玩家和服务端日期发放一次奖励；同日换请求键也只返回原领取结果。
      *
      * <p>uid 必须来自认证会话；DTO 的 uid 仅是本地演示输入。
-     * 提交后缓存或事件失败会使完成信号失败，但重试不会再加库存，也不自动重发通知。
-     * 需要可靠通知的应用应将 outbox 与库存一起提交。</p>
+     * 提交后缓存或事件失败会使完成信号失败，但重试不会再加库存；待通知状态保存在同一聚合。
+     * replayNotification 可在恢复后重放；未确认旧通知时拒绝下一天领取，避免积压无限增长。</p>
      *
      * @param uid 已认证玩家 ID，必须为正数。
      * @param idempotencyKey 非空请求标识，用于回显第一次领取请求。
@@ -79,12 +79,28 @@ public final class DailyRewardService {
                 return CompletableFuture.completedFuture(result(
                         DailyRewardClaimResult.Status.DUPLICATE, current.claimKey()));
             }
-            DailyRewardInventory next = current.claim(day, idempotencyKey);
+            if (current.pendingNotification()) throw invalid("previous notification must be replayed before the next claim");
+            DailyRewardInventory next = current.claim(day, idempotencyKey, traceId);
             return inventories.save(next)
                     .thenCompose(ignored -> cache.invalidate(uid))
-                    .thenCompose(ignored -> events.publish(new DailyRewardClaimedEvent(
-                            "daily-reward-" + uid + "-" + day, traceId, uid, REWARD_ITEM, REWARD_QUANTITY)))
+                    .thenCompose(ignored -> replayNotification(uid))
                     .thenApply(ignored -> result(DailyRewardClaimResult.Status.ACCEPTED, idempotencyKey));
+        });
+    }
+
+    /** 重放单个玩家的已提交通知；成功后 CAS 确认，发送成功但确认失败允许重复发送。
+     * @param uid 玩家 ID。 @return 是否曾有待通知事件；同玩家应与 claim 串行。
+     * @throws RuntimeException 查询/通知/确认失败；不会再次增加库存。 */
+    public CompletionStage<Boolean> replayNotification(final long uid) {
+        return inventories.findById(uid).thenCompose(found -> {
+            if (found.isEmpty() || !found.orElseThrow().pendingNotification()) {
+                return CompletableFuture.completedFuture(false);
+            }
+            DailyRewardInventory current = found.orElseThrow();
+            return events.publish(new DailyRewardClaimedEvent("daily-reward-" + uid + "-" + current.claimDay(),
+                    current.notificationTrace(), uid, REWARD_ITEM, REWARD_QUANTITY))
+                    .thenCompose(ignored -> inventories.save(current.notified()))
+                    .thenCompose(ignored -> cache.invalidate(uid)).thenApply(ignored -> true);
         });
     }
 

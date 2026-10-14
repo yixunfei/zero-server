@@ -6,7 +6,6 @@ import group.zn.zero.data.repository.RepositoryDefinition;
 import group.zn.zero.data.repository.RepositoryRequest;
 import group.zn.zero.runtime.api.GameRuntime;
 import group.zn.zero.runtime.bootstrap.RuntimeBasics;
-import group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors;
 import group.zn.zero.runtime.data.DataRuntime;
 import group.zn.zero.runtime.mongo.MongoRuntime;
 import group.zn.zero.runtime.postgresql.PostgresqlRuntime;
@@ -57,7 +56,7 @@ public final class RepositoryCompositionApplication {
         };
         var values = new LinkedHashMap<>(ZeroConfigLoader.loadStandard().asMap());
         values.put(enabled, "true");
-        var assembly = ProductionAssembly.builder("external-test", new MapZeroConfig(values), ZeroRuntimeExecutors.direct())
+        var assembly = ProductionAssembly.builder("external-test", new MapZeroConfig(values))
                 .install(roles);
         switch (backend) {
             case "mongo" -> assembly.install(MongoRuntime.module());

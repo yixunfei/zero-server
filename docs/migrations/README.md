@@ -6,6 +6,7 @@
 
 | 日期 / 主题 | 适用范围 |
 | --- | --- |
+| [2026-10-14 产品目标修复与玩家链路](20261014-product-goal-remediation.zh-CN.md) | D01–D08、显式归档序号、生成 Async BO、可信上下文、Actor 保存确认、玩家档案接线与奖励 schema 3/通知重放 |
 | [2026-10-12 模块接入与常见场景应用](20261012-module-recipes.zh-CN.md) | 七个独立应用、16 个模块入口更新；无框架 API/存储/协议迁移 |
 | [2026-10-12 新增 examples 审核修复](20261012-examples-review.zh-CN.md) | 每日奖励聚合 schema 2、示例 API/线程约束、外部探针命令及模块接入文档修正 |
 | [2026-10-12 模块接入示例](20261012-module-access-examples.zh-CN.md) | 62 个 `zero-*` 模块和根 examples 的 63 张最小接入卡片；无运行时/API 迁移 |

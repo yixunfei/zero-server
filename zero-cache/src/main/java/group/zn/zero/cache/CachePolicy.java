@@ -11,7 +11,7 @@ import java.util.Objects;
  * @param ttlJitter TTL 抖动上限。
  * @param maxLocalEntries 本地缓存最大条目数。
  * @param maxConcurrentLoads 最大并发加载数。
- * @param allowStaleOnBackendFailure 后端失败时是否允许返回过期本地值。
+ * @param allowStaleOnBackendFailure 保留的配置校验位；目前只允许 false，true 明确拒绝。
  * @param loadTimeout 单次加载最长等待时间；必须为正数。
  * @param writeTimeout 已准入写入的观察期限；结果超时不撤销物理写入，必须为正数。
  * @author zn
@@ -39,7 +39,7 @@ public record CachePolicy(
      * @param ttlJitter TTL 抖动上限。
      * @param maxLocalEntries 本地容量。
      * @param maxConcurrentLoads 并发加载上限。
-     * @param allowStaleOnBackendFailure 后端失败时是否允许旧值。
+     * @param allowStaleOnBackendFailure 目前只允许 false；尚未实现有界旧值回退。
      * @throws IllegalArgumentException 当时间或容量不合法时抛出。
      */
     public CachePolicy(final Duration ttl, final Duration negativeTtl, final Duration ttlJitter,
@@ -80,6 +80,9 @@ public record CachePolicy(
      * @throws IllegalArgumentException 当有效期、容量或并发数非法时抛出。
      */
     public CachePolicy {
+        if (allowStaleOnBackendFailure) {
+            throw new IllegalArgumentException("allowStaleOnBackendFailure=true is not supported");
+        }
         ttl = positive(ttl, "ttl");
         negativeTtl = positive(negativeTtl, "negativeTtl");
         ttlJitter = nonNegative(ttlJitter, "ttlJitter");

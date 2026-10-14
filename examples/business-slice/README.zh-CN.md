@@ -1,13 +1,13 @@
 # 业务开发纵向切片：每日道具领取
 
-本示例展示协议生成、服务端限领、Repository 条件写、查询缓存、内部事件、日志和指标。每名玩家每个服务端业务日只能获得一次固定奖励 `coin/100`；同日换客户端请求键也不会再次发放。
+本示例展示类型化异步协议、已认证 TCP、玩家 lane、Repository 条件写、查询缓存、通知恢复、日志和指标。每名玩家每个服务端业务日只能获得一次固定奖励 `coin/100`；同日换客户端请求键也不会再次发放。
 
 ```text
-生成 DTO/codec/BO/dispatcher
-  → 校验玩家 ID 和服务端奖励配置
+已认证 SecurityContext → RequestExecution → 生成 Async BO/帧端点
+  → 校验可信玩家身份/权限 → player lane → 校验服务端奖励配置
   → Repository 读取权威库存与领取日期
-  → 一次版本条件写：库存 + 日期 + 首次请求键
-  → 失效查询缓存 → 发布事件 → 日志与指标
+  → 一次版本条件写：库存 + 日期 + 首次请求键 + 待通知状态
+  → 失效查询缓存 → 发布稳定 ID 事件 → CAS 确认 → 类型化响应
 查询库存 → CacheService → 未命中回源并回填
 ```
 
@@ -40,10 +40,23 @@ business-slice=ok|statuses=[ACCEPTED, DUPLICATE]|inventory=100|events=1|logs=2|m
 
 ## 线程、失败与替换边界
 
-同一玩家必须串行等待整条异步完成链。返回 CompletionStage 不保证底层非阻塞，也不自动恢复 Actor 归属。示例的 BO 使用 join，仅适用于普通命令行线程与本地依赖；远程 IO 需受管执行域，状态变更需回到正确 Actor。
+同一玩家必须串行等待整条异步完成链。返回 CompletionStage 不保证底层非阻塞，也不自动恢复 Actor 归属。BO 通过 ActorRequestExecutor 返回实际 CompletionStage，不阻塞 IO/Actor；仅 CLI 与测试编排等待。请求范围保留身份、trace、期限，取消不撤销已发出的物理写入。
 
 Repository 必须提供原子插入与版本条件写。并发服务实例发生版本冲突时，错误向上传播；调用方可重新查询权威结果，不得盲目重试未知写结果。库存溢出在保存前失败。
 
-库存和领取标记一次提交，缓存失效或事件失败不会造成“已发奖但没有领取记录”。这些提交后失败仍向上传播；再次请求返回 DUPLICATE，不会增发，也不自动补发通知。真实应用应明确缓存故障后的读一致性与失效修复策略；可靠事件需要将 outbox 与聚合一起提交，本例未实现。
+库存和领取标记一次提交，缓存失效或事件失败不会造成“已发奖但没有领取记录”。这些提交后失败仍向上传播；再次请求返回 DUPLICATE，不会增发。DailyRewardNotificationReplay 自动分页扫描并在玩家 lane 重放持久化待通知，稳定事件 ID 用于消费者去重。发送成功但确认失败可能重复投递。每玩家一个待通知槽，旧通知未确认前拒绝次日发奖。真实应用仍应明确缓存故障后的读一致性与失效修复策略。
 
-示例不提供真实账号认证、跨进程玩家所有权、可靠消息、容量或长稳保证。聚合格式调整见[迁移说明](../../docs/migrations/20261012-examples-review.zh-CN.md)。
+DailyRewardTcpServer 强制注入 SecurityChain，经框架握手认证后才建立请求范围；测试使用随机 token 的验证器。同一 DailyRewardBO 在 local 和 loopback TCP 返回生成 claimResult DTO，并拒绝伪造 UID。应用需自行提供正式账号认证供应商。
+
+握手就绪帧发送或传输监听失败会取消该连接的交付并关闭连接；首个错误通过 `failure()` 健康查询和 `close()` 传播，调用方须处理关闭错误。
+
+真实 PostgreSQL 恢复验收显式执行：
+
+```powershell
+# 在本机环境中设置 ZERO_POSTGRESQL_URL、ZERO_POSTGRES_USER、ZERO_POSTGRES_PASSWORD、ZERO_POSTGRESQL_TABLE
+mvn -B -f examples/business-slice/pom.xml '-Dtest=*Test,DailyRewardPersistenceExternalIT' test
+```
+
+该测试通过 RepositoryCatalog 的 game→postgresql 绑定，关闭并重建 runtime/连接池后确认库存与领取记录，从聚合重放通知并清理独立玩家记录；这是同 JVM 的 runtime 重建，不是进程崩溃测试。普通 test 不默认连接数据库。
+
+schema/codec 已升为 3，需要重建开发数据或显式离线转换。未交付跨进程玩家所有权、分布式 outbox claim、容量或长稳保证；通知是至少一次，不承诺跨资源 exactly-once。见[迁移说明](../../docs/migrations/20261014-product-goal-remediation.zh-CN.md)。

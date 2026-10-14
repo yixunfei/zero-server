@@ -260,6 +260,10 @@ public final class JavaCodegenRenderer {
         for (ProtocolMethod method : methods) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("signature", methodSignature(method, dtoSuffix));
+            String signature = methodSignature(method, dtoSuffix);
+            String resultType = method.responseMessage().isBlank() ? "R" : dtoName(method.responseMessage(), dtoSuffix);
+            item.put("asyncSignature", "java.util.concurrent.CompletionStage<" + resultType + ">"
+                    + signature.substring(signature.indexOf(' ')));
             item.put("comment", commentOrDefault(method.comment(), "处理 " + method.methodName() + " 协议事件。"));
             item.put("methodName", method.methodName());
             items.add(item);
@@ -303,6 +307,8 @@ public final class JavaCodegenRenderer {
                 handler.put("codecName", dtoName(method.requestMessage(), dtoSuffix) + "Codec");
                 handler.put("methodName", method.methodName());
                 handler.put("arguments", dispatcherArguments(method, project.message(method.requestMessage())));
+                handler.put("resultType", method.responseMessage().isBlank() ? "R"
+                        : layout.dtoPackage() + "." + dtoName(method.responseMessage(), dtoSuffix));
                 handlers.add(handler);
             }
             registration.put("handlers", handlers);

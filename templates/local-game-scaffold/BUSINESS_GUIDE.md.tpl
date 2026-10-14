@@ -122,3 +122,7 @@ __PRODUCTION_GAP__
 ~~~
 
 Before promoting this scaffold into a formal framework module, create a task with REQUIREMENTS / PLAN / RISK / VERIFY, update `docs/module-map.md` if module structure changes, and pause for user confirmation if the work touches public API, protocol, threading, RPC, storage, cache, GM/security, logs or ErrorCode.
+
+## Player data and asynchronous responses
+
+LocalGameFixture obtains the `players` repository role from RepositoryCatalog using PlayerProfileRepository.DEFINITION; remote IO belongs to the runtime. The unique selected external data source becomes the default players source; set `zero.player.repositorySource` explicitly when choosing among multiple sources. LocalGameBO implements generated Async interfaces. LocalGameFlow binds generated request/response codecs, and the client decodes real login results. Change Game.si, BO/domain logic and assertions for a new business operation. This loopback prototype has a fixed UID resolver; for verified SecurityContext, request deadlines and durable reward notifications, follow the framework business-slice recipe.

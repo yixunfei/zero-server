@@ -20,6 +20,7 @@ public final class LogicMain {
         String bootstrap = required(args, 0, "bootstrap");
         String prefix = required(args, 1, "topicPrefix");
         Path control = Path.of(required(args, 2, "controlDir"));
+        CenterLogicSecurity security = CenterLogicSecurity.fromEnvironment(prefix);
         String suffix = suffix(prefix);
         KafkaRpcSettings settings = new KafkaRpcSettings(bootstrap, "logic-" + suffix, "logic-group-" + suffix,
                 prefix, "reply-logic-" + suffix, 128, Duration.ofMillis(100), Duration.ofSeconds(5), Map.of(), Map.of("auto.offset.reset", "earliest"));
@@ -28,16 +29,18 @@ public final class LogicMain {
         try (var executors = group.zn.zero.runtime.bootstrap.ZeroRuntimeExecutors.localPrototype("logic", 1);
              KafkaRpcAdapter adapter = new KafkaRpcAdapter(settings, executors.scheduledExecutor("kafka-rpc"))) {
             CenterContract client = new RpcClientFactory(adapter, codecs,
-                    RpcCallOptions.defaults().withReplyTopic(settings.replyTopic()).withTraceId("trace-logic-" + suffix)).create(CenterContract.class);
+                    RpcCallOptions.defaults().withReplyTopic(settings.replyTopic()).withTraceId("trace-logic-" + suffix),
+                    security.assertion()).create(CenterContract.class);
             CenterRegistration registration = new CenterRegistration("logic-" + suffix, "logic", "trace-register-" + suffix);
-            RpcResult<CenterAck> registered = client.register(registration);
+            RpcResult<CenterAck> registered = security.asLogic(registration.traceId(), () -> client.register(registration));
             if (!registered.success()) throw new IllegalStateException("register failed");
             Files.writeString(control.resolve("logic.ready"), "REGISTERED|instanceId=" + registration.instanceId());
-            RpcResult<CenterAck> heartbeat = client.heartbeat(new CenterHeartbeat(registration.instanceId(), "trace-heartbeat-" + suffix, System.currentTimeMillis()));
+            RpcResult<CenterAck> heartbeat = security.asLogic("trace-heartbeat-" + suffix, () -> client.heartbeat(
+                    new CenterHeartbeat(registration.instanceId(), "trace-heartbeat-" + suffix, System.currentTimeMillis())));
             if (!heartbeat.success()) throw new IllegalStateException("heartbeat failed");
             Files.writeString(control.resolve("logic.requested"), "correlation-visible|traceId=" + heartbeat.result().traceId() + "|timeoutAt=method-default");
             Files.writeString(control.resolve("logic.drain"), "DRAINING|inFlight=0");
-            RpcResult<CenterAck> removed = client.unregister(registration);
+            RpcResult<CenterAck> removed = security.asLogic("trace-unregister-" + suffix, () -> client.unregister(registration));
             if (!removed.success()) throw new IllegalStateException("unregister failed");
             Files.writeString(control.resolve("logic.stopped"), "UNREGISTERED|resources=closed");
         }

@@ -1,6 +1,8 @@
 package group.zn.zero.data.persistence;
 
 import java.time.Duration;
+import java.util.concurrent.CompletionStage;
+import java.util.function.Supplier;
 
 /**
  * 持久化调度器 SPI。
@@ -17,9 +19,10 @@ public interface PersistenceScheduler {
      *
      * @param taskName 任务名称；不可为空。
      * @param interval 调度间隔；不可为空且必须大于 0。
-     * @param task 任务逻辑；不可为空。
+     * @param task 异步任务；不可为空；实现必须观察实际完成和失败，前次未完成时跳过重复触发。
      * @return 调度句柄；不可为空；线程安全性由实现声明。
      * @throws group.zn.zero.core.error.ZeroException 调度失败时抛出，必须绑定 ErrorCode。
      */
-    PersistenceScheduleHandle scheduleAtFixedRate(String taskName, Duration interval, Runnable task);
+    PersistenceScheduleHandle scheduleAtFixedRate(
+            String taskName, Duration interval, Supplier<? extends CompletionStage<?>> task);
 }

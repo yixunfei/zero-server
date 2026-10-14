@@ -70,11 +70,13 @@ class LocalGameAsyncTest {
         var flow = new LocalGameFlow(players, unusedScenes(), new LocalGameObservation());
         var a = flow.dispatch(ProtocolIds.GAME_LOGIN_PROTOCOL, GameLoginProtocolDTOCodec.INSTANCE, login()).toCompletableFuture();
         var b = flow.dispatch(ProtocolIds.GAME_LOGIN_PROTOCOL, GameLoginProtocolDTOCodec.INSTANCE, login()).toCompletableFuture();
-        second.complete("second");
-        assertEquals("second", b.join());
+        var secondResult = new group.zn.zero.player.PlayerLoginResult("second", 2, "s2", "shared-trace");
+        second.complete(secondResult);
+        assertEquals(secondResult, b.join());
         assertFalse(a.isDone());
-        first.complete("first");
-        assertEquals("first", a.join());
+        var firstResult = new group.zn.zero.player.PlayerLoginResult("first", 1, "s1", "shared-trace");
+        first.complete(firstResult);
+        assertEquals(firstResult, a.join());
     }
 
     @Test

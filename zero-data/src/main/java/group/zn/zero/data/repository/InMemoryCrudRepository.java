@@ -51,19 +51,24 @@ public final class InMemoryCrudRepository<ID, T extends VersionedEntity<ID>> imp
      */
     @Override
     public synchronized CompletionStage<Void> save(final T entity) {
+        try {
+            saveChecked(entity);
+            return CompletableFuture.completedFuture(null);
+        } catch (RuntimeException failure) {
+            return writeFailure(failure);
+        }
+    }
+
+    private void saveChecked(final T entity) {
         T current = checkedEntity(entity);
         ID id = current.id();
         T previous = storage.get(id);
-        if (previous == null) {
-            storage.put(id, castEntity(current.withVersion(1)));
-            return CompletableFuture.completedFuture(null);
+        long expected = previous == null ? 0 : previous.version();
+        if (expected != current.version()) {
+            throw ZeroException.of(DataErrorCode.VERSION_CONFLICT,
+                    "version conflict for id=" + id + ", expected=" + expected + ", actual=" + current.version(), null);
         }
-        if (previous.version() != current.version()) {
-            return failedFuture(DataErrorCode.VERSION_CONFLICT,
-                    "version conflict for id=" + id + ", expected=" + previous.version() + ", actual=" + current.version());
-        }
-        storage.put(id, castEntity(current.withVersion(previous.version() + 1)));
-        return CompletableFuture.completedFuture(null);
+        storage.put(id, castEntity(current.withVersion(expected + 1)));
     }
 
     /**
@@ -99,23 +104,18 @@ public final class InMemoryCrudRepository<ID, T extends VersionedEntity<ID>> imp
      * 批量保存对象。
      *
      * @param entities 对象集合；不可为空。
-     * @return 保存完成信号；不可为空；线程安全。
+     * @return 保存完成信号；不可为空；线程安全；失败可能已有部分提交，需重新读取后重试。
      */
     @Override
     public synchronized CompletionStage<Void> saveAll(final Collection<T> entities) {
         Objects.requireNonNull(entities, "entities");
         try {
             for (T entity : entities) {
-                save(entity).toCompletableFuture().join();
+                saveChecked(entity);
             }
             return CompletableFuture.completedFuture(null);
-        } catch (RuntimeException ex) {
-            if (ex instanceof ZeroException zeroException) {
-                return failedFuture(zeroException.errorCode(),
-                        zeroException.getMessage() == null ? "batch save failed" : zeroException.getMessage());
-            }
-            return failedFuture(DataErrorCode.WRITE_FAILED,
-                    ex.getMessage() == null ? "batch save failed" : ex.getMessage());
+        } catch (RuntimeException failure) {
+            return writeFailure(failure);
         }
     }
 
@@ -200,6 +200,9 @@ public final class InMemoryCrudRepository<ID, T extends VersionedEntity<ID>> imp
         if (current.id() == null) {
             throw ZeroException.of(DataErrorCode.INVALID_ENTITY, "entity id must not be null", null);
         }
+        if (current.version() < 0 || current.version() == Long.MAX_VALUE) {
+            throw ZeroException.of(DataErrorCode.INVALID_ENTITY, "entity version must be incrementable", null);
+        }
         return current;
     }
 
@@ -208,9 +211,8 @@ public final class InMemoryCrudRepository<ID, T extends VersionedEntity<ID>> imp
         return (T) entity;
     }
 
-    private <R> CompletionStage<R> failedFuture(final group.zn.zero.core.error.ErrorCode errorCode, final String message) {
-        CompletableFuture<R> future = new CompletableFuture<>();
-        future.completeExceptionally(ZeroException.of(errorCode, message, null));
-        return future;
+    private CompletionStage<Void> writeFailure(final RuntimeException failure) {
+        return CompletableFuture.failedFuture(failure instanceof ZeroException ? failure
+                : ZeroException.of(DataErrorCode.WRITE_FAILED, "save data entity failed", failure));
     }
 }

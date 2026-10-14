@@ -5,7 +5,6 @@ import group.zn.zero.player.LocalPlayerService;
 import group.zn.zero.player.PlayerUidResolver;
 import group.zn.zero.scene.LocalSceneService;
 import java.util.Objects;
-import java.util.function.LongFunction;
 
 /** Composition fixture for the local business services. */
 public final class LocalGameFixture implements AutoCloseable {
@@ -14,12 +13,18 @@ public final class LocalGameFixture implements AutoCloseable {
     private final LocalGameObservation observation;
 
     /** Creates services from the injected actor scheduler; no executor is created here. */
-    public LocalGameFixture(final ActorScheduler scheduler, final LongFunction<String> profileLoader) {
-        Objects.requireNonNull(scheduler, "scheduler");
-        Objects.requireNonNull(profileLoader, "profileLoader");
+    public LocalGameFixture(final group.zn.zero.runtime.api.GameRuntime runtime) {
+        Objects.requireNonNull(runtime, "runtime");
+        ActorScheduler scheduler = new group.zn.zero.game.ContextualActorScheduler(
+                runtime.require(group.zn.zero.runtime.actor.ActorRuntime.ACTOR_SCHEDULER));
         this.observation = new LocalGameObservation();
         PlayerUidResolver resolver = request -> 1001L;
-        this.playerService = new LocalPlayerService(scheduler, resolver, group.zn.zero.player.MissingPlayerPolicy.CREATE_DEFAULT);
+        var repository = runtime.require(group.zn.zero.runtime.data.DataRuntime.REPOSITORIES).create(
+                new group.zn.zero.data.repository.RepositoryRequest<>("players",
+                        group.zn.zero.player.PlayerProfileRepository.DEFINITION));
+        this.playerService = new LocalPlayerService(scheduler, resolver, repository,
+                new group.zn.zero.cache.InMemoryCacheService<>(), group.zn.zero.player.MissingPlayerPolicy.CREATE_DEFAULT,
+                runtime.require(group.zn.zero.runtime.bootstrap.RuntimeBasics.EXECUTORS).remoteIoExecutor());
         this.sceneService = new LocalSceneService(scheduler);
     }
 
